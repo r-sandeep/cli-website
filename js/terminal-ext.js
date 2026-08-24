@@ -249,10 +249,14 @@ const extend = (term) => {
 
   // Prints phrase followed by n dots at 1-second intervals.
   term.dottedPrint = async (phrase, n, newline = true) => {
+    const execution = term._execution;
     term.write(phrase);
 
     for (let i = 0; i < n; i++) {
       await term.delayPrint(".", 1000);
+    }
+    if (execution?.aborted) {
+      throw execution.abortError;
     }
     if (newline) {
       term.write("\r\n");
@@ -262,6 +266,7 @@ const extend = (term) => {
   // Renders an animated progress bar that fills over time t (ms).
   // Randomizes the fill speed to look more authentic.
   term.progressBar = async (t, msg) => {
+    const execution = term._execution;
     var r;
 
     if (msg) {
@@ -274,16 +279,27 @@ const extend = (term) => {
       t = t - r;
       await term.delayPrint("█", r);
     }
+    if (execution?.aborted) {
+      throw execution.abortError;
+    }
     term.write("]\r\n");
   };
 
   term.delayPrint = async (str, t) => {
+    const execution = term._execution;
     await term.timer(t);
+    if (execution?.aborted) {
+      throw execution.abortError;
+    }
     term.write(str);
   };
 
   term.delayStylePrint = async (str, t, wrap) => {
+    const execution = term._execution;
     await term.timer(t);
+    if (execution?.aborted) {
+      throw execution.abortError;
+    }
     term.stylePrint(str, wrap);
   };
 
@@ -376,7 +392,6 @@ const extend = (term) => {
     const ownsBusy = settings.manageBusy && !term._replaying;
     const execution = ownsBusy ? createExecution() : null;
     let interrupted = false;
-
     try {
       if (ownsBusy) {
         term.busy = true;
@@ -427,6 +442,7 @@ const extend = (term) => {
       const ownsExecution = !execution || term._execution === execution;
       if (interrupted && ownsExecution) {
         term.locked = false;
+        term.write("\r\n");
         term.writeln("^C");
         term.clearCurrentLine(true);
       } else if (

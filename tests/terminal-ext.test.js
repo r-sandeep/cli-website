@@ -219,8 +219,19 @@ describe("terminal-ext", () => {
     term._requestInterrupt();
     await command;
 
+    expect(term.write).toHaveBeenCalledWith("before");
+    expect(term.write).toHaveBeenCalledWith("middle");
+    expect(term.write).toHaveBeenCalledWith("\r\n");
     expect(term.writeln).toHaveBeenCalledWith("^C");
+    expect(
+      term.write.mock.invocationCallOrder.find(
+        (callOrder, index) => term.write.mock.calls[index][0] === "\r\n"
+      )
+    ).toBeLessThan(term.writeln.mock.invocationCallOrder[term.writeln.mock.calls.findIndex(([value]) => value === "^C")]);
     expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.prompt.mock.invocationCallOrder[0]).toBeGreaterThan(
+      term.writeln.mock.invocationCallOrder[term.writeln.mock.calls.findIndex(([value]) => value === "^C")]
+    );
     expect(term.writeln).not.toHaveBeenCalledWith("late");
     expect(term.busy).toBe(false);
     expect(term.locked).toBe(false);
