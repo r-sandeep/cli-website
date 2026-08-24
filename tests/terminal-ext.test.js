@@ -28,6 +28,8 @@ function loadTerminalExt(globals = {}) {
 function createTerm(overrides = {}) {
   const term = {
     VERSION: 4,
+    busy: false,
+    locked: false,
     _core: { buffer: { x: 0 } },
     cols: 80,
     command: vi.fn(() => 0),
