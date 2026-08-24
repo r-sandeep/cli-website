@@ -42,6 +42,17 @@ function createTerm(overrides = {}) {
     writeln: vi.fn(),
   };
 
+  term.onData = vi.fn((handler) => {
+    term._inputHandler = handler;
+    return {
+      dispose: vi.fn(() => {
+        if (term._inputHandler === handler) {
+          term._inputHandler = null;
+        }
+      }),
+    };
+  });
+
   return Object.assign(term, overrides);
 }
 
@@ -178,5 +189,132 @@ describe("terminal-ext", () => {
 
     expect(term.writeln).toHaveBeenCalledWith("\r\nASCII\r\n");
     expect(env.window.ensureASCIIArt).toHaveBeenCalledWith("rootvc-square");
+  });
+
+  it("stops an async command at its next primitive await and restores the prompt", async () => {
+    vi.useFakeTimers();
+    let term;
+    const { extend } = loadTerminalExt({
+      commands: {
+        animate: async () => {
+          term.write("before");
+          await term.delayPrint("middle", 10);
+          await term.delayStylePrint("late", 100);
+        },
+      },
+    });
+    term = createTerm();
+    extend(term);
+    vi.spyOn(term, "prompt");
+
+    const command = term.executeCommandLine("animate");
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(term.write).toHaveBeenCalledWith("middle");
+
+    term._requestInterrupt();
+    term._requestInterrupt();
+    await command;
+
+    expect(term.writeln).toHaveBeenCalledWith("^C");
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.writeln).not.toHaveBeenCalledWith("late");
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("unlocks an interrupted command without rolling back completed mutations", async () => {
+    vi.useFakeTimers();
+    let term;
+    const { extend } = loadTerminalExt({
+      commands: {
+        mutate: async () => {
+          term.VERSION = 9;
+          term.locked = true;
+          await term.delayPrint("never", 100);
+        },
+      },
+    });
+    term = createTerm();
+    extend(term);
+
+    const command = term.executeCommandLine("mutate");
+    await Promise.resolve();
+    await Promise.resolve();
+    term._requestInterrupt();
+    await command;
+
+    expect(term.VERSION).toBe(9);
+    expect(term.locked).toBe(false);
+    expect(term.busy).toBe(false);
+    expect(term.writeln).toHaveBeenCalledWith("^C");
+    vi.useRealTimers();
+  });
+
+  it("keeps collectInput Ctrl+C single-fire and exclusive", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+
+    const input = term.collectInput("Name");
+    const inputHandler = term._inputHandler;
+    inputHandler("\u0003");
+    inputHandler("\u0003");
+
+    await expect(input).resolves.toBe(null);
+    expect(term.locked).toBe(false);
+    expect(term._collectingInput).toBe(false);
+    expect(term.write).toHaveBeenCalledWith("^C\r\n");
+    expect(term.write.mock.calls.filter(([value]) => value === "^C\r\n")).toHaveLength(1);
+  });
+
+  it("preserves a non-interrupt command failure instead of printing Ctrl+C", async () => {
+    const error = new Error("boom");
+    let term;
+    const { extend } = loadTerminalExt({
+      commands: {
+        fail: () => Promise.reject(error),
+      },
+    });
+    term = createTerm();
+    extend(term);
+
+    await term.executeCommandLine("fail");
+
+    expect(term.writeln).not.toHaveBeenCalledWith("^C");
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+  });
+
+  it("awaits a complete, non-interruptible resize replay", async () => {
+    vi.useFakeTimers();
+    let term;
+    const { extend } = loadTerminalExt({
+      commands: {
+        replay: async () => {
+          term.write("replay-start");
+          await term.delayPrint("replay-end", 25);
+        },
+      },
+    });
+    term = createTerm();
+    extend(term);
+    term.history = ["replay"];
+
+    const replay = term.resizeListener();
+    expect(term._replaying).toBe(true);
+    term._requestInterrupt();
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(25);
+    await replay;
+
+    expect(term.write).toHaveBeenCalledWith("replay-end");
+    expect(term._replaying).toBe(false);
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+    vi.useRealTimers();
   });
 });

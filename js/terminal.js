@@ -28,6 +28,31 @@ function runRootTerminal(term) {
   );
 
   term.onData((e) => {
+    // Ctrl+C is the one input that remains meaningful while an async command
+    // owns the terminal.  Let collectInput's handler keep exclusive ownership
+    // of its cancellation, and never let input interrupt transcript replay.
+    if (e === "\u0003") {
+      if (term._collectingInput || term._replaying) {
+        return;
+      }
+      if (term.busy) {
+        if (term._execution && !term._execution.abortRequested) {
+          term._requestInterrupt();
+        }
+        return;
+      }
+      if (term._initialized && !term.locked) {
+        // Reset tab state
+        term.tabIndex = 0;
+        term.tabOptions = [];
+        term.tabBase = "";
+
+        term.prompt();
+        term.clearCurrentLine(true);
+      }
+      return;
+    }
+
     if (term._initialized && !term.locked && !term.busy) {
       switch (e) {
         case "\r": // Enter
@@ -44,15 +69,6 @@ function runRootTerminal(term) {
           if (term.pos() < term.currentLine.length) {
             term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
           }
-          break;
-        case "\u0003": // Ctrl+C
-          // Reset tab state
-          term.tabIndex = 0;
-          term.tabOptions = [];
-          term.tabBase = "";
-
-          term.prompt();
-          term.clearCurrentLine(true);
           break;
         case "\u0008": // Ctrl+H
         case "\u007F": // Backspace (DEL)

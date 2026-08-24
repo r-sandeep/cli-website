@@ -21,6 +21,9 @@ const extend = (term) => {
   term.history = [];
   term.historyCursor = -1;
   term.busy = false;
+  term._collectingInput = false;
+  term._replaying = false;
+  term._execution = null;
 
   // Tab completion state — reset on any non-tab keypress.
   term.tabIndex = 0;
@@ -166,7 +169,81 @@ const extend = (term) => {
 
   // ── Animation Helpers ──────────────────────────────────────────────────────
 
-  term.timer = (ms) => new Promise((res) => setTimeout(res, ms));
+  // An execution owns its pending waits.  Keeping the cancellation machinery
+  // private means commands continue to use the same public command API.
+  const makeAbortError = () => {
+    const error = new Error("Command interrupted");
+    error._terminalAbort = true;
+    return error;
+  };
+
+  const isAbortError = (error) => Boolean(error && error._terminalAbort);
+
+  const createExecution = () => {
+    const execution = {
+      aborted: false,
+      abortRequested: false,
+      abortError: makeAbortError(),
+      listeners: new Set(),
+      abort() {
+        if (execution.aborted) {
+          return;
+        }
+        execution.aborted = true;
+        for (const listener of [...execution.listeners]) {
+          listener();
+        }
+        execution.listeners.clear();
+      },
+    };
+    return execution;
+  };
+
+  const cancellableWait = (ms, execution = term._execution) =>
+    new Promise((resolve, reject) => {
+      if (execution?.aborted) {
+        reject(execution.abortError);
+        return;
+      }
+
+      let settled = false;
+      let removeListener = () => {};
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (removeListener) removeListener();
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (removeListener) removeListener();
+        reject(execution.abortError);
+      };
+      if (execution) {
+        execution.listeners.add(onAbort);
+        removeListener = () => execution.listeners.delete(onAbort);
+      }
+    });
+
+  term.timer = (ms) => cancellableWait(ms);
+
+  term._requestInterrupt = () => {
+    const execution = term._execution;
+    if (
+      !term.busy ||
+      term._replaying ||
+      term._collectingInput ||
+      !execution ||
+      execution.abortRequested
+    ) {
+      return false;
+    }
+    execution.abortRequested = true;
+    execution.abort();
+    return true;
+  };
 
   // Prints phrase followed by n dots at 1-second intervals.
   term.dottedPrint = async (phrase, n, newline = true) => {
@@ -294,13 +371,21 @@ const extend = (term) => {
     };
     const parsed = term.parseCommandLine(line);
     let exitStatus;
+    const ownsBusy = settings.manageBusy && !term._replaying;
+    const execution = ownsBusy ? createExecution() : null;
+    let interrupted = false;
 
     try {
-      if (settings.manageBusy) {
+      if (ownsBusy) {
         term.busy = true;
+        term._execution = execution;
       }
 
       await term.preloadCommandAssets(parsed.line);
+
+      if (execution?.aborted) {
+        throw execution.abortError;
+      }
 
       if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
         term.writeln("");
@@ -311,7 +396,11 @@ const extend = (term) => {
           term.history.push(parsed.line);
         }
 
-        exitStatus = term.command(parsed.line);
+        exitStatus = await term.command(parsed.line);
+
+        if (execution?.aborted) {
+          throw execution.abortError;
+        }
 
         if (settings.trackAnalytics) {
           window.dataLayer = window.dataLayer || [];
@@ -323,16 +412,34 @@ const extend = (term) => {
         }
       }
     } catch (error) {
-      console.error("Command preparation failed", error);
-      term.stylePrint("Command failed to load required assets. Please try again.");
+      if (isAbortError(error)) {
+        // A resize or replacement may have displaced this execution by the
+        // time its rejected wait settles.  Such an old owner must be silent;
+        // only its current owner performs interruption cleanup.
+        interrupted = term._execution === execution;
+      } else {
+        console.error("Command preparation failed", error);
+        term.stylePrint("Command failed to load required assets. Please try again.");
+      }
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+      const ownsExecution = !execution || term._execution === execution;
+      if (interrupted && ownsExecution) {
+        term.locked = false;
+        term.writeln("^C");
+        term.clearCurrentLine(true);
+      } else if (
+        settings.promptAfter &&
+        exitStatus != 1 &&
+        parsed.cmd != "upgrade" &&
+        ownsExecution
+      ) {
         term.prompt();
         term.clearCurrentLine(true);
       }
 
-      if (settings.manageBusy) {
+      if (ownsBusy && ownsExecution) {
         term.busy = false;
+        term._execution = null;
       }
 
       term.scrollToBottom();
@@ -346,20 +453,34 @@ const extend = (term) => {
   // Called on window resize. xterm clears its buffer on resize, so we
   // reinitialize the terminal and replay the entire command history to restore
   // the visible output, then re-render the prompt at the bottom.
-  term.resizeListener = () => {
+  term.resizeListener = async () => {
+    const previousExecution = term._execution;
+    if (previousExecution) {
+      previousExecution.abort();
+    }
+    term._replaying = true;
+    term._execution = null;
+    term.busy = true;
     term._initialized = false;
-    term.init(term.user, true);
-    if (typeof preloadASCIIArt === "function") {
-      window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
+    try {
+      term.init(term.user, true);
+      if (typeof preloadASCIIArt === "function") {
+        window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
+      }
+      await term.runDeepLink({ replay: true });
+      for (const c of term.history) {
+        term.prompt("\r\n", ` ${c}\r\n`);
+        await term.command(c);
+      }
+      term.prompt();
+      term.scrollToBottom();
+    } finally {
+      term._replaying = false;
+      term.busy = false;
+      term.locked = false;
+      term._execution = null;
+      term._initialized = true;
     }
-    term.runDeepLink({ replay: true });
-    for (const c of term.history) {
-      term.prompt("\r\n", ` ${c}\r\n`);
-      term.command(c);
-    }
-    term.prompt();
-    term.scrollToBottom();
-    term._initialized = true;
   };
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
@@ -413,9 +534,9 @@ const extend = (term) => {
   // buffer xterm cleared. That is the same visit, not a new arrival, so it must
   // not be counted again — the history replay right below it calls term.command
   // directly rather than executeCommandLine for exactly this reason.
-  term.runDeepLink = ({ replay = false } = {}) => {
+  term.runDeepLink = async ({ replay = false } = {}) => {
     if (term.deepLink != "") {
-      term.executeCommandLine(term.deepLink, {
+      await term.executeCommandLine(term.deepLink, {
         addToHistory: false,
         promptAfter: false,
         showLeadingNewline: false,
@@ -423,8 +544,6 @@ const extend = (term) => {
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.
         trackAnalytics: !replay,
-      }).catch((error) => {
-        console.error("Deep link failed", error);
       });
     }
   };
@@ -437,21 +556,30 @@ const extend = (term) => {
   //   - null if the user pressed Ctrl+C (cancelled)
   term.collectInput = (prompt, isOptional = false) => {
     return new Promise((resolve) => {
+      term._collectingInput = true;
       term.locked = true;
       term.write(`\r\n${prompt}${isOptional ? ' (optional)' : ''}: `);
       let inputBuffer = '';
+      let settled = false;
 
       const inputHandler = term.onData((e) => {
+        if (settled) {
+          return;
+        }
         switch (e) {
           case '\r': // Enter — submit
+            settled = true;
             term.write('\r\n');
             inputHandler.dispose();
+            term._collectingInput = false;
             term.locked = false;
             resolve(inputBuffer.trim());
             break;
           case '\u0003': // Ctrl+C — cancel, resolves to null
+            settled = true;
             term.write('^C\r\n');
             inputHandler.dispose();
+            term._collectingInput = false;
             term.locked = false;
             resolve(null);
             break;
