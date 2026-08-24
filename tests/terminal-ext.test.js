@@ -138,18 +138,11 @@ describe("terminal-ext", () => {
       manageBusy: true,
       promptAfter: false,
       showLeadingNewline: false,
-      // Deep links are the only way to address a specific company or person
-      // now, and a fragment fires no pageview of its own, so these arrivals
-      // would otherwise be invisible in analytics.
       trackAnalytics: true,
     });
   });
 
   it("does not re-count a deep link when a resize replays it", () => {
-    // xterm clears its buffer on resize, so resizeListener reruns the deep link
-    // to redraw the output. That is the same visit — counting it again inflates
-    // every deep-link arrival by one per resize, and mobile browsers fire
-    // resize just from showing and hiding the address bar.
     const { extend } = loadTerminalExt();
     const term = createTerm();
 
@@ -168,9 +161,6 @@ describe("terminal-ext", () => {
     ["#jobs", "jobs"],
     ["#whois-root", "whois root"],
     ["#tldr-chargelab", "tldr chargelab"],
-    // The one that used to break: splitting on every hyphen turned a
-    // hyphenated slug into two arguments, so the company's own deep link
-    // missed. Only the first hyphen separates command from argument.
     ["#tldr-vibe-robotics", "tldr vibe-robotics"],
     ["", ""],
   ])("parses %s into the command %s", (hash, expected) => {
@@ -251,6 +241,65 @@ describe("terminal-ext", () => {
     expect(term.busy).toBe(false);
   });
 
+  it("waits for async history output before replaying the next entry prompt and final prompt", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    const events = [];
+    const helpGate = createDeferred();
+
+    extend(term);
+    term.history = ["help", "jobs"];
+    term.init = vi.fn(() => {
+      events.push("init");
+    });
+    term.runDeepLink = vi.fn(() => Promise.resolve());
+    term.prompt = vi.fn((prefix = "\r\n", suffix = " ") => {
+      events.push(`prompt:${prefix}:${suffix}`);
+    });
+    term.scrollToBottom = vi.fn(() => {
+      events.push("scroll");
+    });
+    term.command = vi.fn((line) => {
+      if (line === "help") {
+        events.push("command:help:start");
+        return helpGate.promise.then(() => {
+          events.push("output:help");
+          return 0;
+        });
+      }
+
+      events.push(`command:${line}`);
+      return Promise.resolve(0);
+    });
+
+    const replay = term.resizeListener();
+    await flushMicrotasks();
+
+    expect(events).toEqual([
+      "init",
+      "prompt:\r\n: help\r\n",
+      "command:help:start",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.busy).toBe(true);
+
+    helpGate.resolve();
+    await replay;
+
+    expect(events).toEqual([
+      "init",
+      "prompt:\r\n: help\r\n",
+      "command:help:start",
+      "output:help",
+      "prompt:\r\n: jobs\r\n",
+      "command:jobs",
+      "prompt:\r\n: ",
+      "scroll",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(3);
+    expect(term.busy).toBe(false);
+  });
+
   it("renders upgrade history without replaying its side effects and writes the final prompt last", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -282,7 +331,13 @@ describe("terminal-ext", () => {
     deepLinkGate.resolve();
     await flushMicrotasks();
 
-    expect(events).toEqual(["init", "prompt:\r\n: upgrade\r\n", "prompt:\r\n: help\r\n", "command:help:start", "command:help:end"]);
+    expect(events).toEqual([
+      "init",
+      "prompt:\r\n: upgrade\r\n",
+      "prompt:\r\n: help\r\n",
+      "command:help:start",
+      "command:help:end",
+    ]);
 
     await replay;
 
@@ -420,6 +475,47 @@ describe("terminal-ext", () => {
     await firstReplay;
 
     expect(term.busy).toBe(false);
+    expect(term._resizeReplayPromise).toBe(null);
+  });
+
+  it("clears busy, locked, and replay ownership when a replayed history command fails", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({ locked: true });
+    const replayError = new Error("replay failed");
+    const events = [];
+
+    extend(term);
+    term.history = ["help"];
+    term.init = vi.fn(() => {
+      events.push("init");
+    });
+    term.runDeepLink = vi.fn(() => Promise.resolve());
+    term.prompt = vi.fn((prefix = "\r\n", suffix = " ") => {
+      events.push(`prompt:${prefix}:${suffix}`);
+    });
+    term.scrollToBottom = vi.fn(() => {
+      events.push("scroll");
+    });
+    term.command = vi.fn(() => {
+      events.push("command:help");
+      return Promise.reject(replayError);
+    });
+
+    const replay = term.resizeListener();
+
+    expect(term.busy).toBe(true);
+    await expect(replay).rejects.toBe(replayError);
+
+    expect(events).toEqual([
+      "init",
+      "prompt:\r\n: help\r\n",
+      "command:help",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.scrollToBottom).not.toHaveBeenCalled();
+    expect(term.locked).toBe(false);
+    expect(term.busy).toBe(false);
+    expect(term._initialized).toBe(true);
     expect(term._resizeReplayPromise).toBe(null);
   });
 });
