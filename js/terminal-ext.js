@@ -21,8 +21,10 @@ const extend = (term) => {
   term.history = [];
   term.historyCursor = -1;
   term.busy = false;
+  term.locked = false;
   term._collectingInput = false;
   term._replaying = false;
+  term._replayPromise = null;
   term._execution = null;
 
   // Tab completion state — reset on any non-tab keypress.
@@ -453,7 +455,14 @@ const extend = (term) => {
   // Called on window resize. xterm clears its buffer on resize, so we
   // reinitialize the terminal and replay the entire command history to restore
   // the visible output, then re-render the prompt at the bottom.
-  term.resizeListener = async () => {
+  term.resizeListener = () => {
+    if (term._replayPromise) {
+      return term._replayPromise;
+    }
+
+    // Publish the replay promise and ownership state before starting any
+    // replay work.  init/command hooks can synchronously cause another resize;
+    // that call must join this replay rather than create a second owner.
     const previousExecution = term._execution;
     if (previousExecution) {
       previousExecution.abort();
@@ -462,25 +471,50 @@ const extend = (term) => {
     term._execution = null;
     term.busy = true;
     term._initialized = false;
-    try {
-      term.init(term.user, true);
-      if (typeof preloadASCIIArt === "function") {
-        window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
+
+    let resolveReplay;
+    let rejectReplay;
+    const replay = new Promise((resolve, reject) => {
+      resolveReplay = resolve;
+      rejectReplay = reject;
+    });
+    term._replayPromise = replay;
+
+    (async () => {
+      try {
+        term.init(term.user, true);
+        if (typeof preloadASCIIArt === "function") {
+          window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
+        }
+        await term.runDeepLink({ replay: true });
+        for (const c of term.history) {
+          term.prompt("\r\n", ` ${c}\r\n`);
+          await term.command(c);
+        }
+        term.prompt();
+        term.scrollToBottom();
+      } finally {
+        // Only the replay owner may release shared terminal state.  Calls made
+        // while a replay is pending join the same promise above instead of
+        // allowing an older callback to finalize a newer replay.
+        if (term._replayPromise === replay) {
+          term._replaying = false;
+          term.busy = false;
+          term.locked = false;
+          term._execution = null;
+          term._initialized = true;
+        }
       }
-      await term.runDeepLink({ replay: true });
-      for (const c of term.history) {
-        term.prompt("\r\n", ` ${c}\r\n`);
-        await term.command(c);
+    })().then(resolveReplay, rejectReplay);
+    replay.then(
+      () => {
+        if (term._replayPromise === replay) term._replayPromise = null;
+      },
+      () => {
+        if (term._replayPromise === replay) term._replayPromise = null;
       }
-      term.prompt();
-      term.scrollToBottom();
-    } finally {
-      term._replaying = false;
-      term.busy = false;
-      term.locked = false;
-      term._execution = null;
-      term._initialized = true;
-    }
+    );
+    return replay;
   };
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade

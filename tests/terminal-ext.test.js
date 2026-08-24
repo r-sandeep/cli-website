@@ -255,6 +255,77 @@ describe("terminal-ext", () => {
     vi.useRealTimers();
   });
 
+  it("accepts the next command after an interrupted command settles", async () => {
+    vi.useFakeTimers();
+    let term;
+    const { extend } = loadTerminalExt({
+      commands: {
+        interruptible: async () => {
+          await term.delayPrint("not-after-interrupt", 100);
+        },
+        next: () => {
+          term.write("next-command");
+        },
+      },
+    });
+    term = createTerm();
+    extend(term);
+
+    const interrupted = term.executeCommandLine("interruptible");
+    await Promise.resolve();
+    await Promise.resolve();
+    term._requestInterrupt();
+    await interrupted;
+
+    await term.executeCommandLine("next");
+
+    expect(term.write).toHaveBeenCalledWith("next-command");
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it.each(["delayPrint", "delayStylePrint", "dottedPrint", "progressBar"])(
+    "%s rejects its pending wait with the private abort error",
+    async (primitive) => {
+      vi.useFakeTimers();
+      let term;
+      const { extend } = loadTerminalExt({
+        commands: {
+          probe: async () => {
+            try {
+              if (primitive === "delayPrint") {
+                await term.delayPrint("late", 100);
+              } else if (primitive === "delayStylePrint") {
+                await term.delayStylePrint("late", 100);
+              } else if (primitive === "dottedPrint") {
+                await term.dottedPrint("dots", 1);
+              } else {
+                await term.progressBar(100, "progress");
+              }
+            } catch (error) {
+              term.caughtAbort = error;
+              throw error;
+            }
+          },
+        },
+      });
+      term = createTerm();
+      extend(term);
+
+      const command = term.executeCommandLine("probe");
+      await Promise.resolve();
+      await Promise.resolve();
+      term._requestInterrupt();
+      await command;
+
+      expect(term.caughtAbort).toMatchObject({ _terminalAbort: true });
+      expect(term.busy).toBe(false);
+      expect(term.locked).toBe(false);
+      vi.useRealTimers();
+    }
+  );
+
   it("keeps collectInput Ctrl+C single-fire and exclusive", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -317,6 +388,39 @@ describe("terminal-ext", () => {
     expect(term._replaying).toBe(false);
     expect(term.busy).toBe(false);
     expect(term.locked).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("joins overlapping resize requests so stale replay cleanup cannot release ownership", async () => {
+    vi.useFakeTimers();
+    let term;
+    const { extend } = loadTerminalExt({
+      commands: {
+        replay: async () => {
+          await term.delayPrint("replay-end", 25);
+        },
+      },
+    });
+    term = createTerm();
+    extend(term);
+    term.history = ["replay"];
+
+    const firstReplay = term.resizeListener();
+    const joinedReplay = term.resizeListener();
+
+    expect(joinedReplay).toBe(firstReplay);
+    expect(term._replaying).toBe(true);
+    expect(term.busy).toBe(true);
+    expect(term._requestInterrupt()).toBe(false);
+    expect(term._replaying).toBe(true);
+    expect(term.busy).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(25);
+    await firstReplay;
+
+    expect(term._replaying).toBe(false);
+    expect(term.busy).toBe(false);
+    expect(term._replayPromise).toBe(null);
     vi.useRealTimers();
   });
 });

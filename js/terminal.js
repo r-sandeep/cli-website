@@ -8,7 +8,9 @@ function runRootTerminal(term) {
   term.locked = false;
 
   term.prompt();
-  term.runDeepLink();
+  Promise.resolve(term.runDeepLink()).catch((error) => {
+    console.error("Deep link failed", error);
+  });
 
   let resizeQueued = false;
   window.addEventListener(
@@ -20,8 +22,14 @@ function runRootTerminal(term) {
 
       resizeQueued = true;
       window.requestAnimationFrame(() => {
-        resizeQueued = false;
-        term.resizeListener();
+        Promise.resolve(term.resizeListener()).then(
+          () => {
+            resizeQueued = false;
+          },
+          () => {
+            resizeQueued = false;
+          }
+        );
       });
     },
     { passive: true }
