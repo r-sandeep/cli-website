@@ -263,6 +263,11 @@ const extend = (term) => {
     }
   };
 
+  term.isReplayOnlyHistoryLine = (line) => {
+    const { cmd } = term.parseCommandLine(line);
+    return cmd === "apply" || cmd === "upgrade";
+  };
+
   term.preloadCommandAssets = async (line) => {
     const parsed = term.parseCommandLine(line);
     const normalized = term.normalizeCommandForPreload(parsed.cmd, parsed.args);
@@ -368,7 +373,7 @@ const extend = (term) => {
         for (const c of history) {
           term.prompt("\r\n", ` ${c}\r\n`);
 
-          if (term.parseCommandLine(c).cmd === "apply") {
+          if (term.isReplayOnlyHistoryLine(c)) {
             continue;
           }
 

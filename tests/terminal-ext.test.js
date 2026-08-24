@@ -251,12 +251,11 @@ describe("terminal-ext", () => {
     expect(term.busy).toBe(false);
   });
 
-  it("replays async history sequentially and writes the final prompt last", async () => {
+  it("renders upgrade history without replaying its side effects and writes the final prompt last", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
     const events = [];
     const deepLinkGate = createDeferred();
-    const upgradeGate = createDeferred();
 
     extend(term);
     term.history = ["upgrade", "help"];
@@ -272,12 +271,6 @@ describe("terminal-ext", () => {
     term.runDeepLink = vi.fn(() => deepLinkGate.promise);
     term.command = vi.fn((line) => {
       events.push(`command:${line}:start`);
-      if (line === "upgrade") {
-        return upgradeGate.promise.then(() => {
-          events.push("command:upgrade:end");
-          return 0;
-        });
-      }
       events.push(`command:${line}:end`);
       return Promise.resolve(0);
     });
@@ -289,16 +282,13 @@ describe("terminal-ext", () => {
     deepLinkGate.resolve();
     await flushMicrotasks();
 
-    expect(events).toEqual(["init", "prompt:\r\n: upgrade\r\n", "command:upgrade:start"]);
+    expect(events).toEqual(["init", "prompt:\r\n: upgrade\r\n", "prompt:\r\n: help\r\n", "command:help:start", "command:help:end"]);
 
-    upgradeGate.resolve();
     await replay;
 
     expect(events).toEqual([
       "init",
       "prompt:\r\n: upgrade\r\n",
-      "command:upgrade:start",
-      "command:upgrade:end",
       "prompt:\r\n: help\r\n",
       "command:help:start",
       "command:help:end",
@@ -306,9 +296,38 @@ describe("terminal-ext", () => {
       "scroll",
     ]);
     expect(term.history).toEqual(["upgrade", "help"]);
-    env.window.dataLayer = [];
-    expect(env.window.dataLayer).toEqual([]);
+    expect(term.command).toHaveBeenCalledTimes(1);
+    expect(term.command).toHaveBeenCalledWith("help");
     expect(term.busy).toBe(false);
+  });
+
+  it("renders upgrade history without dispatching it or clearing surviving history", async () => {
+    const upgradeCommand = vi.fn(() => {
+      throw new Error("upgrade should not run during replay");
+    });
+    const { extend } = loadTerminalExt({
+      commands: { upgrade: upgradeCommand, help: vi.fn() },
+    });
+    const term = createTerm();
+
+    extend(term);
+    term.history = ["upgrade", "help"];
+    term.init = vi.fn();
+    term.runDeepLink = vi.fn(() => Promise.resolve());
+    term.prompt = vi.fn();
+    term.command = vi.fn((line) => {
+      const fn = env.window.commands[term.parseCommandLine(line).cmd];
+      return fn ? fn(term.parseCommandLine(line).args) : 0;
+    });
+
+    await term.resizeListener();
+
+    expect(term.prompt).toHaveBeenNthCalledWith(1, "\r\n", " upgrade\r\n");
+    expect(term.prompt).toHaveBeenNthCalledWith(2, "\r\n", " help\r\n");
+    expect(term.command).toHaveBeenCalledTimes(1);
+    expect(term.command).toHaveBeenCalledWith("help");
+    expect(upgradeCommand).not.toHaveBeenCalled();
+    expect(term.history).toEqual(["upgrade", "help"]);
   });
 
   it("renders apply history without reopening interactive input and finishes unlocked", async () => {
