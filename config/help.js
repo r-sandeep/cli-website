@@ -1,5 +1,6 @@
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%history%": "list previously entered commands",
   "%whois%": "list all partners",
   "%whois% [partner]": "learn about a partner",
   "%whois% root": "learn about us",
