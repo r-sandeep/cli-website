@@ -178,6 +178,7 @@ describe("runRootTerminal", () => {
 
     expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "second", false);
     expect(term.currentLine).toBe("second");
+    expect(term.historyCursor).toBe(0);
   });
 
   it("leaves an empty history unchanged when arrow keys are pressed", () => {
