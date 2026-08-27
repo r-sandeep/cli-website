@@ -117,6 +117,7 @@ describe("apply", () => {
 function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {}) {
   const term = {
     cwd,
+    history: [],
     user,
     stylePrint: vi.fn(),
     writeln: vi.fn(),
@@ -144,6 +145,28 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
   };
   return { commands, term };
 }
+
+describe("history", () => {
+  it("lists recorded commands chronologically with one-based sequence numbers", () => {
+    const { commands, term } = loadCommands();
+    term.history = ["help", "whois root", "history"];
+
+    commands.history();
+
+    expect(term.stylePrint.mock.calls).toEqual([
+      ["1 help"],
+      ["2 whois root"],
+      ["3 history"],
+    ]);
+  });
+
+  it("does not print rows or throw when history is empty", () => {
+    const { commands, term } = loadCommands();
+
+    expect(() => commands.history()).not.toThrow();
+    expect(term.stylePrint).not.toHaveBeenCalled();
+  });
+});
 
 describe("cd", () => {
   // Table ported from #51 (@astonm, 2021), which never landed. The cases still

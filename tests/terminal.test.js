@@ -136,9 +136,9 @@ describe("runRootTerminal", () => {
     term._onData("\x1b[A");
     term._onData("\x1b[A");
 
-    expect(term.setCurrentLine).toHaveBeenNthCalledWith(1, "second");
-    expect(term.setCurrentLine).toHaveBeenNthCalledWith(2, "first");
-    expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "first");
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(1, "second", false);
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(2, "first", false);
+    expect(term.setCurrentLine).toHaveBeenCalledTimes(2);
   });
 
   it("moves forward through history and clears past newest without wrapping", () => {
@@ -148,13 +148,14 @@ describe("runRootTerminal", () => {
     runRootTerminal(term);
     term._onData("\x1b[A");
     term._onData("\x1b[A");
+    term._onData("\x1b[A");
     term._onData("\x1b[B");
     term._onData("\x1b[B");
     term._onData("\x1b[B");
 
-    expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "second");
-    expect(term.setCurrentLine).toHaveBeenNthCalledWith(4, "");
-    expect(term.setCurrentLine).toHaveBeenNthCalledWith(5, "");
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "second", false);
+    expect(term.clearCurrentLine).toHaveBeenNthCalledWith(1, true);
+    expect(term.clearCurrentLine).toHaveBeenNthCalledWith(2, true);
   });
 
   it("leaves an empty history unchanged when arrow keys are pressed", () => {
