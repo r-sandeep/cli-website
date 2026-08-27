@@ -126,4 +126,47 @@ describe("runRootTerminal", () => {
     expect(term.prompt).not.toHaveBeenCalled();
     expect(term.onData).not.toHaveBeenCalled();
   });
+
+  it("recalls history from newest to oldest without wrapping", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ history: ["first", "second"] });
+
+    runRootTerminal(term);
+    term._onData("\x1b[A");
+    term._onData("\x1b[A");
+    term._onData("\x1b[A");
+
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(1, "second");
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(2, "first");
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "first");
+  });
+
+  it("moves forward through history and clears past newest without wrapping", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ history: ["first", "second"] });
+
+    runRootTerminal(term);
+    term._onData("\x1b[A");
+    term._onData("\x1b[A");
+    term._onData("\x1b[B");
+    term._onData("\x1b[B");
+    term._onData("\x1b[B");
+
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "second");
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(4, "");
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(5, "");
+  });
+
+  it("leaves an empty history unchanged when arrow keys are pressed", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ currentLine: "typed" });
+
+    runRootTerminal(term);
+    term._onData("\x1b[A");
+    term._onData("\x1b[B");
+
+    expect(term.setCurrentLine).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe("typed");
+  });
 });
