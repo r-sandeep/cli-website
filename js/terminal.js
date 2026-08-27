@@ -88,10 +88,10 @@ function runRootTerminal(term) {
           term.tabBase = "";
 
           var h = [...term.history].reverse();
-          if (term.historyCursor > 0) {
+          if (h.length > 0 && term.historyCursor > 0) {
             term.historyCursor -= 1;
             term.setCurrentLine(h[term.historyCursor], false);
-          } else {
+          } else if (h.length > 0) {
             term.clearCurrentLine(true);
           }
           break;
