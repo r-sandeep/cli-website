@@ -114,6 +114,8 @@ describe("terminal-ext", () => {
     });
 
     extend(term);
+    term.history = ["first", "second"];
+    term.historyCursor = 0;
     await term.executeCommandLine("help");
 
     expect(term.history).toEqual(["first", "second", "help"]);
