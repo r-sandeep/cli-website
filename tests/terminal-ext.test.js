@@ -106,6 +106,20 @@ describe("terminal-ext", () => {
     expect(term.command).toHaveBeenCalledWith("help");
   });
 
+  it("resets history recall to the post-newest position after a command", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      history: ["first", "second"],
+      historyCursor: 0,
+    });
+
+    extend(term);
+    await term.executeCommandLine("help");
+
+    expect(term.history).toEqual(["first", "second", "help"]);
+    expect(term.historyCursor).toBe(-1);
+  });
+
   it("routes deep links through executeCommandLine without double prompts", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
