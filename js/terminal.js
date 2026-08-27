@@ -92,6 +92,7 @@ function runRootTerminal(term) {
             term.historyCursor -= 1;
             term.setCurrentLine(h[term.historyCursor], false);
           } else if (h.length > 0) {
+            term.historyCursor = -1;
             term.clearCurrentLine(true);
           }
           break;

@@ -158,6 +158,28 @@ describe("runRootTerminal", () => {
     expect(term.clearCurrentLine).toHaveBeenNthCalledWith(2, true);
   });
 
+  it("resets the cursor after clearing past newest so Up recalls newest", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ history: ["first", "second"] });
+    term.clearCurrentLine = vi.fn(() => {
+      term.currentLine = "";
+    });
+
+    runRootTerminal(term);
+    term._onData("\x1b[A");
+    term._onData("\x1b[A");
+    term._onData("\x1b[B");
+    term._onData("\x1b[B");
+
+    expect(term.currentLine).toBe("");
+    expect(term.historyCursor).toBe(-1);
+
+    term._onData("\x1b[A");
+
+    expect(term.setCurrentLine).toHaveBeenNthCalledWith(3, "second", false);
+    expect(term.currentLine).toBe("second");
+  });
+
   it("leaves an empty history unchanged when arrow keys are pressed", () => {
     const { runRootTerminal } = loadTerminalScript();
     const term = createTerm({ currentLine: "typed" });
