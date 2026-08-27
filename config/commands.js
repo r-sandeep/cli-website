@@ -86,13 +86,6 @@ const commands = {
     });
   },
 
-  // Lists commands entered during this terminal page session.
-  history: function () {
-    term.history.forEach((command, index) => {
-      term.stylePrint(`${index + 1} ${command}`);
-    });
-  },
-
   // Displays bio and ASCII art portrait for a team member, or the firm blurb.
   whois: function (args) {
     const name = args[0];
@@ -574,7 +567,7 @@ const commands = {
 
   history: function () {
     term.history.forEach((element, index) => {
-      term.stylePrint(`${1000 + index}  ${element}`);
+      term.stylePrint(`${index + 1} ${element}`);
     });
   },
 
