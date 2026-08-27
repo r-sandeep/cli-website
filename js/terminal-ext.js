@@ -309,6 +309,9 @@ const extend = (term) => {
       if (parsed.line.length > 0) {
         if (settings.addToHistory) {
           term.history.push(parsed.line);
+          // A newly submitted command establishes the post-newest position
+          // for the next history traversal.
+          term.historyCursor = -1;
         }
 
         exitStatus = term.command(parsed.line);
