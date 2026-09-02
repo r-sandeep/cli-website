@@ -164,7 +164,7 @@ describe("grep", () => {
 
     expect(() => commands.grep(["(", "sample.txt"])).not.toThrow();
     expect(term.writeln).toHaveBeenCalledWith(
-      "before <files><files>(</files></files> after <files><files>(</files></files>"
+      "before <files>(</files> after <files>(</files>"
     );
   });
 
@@ -186,9 +186,7 @@ describe("grep", () => {
 
     commands.grep(["+", "sample.txt"]);
 
-    expect(term.writeln).toHaveBeenCalledWith(
-      "A<files><files>+</files></files>B a<files><files>+</files></files>b"
-    );
+    expect(term.writeln).toHaveBeenCalledWith("A<files>+</files>B a<files>+</files>b");
   });
 
   it("highlights only literal dots", () => {
@@ -200,7 +198,38 @@ describe("grep", () => {
     commands.grep([".", "sample.txt"]);
 
     expect(term.writeln).toHaveBeenCalledWith(
-      "one<files><files><files><files>.</files></files></files></files>two\n<files><files><files><files>.</files></files></files></files><files><files><files><files>.</files></files></files></files><files><files><files><files>.</files></files></files></files>"
+      "one<files>.</files>two\n<files>.</files><files>.</files><files>.</files>"
+    );
+  });
+
+  it("wraps each occurrence exactly once, never re-matching inserted styling", () => {
+    // "e" also appears in the "<files>" wrapper itself; a repeated-replaceAll
+    // implementation re-matches it inside earlier insertions and shreds the
+    // styling (with real ANSI codes: patterns like "0", ";", "m", "[").
+    const { commands, term } = loadCommands({
+      files: { "sample.txt": "see bee" },
+      colorText: (text, style) => `<${style}>${text}</${style}>`,
+    });
+
+    commands.grep(["e", "sample.txt"]);
+
+    expect(term.writeln).toHaveBeenCalledWith(
+      "s<files>e</files><files>e</files> b<files>e</files><files>e</files>"
+    );
+  });
+
+  it("keeps replacement-pattern sequences in the query inert", () => {
+    // "$`" is a substitution directive to String.replaceAll with a string
+    // replacement (it splices in the text before the match).
+    const { commands, term } = loadCommands({
+      files: { "sample.txt": "x $` y $`" },
+      colorText: (text, style) => `<${style}>${text}</${style}>`,
+    });
+
+    commands.grep(["$`", "sample.txt"]);
+
+    expect(term.writeln).toHaveBeenCalledWith(
+      "x <files>$`</files> y <files>$`</files>"
     );
   });
 
@@ -211,7 +240,7 @@ describe("grep", () => {
     });
     matching.commands.grep(["foo", "sample.txt"]);
     expect(matching.term.writeln).toHaveBeenCalledWith(
-      "<files><files>foo</files></files> bar <files><files>foo</files></files>"
+      "<files>foo</files> bar <files>foo</files>"
     );
 
     const missing = loadCommands();

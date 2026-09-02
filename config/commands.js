@@ -384,13 +384,10 @@ const commands = {
     }
 
     if (_filesHere().includes(filename)) {
-      let file = getFileContents(filename);
-      const literalQuery = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const matches = file.matchAll(literalQuery);
-      for (const match of matches) {
-        file = file.replaceAll(match[0], colorText(match[0], "files"));
-      }
-      term.writeln(file);
+      // Split/join keeps the pattern and the inserted color codes inert: one
+      // literal pass, so styling never gets re-matched as pattern text.
+      const file = getFileContents(filename);
+      term.writeln(file.split(q).join(colorText(q, "files")));
     } else {
       term.stylePrint(`No such file or directory: ${filename}`);
     }
