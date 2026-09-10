@@ -123,6 +123,9 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     printArt: vi.fn(),
     openURL: vi.fn(),
     displayURL: vi.fn(),
+    clear: vi.fn(),
+    init: vi.fn(),
+    reset: vi.fn(),
     cols: 100,
   };
   const context = vm.createContext({
@@ -198,6 +201,22 @@ describe("cd", () => {
     commands.cd(["nope"]);
     expect(term.cwd).toBe("~");
     expect(term.stylePrint).toHaveBeenCalledWith("No such directory: nope");
+  });
+});
+
+describe("clear", () => {
+  it("clears only the visible terminal buffer", () => {
+    const { commands, term } = loadCommands();
+    const history = ["whoami"];
+    term.history = history;
+
+    commands.clear([]);
+
+    expect(term.clear).toHaveBeenCalledTimes(1);
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.reset).not.toHaveBeenCalled();
+    expect(term.openURL).not.toHaveBeenCalled();
+    expect(term.history).toBe(history);
   });
 });
 

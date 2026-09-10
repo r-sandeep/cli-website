@@ -595,9 +595,9 @@ const commands = {
     term.command("open welcome.htm");
   },
 
-  // Reinitializes the terminal, clearing history and resetting the prompt.
+  // Clears the visible terminal buffer without resetting command history.
   clear: function () {
-    term.init();
+    term.clear();
   },
 
   // ── Easter Eggs & Jokes ─────────────────────────────────────────────────────
