@@ -18,7 +18,8 @@ const {
 } = buildPagesModule;
 
 const config = loadConfig();
-const files = buildPages(config);
+const GENERATED_AT = new Date("2026-01-15T12:00:00.000Z");
+const files = buildPages(config, GENERATED_AT);
 
 // index.html is the only page now. The static mirror that used to live at
 // /portfolio/, /team/, /about/ and /jobs/ is gone; see the header of
@@ -58,6 +59,46 @@ describe("loadConfig", () => {
     expect(config.firm.address.streetAddress).toBeTruthy();
     expect(config.firm.fundSize).toBeTruthy();
     expect(config.firm.blurb).toBeTruthy();
+  });
+});
+
+describe("security.txt", () => {
+  const securityPath = ".well-known/security.txt";
+  const security = fileNamed(securityPath);
+
+  it("adds exactly the well-known artifact to the legacy generated path set", () => {
+    expect(files.map((file) => file.path)).toEqual([
+      "sitemap.xml",
+      "robots.txt",
+      securityPath,
+      "_redirects",
+      "llms.txt",
+      "llms-full.txt",
+      "index.html",
+    ]);
+  });
+
+  it("uses the configured contact and emits one parseable RFC 9116 expiration", () => {
+    const lines = security.trimEnd().split("\n");
+    const contacts = lines.filter((line) => line.startsWith("Contact: "));
+    const expirations = lines.filter((line) => line.startsWith("Expires: "));
+
+    expect(contacts).toEqual([`Contact: mailto:${config.firm.email}`]);
+    expect(expirations).toHaveLength(1);
+
+    const match = expirations[0].match(
+      /^Expires: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/
+    );
+    expect(match).not.toBeNull();
+
+    const expiresAt = new Date(match[1]);
+    const oneYearLater = new Date(GENERATED_AT);
+    oneYearLater.setUTCFullYear(oneYearLater.getUTCFullYear() + 1);
+
+    expect(Number.isNaN(expiresAt.getTime())).toBe(false);
+    expect(expiresAt.toISOString()).toBe(match[1]);
+    expect(expiresAt.getTime()).toBeGreaterThan(GENERATED_AT.getTime());
+    expect(expiresAt.getTime()).toBeLessThan(oneYearLater.getTime());
   });
 });
 
@@ -406,9 +447,9 @@ describe("generated output stays out of the repo", () => {
   );
 
   it("regenerates identical output from an unchanged config", () => {
-    // buildPages() must be deterministic — object-key order, no timestamps —
-    // or every deploy would republish all 70-odd pages as changed.
-    expect(buildPages(loadConfig())).toEqual(files);
+    // buildPages() must be deterministic for the same config and generation
+    // time, or every deploy would republish all generated files as changed.
+    expect(buildPages(loadConfig(), GENERATED_AT)).toEqual(files);
   });
 });
 
