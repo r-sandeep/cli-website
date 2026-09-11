@@ -12,6 +12,7 @@ const help = {
   "%github%": "all repos",
   "%locate%": "physical address",
   "%www%": "plain-text version of this site",
+  "%wc% [filename]": "count lines, words, and characters in a file",
   "%jobs%": "check out our job openings",
   "%test%": "do not use",
   "%upgrade%": "upgrade to the latest version of Root Ventures",

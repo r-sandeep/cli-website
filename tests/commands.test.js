@@ -273,4 +273,13 @@ describe("help stays in sync with commands", () => {
     );
     expect(missing).toEqual([]);
   });
+
+  it("advertises wc with a filename and an implemented command", () => {
+    const { commands } = loadCommands();
+
+    expect(helpContext.helpEntries["%wc% [filename]"]).toBe(
+      "count lines, words, and characters in a file"
+    );
+    expect(commands.wc).toBeTypeOf("function");
+  });
 });
