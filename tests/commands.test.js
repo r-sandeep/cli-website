@@ -190,6 +190,7 @@ describe("wc", () => {
 
     expect(term.stylePrint).toHaveBeenCalledWith("usage: %wc% [filename]");
     expect(getFileContents).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
   });
 });
 
