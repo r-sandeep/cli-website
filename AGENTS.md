@@ -8,9 +8,10 @@ anything under `scripts/` or the root `index.html`.
 ## Source of truth
 
 **`config/*.js` is the only source of truth for content.** The homepage
-crawlable block, JSON-LD, `llms.txt`, `llms-full.txt`, `sitemap.xml`, and
-`_redirects` are all generated from it at build time, exist only in `dist/`,
-and are never committed. Edit the config, never the generated output.
+crawlable block, JSON-LD, `llms.txt`, `llms-full.txt`, `sitemap.xml`,
+`.well-known/security.txt`, and `_redirects` are all generated from it at build
+time, exist only in `dist/`, and are never committed. Edit the config, never the
+generated output.
 
 - `config/firm.js` — firm-level facts (blurb, thesis, fund size, address, email)
 - `config/portfolio.js` — portfolio companies
