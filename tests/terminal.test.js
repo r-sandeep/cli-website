@@ -95,6 +95,19 @@ describe("runRootTerminal", () => {
     expect(term.scrollToBottom).toHaveBeenCalled();
   });
 
+  it("completes visible filenames for wc", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      _filesHere: () => ["fixture.txt", "other.txt"],
+      commands: { help: () => {}, wc: () => {} },
+    });
+    const term = createTerm({ currentLine: "wc fix" });
+
+    runRootTerminal(term);
+    term._onData("\t");
+
+    expect(term.setCurrentLine).toHaveBeenCalledWith("wc fixture.txt");
+  });
+
   it("debounces resize handling with requestAnimationFrame", () => {
     const rafCallbacks = [];
     const requestAnimationFrame = vi.fn((callback) => {

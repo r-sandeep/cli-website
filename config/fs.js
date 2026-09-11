@@ -110,7 +110,7 @@ function getPreloadFileForCommand(cmd, args) {
     return null;
   }
 
-  if (["cat", "grep"].includes(cmd) && _REMOTE_FILES[filename]) {
+  if (["cat", "grep", "wc"].includes(cmd) && _REMOTE_FILES[filename]) {
     return filename;
   }
 

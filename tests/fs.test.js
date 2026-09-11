@@ -80,6 +80,7 @@ describe("virtual fs", () => {
     expect(getPreloadFileForCommand("grep", ["welcome.htm"])).toBe(
       "welcome.htm"
     );
+    expect(getPreloadFileForCommand("wc", ["README.md"])).toBe("README.md");
     expect(getPreloadFileForCommand("cat", ["id_rsa"])).toBeNull();
     expect(getPreloadFileForCommand("open", ["README.md"])).toBeNull();
   });
