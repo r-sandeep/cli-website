@@ -369,6 +369,26 @@ const commands = {
     }
   },
 
+  wc: function (args) {
+    const filename = args[0];
+
+    if (!filename) {
+      term.stylePrint("usage: %wc% [filename]");
+      return;
+    }
+
+    if (!_filesHere().includes(filename)) {
+      term.stylePrint(`No such file: ${filename}`);
+      return;
+    }
+
+    const contents = getFileContents(filename);
+    const lines = (contents.match(/\n/g) || []).length;
+    const words = contents.trim() ? contents.trim().split(/\s+/).length : 0;
+    const characters = [...contents].length;
+    term.writeln(`${lines} ${words} ${characters} ${filename}`);
+  },
+
   // Grepping id_rsa gets you an appropriate reaction instead.
   grep: function (args) {
     const q = args[0];

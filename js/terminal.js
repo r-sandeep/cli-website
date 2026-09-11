@@ -125,6 +125,7 @@ function runRootTerminal(term) {
             } else if (
               [
                 "cat",
+                "wc",
                 "tail",
                 "less",
                 "head",

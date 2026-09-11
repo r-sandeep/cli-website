@@ -179,4 +179,17 @@ describe("terminal-ext", () => {
     expect(term.writeln).toHaveBeenCalledWith("\r\nASCII\r\n");
     expect(env.window.ensureASCIIArt).toHaveBeenCalledWith("rootvc-square");
   });
+
+  it("preserves the unknown-command error message", () => {
+    const { extend } = loadTerminalExt({ commands: {} });
+    const term = createTerm();
+
+    extend(term);
+    term.stylePrint = vi.fn();
+    term.command("definitely-unknown");
+
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "Command not found: definitely-unknown. Try 'help' to get started."
+    );
+  });
 });

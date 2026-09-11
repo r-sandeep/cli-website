@@ -114,7 +114,13 @@ describe("apply", () => {
 // Loads the full command set with a fake terminal. `cd` is the one command with
 // real branching logic — a switch over ~, .., /home, /bin and team member names
 // — and it drives term.cwd, which the prompt renders on every keystroke.
-function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {}) {
+function loadCommands({
+  cwd = "~",
+  user = "guest",
+  team = { avidan: {} },
+  files = ["id_rsa", "welcome.htm"],
+  getFileContents = vi.fn(),
+} = {}) {
   const term = {
     cwd,
     user,
@@ -134,6 +140,13 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     portfolio: {},
     colorText: (text) => text,
     window: {},
+    _DIRS: {
+      "~": files,
+      bin: ["zsh"],
+      home: Object.keys(team).concat("guest", "root").sort(),
+      "/": ["bin", "home"],
+    },
+    getFileContents,
   });
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
@@ -142,8 +155,44 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     const [name, ...args] = line.split(" ");
     return commands[name](args);
   };
-  return { commands, term };
+  return { commands, term, getFileContents };
 }
+
+describe("wc", () => {
+  it("counts newlines, words, and Unicode code points from the file accessor", () => {
+    const contents = "alpha  beta\nemoji 😀\n";
+    const getFileContents = vi.fn(() => contents);
+    const { commands, term } = loadCommands({
+      files: ["fixture.txt"],
+      getFileContents,
+    });
+
+    commands.wc(["fixture.txt"]);
+
+    expect(getFileContents).toHaveBeenCalledTimes(1);
+    expect(getFileContents).toHaveBeenCalledWith("fixture.txt");
+    expect(term.writeln).toHaveBeenCalledWith("2 4 20 fixture.txt");
+  });
+
+  it("reports a missing current-directory file without reading it", () => {
+    const { commands, term, getFileContents } = loadCommands({ files: [] });
+
+    commands.wc(["missing.txt"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith("No such file: missing.txt");
+    expect(getFileContents).not.toHaveBeenCalled();
+  });
+
+  it("prints usage without looking up a file when no argument is given", () => {
+    const { commands, term, getFileContents } = loadCommands({ files: [] });
+
+    commands.wc([]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith("usage: %wc% [filename]");
+    expect(getFileContents).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
+  });
+});
 
 describe("cd", () => {
   // Table ported from #51 (@astonm, 2021), which never landed. The cases still
@@ -224,5 +273,14 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("advertises wc with a filename and an implemented command", () => {
+    const { commands } = loadCommands();
+
+    expect(helpContext.helpEntries["%wc% [filename]"]).toBe(
+      "count lines, words, and characters in a file"
+    );
+    expect(commands.wc).toBeTypeOf("function");
   });
 });
