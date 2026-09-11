@@ -198,7 +198,6 @@ describe("clear command interaction", () => {
     expect(
       interactive.lines().filter((line) => line === "guest:rootpc ~ $ ")
     ).toHaveLength(1);
-
   });
 
   it("retains bounded history through repeated and recalled clear commands", async () => {
@@ -233,7 +232,6 @@ describe("clear command interaction", () => {
     expect(interactive.lines().join("\n")).toContain(
       "Command not found: not-a-command. Try 'help' to get started."
     );
-
   });
 });
 
