@@ -111,6 +111,9 @@ function createInteractiveTerminal() {
         } else if (text.startsWith("\x1b[D", i)) {
           term._core.buffer.x = Math.max(0, term._core.buffer.x - 1);
           i += 3;
+        } else if (text[i] === "\x1b") {
+          const ansiEnd = text.indexOf("m", i);
+          i = ansiEnd === -1 ? i + 1 : ansiEnd + 1;
         } else {
           lines[lines.length - 1] += text[i];
           term._core.buffer.x += 1;
@@ -131,9 +134,11 @@ function createInteractiveTerminal() {
 }
 
 function loadInteractiveTerminal() {
+  const interactive = createInteractiveTerminal();
   env = createBrowserEnv({
     globals: {
       LOGO_TYPE: "ROOT",
+      term: interactive.term,
       _DIRS: { "~": [] },
       colorText: (text) => text,
       ensureASCIIArt: vi.fn(() => Promise.resolve()),
@@ -160,7 +165,6 @@ function loadInteractiveTerminal() {
     "extend",
     "runRootTerminal",
   ]);
-  const interactive = createInteractiveTerminal();
   extend(interactive.term);
   runRootTerminal(interactive.term);
   return interactive;
@@ -202,15 +206,15 @@ describe("clear command interaction", () => {
 
     await typeCommand(interactive, "echo retained");
     await typeCommand(interactive, "clear");
-    await interactive.send("\033[A");
+    await interactive.send("\x1b[A");
     expect(interactive.term.currentLine).toBe("clear");
-    await interactive.send("\033[A");
+    await interactive.send("\x1b[A");
     expect(interactive.term.currentLine).toBe("echo retained");
-    await interactive.send("\033[B");
+    await interactive.send("\x1b[B");
     expect(interactive.term.currentLine).toBe("clear");
-    await interactive.send("\033[B");
+    await interactive.send("\x1b[B");
     expect(interactive.term.currentLine).toBe("");
-    await interactive.send("\033[A");
+    await interactive.send("\x1b[A");
     expect(interactive.term.currentLine).toBe("clear");
     await interactive.send("\r");
 
