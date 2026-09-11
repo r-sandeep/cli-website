@@ -567,7 +567,7 @@ const commands = {
 
   history: function () {
     term.history.forEach((element, index) => {
-      term.stylePrint(`${1000 + index}  ${element}`);
+      term.stylePrint(`${index + 1} ${element}`);
     });
   },
 
