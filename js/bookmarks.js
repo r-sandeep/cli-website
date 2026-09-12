@@ -2,12 +2,20 @@ const BOOKMARK_STORAGE_KEY = "rootvc.bookmarks.v1";
 const BOOKMARK_LIMIT = 25;
 const BOOKMARK_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
+function _defaultBookmarkStorage() {
+  try {
+    return localStorage;
+  } catch (_) {
+    return null;
+  }
+}
+
 function createBookmarkStore(storage) {
   let activeStorage = storage;
   let bookmarks = null;
 
   try {
-    if (!activeStorage) activeStorage = localStorage;
+    if (!activeStorage) activeStorage = _defaultBookmarkStorage();
     bookmarks = _parseBookmarks(activeStorage.getItem(BOOKMARK_STORAGE_KEY));
   } catch (_) {
     // Keep failed loads distinct from a valid empty store. No operation may
