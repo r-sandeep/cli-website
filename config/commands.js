@@ -824,8 +824,9 @@ const commands = {
   },
 
   // Multi-step async application form. The terminal is locked during collection
-  // so normal keypress handling is suspended. Returns 1 to tell the main input
-  // loop not to re-render the prompt — the async IIFE does that itself when done.
+  // so normal keypress handling is suspended. Resolves to 1 after the form has
+  // settled to tell the main input loop not to re-render the prompt — the form
+  // does that itself when done.
   //
   // collectInput() resolves to: a string on submit, "" if skipped (optional
   // fields), or null on Ctrl+C. Null means the user cancelled.
@@ -837,7 +838,7 @@ const commands = {
     if (hasJob) {
       term.locked = true;
 
-      (async () => {
+      return (async () => {
         // Shared cancellation handler — restores the terminal to a usable state.
         const cancel = () => {
           term.stylePrint("\r\nApplication cancelled.");
@@ -851,22 +852,22 @@ const commands = {
         );
 
         const name = await term.collectInput("What's your name?");
-        if (!name) { cancel(); return; }
+        if (!name) { cancel(); return 1; }
 
         const email = await term.collectInput("Email address");
-        if (!email) { cancel(); return; }
+        if (!email) { cancel(); return 1; }
 
         const linkedin = await term.collectInput("LinkedIn profile URL", true);
-        if (linkedin === null) { cancel(); return; }
+        if (linkedin === null) { cancel(); return 1; }
 
         const github = await term.collectInput("GitHub username", true);
-        if (github === null) { cancel(); return; }
+        if (github === null) { cancel(); return 1; }
 
         const notes = await term.collectInput(
           "Why Root? What makes you a great fit?",
           true
         );
-        if (notes === null) { cancel(); return; }
+        if (notes === null) { cancel(); return 1; }
 
         term.stylePrint("\r\nSubmitting application...");
 
@@ -917,10 +918,8 @@ const commands = {
         term.prompt();
         term.clearCurrentLine(true);
         term.locked = false;
+        return 1;
       })();
-
-      // Return 1 synchronously so terminal.js skips its automatic prompt render.
-      return 1;
     } else if (!args || args == "" || args.length === 0) {
       term.stylePrint(
         "Please provide a job id. Use %jobs% to list all current jobs."
@@ -979,15 +978,57 @@ for (const [alias, target] of Object.entries(_aliases)) {
   commands[alias] = (args) => term.command([target, ...args].join(" ").trim());
 }
 
-// Keep `man` compatible with its long-standing `tldr` alias while providing a
-// focused manual topic for terminal editing.
+// Pipeline filters are stages rather than replacements for the similarly named
+// standalone commands. Give them focused manual pages while retaining tldr as
+// man's fallback for portfolio companies and every other topic.
+const _pipelineManuals = {
+  pipe: [
+    "%PIPE(1)% — filter terminal command output",
+    "Usage: COMMAND | FILTER [| FILTER ...]",
+    "Stages run from left to right. A filter with no input prints nothing.",
+    "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  piping: [
+    "%PIPE(1)% — filter terminal command output",
+    "Usage: COMMAND | FILTER [| FILTER ...]",
+    "Stages run from left to right. A filter with no input prints nothing.",
+    "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  grep: [
+    "%GREP(1)% — retain lines containing a literal substring",
+    "Usage: COMMAND | %grep% [-ivn] PATTERN",
+    "-i ignores case; -v inverts the match; -n prefixes the incoming 1-based line number.",
+  ],
+  head: [
+    "%HEAD(1)% — retain the first output lines",
+    "Usage: COMMAND | %head% [N]",
+    "N defaults to 10 and must be a positive base-10 integer.",
+  ],
+  tail: [
+    "%TAIL(1)% — retain the last output lines",
+    "Usage: COMMAND | %tail% [N]",
+    "N defaults to 10 and must be a positive base-10 integer.",
+  ],
+  wc: [
+    "%WC(1)% — count output lines",
+    "Usage: COMMAND | %wc% -l",
+  ],
+};
+
+// Keep `man` compatible with its long-standing `tldr` alias while providing focused
+// manual pages for the pipeline filters and for terminal editing shortcuts.
 commands.man = function (args) {
-  if (args.length === 1 && args[0].toLowerCase() === "shortcuts") {
+  const topic = (args[0] || "").toLowerCase();
+  if (args.length === 1 && topic === "shortcuts") {
     term.stylePrint("Terminal editing shortcuts:");
     Object.entries(shortcuts).forEach(function (kv) {
       term.stylePrint(`${kv[0]}: ${kv[1]}`);
     });
     return;
   }
-  term.command(["tldr", ...args].join(" ").trim());
+  const manual = _pipelineManuals[topic];
+  if (!manual) {
+    return term.command(["tldr", ...args].join(" ").trim());
+  }
+  manual.forEach((line) => term.stylePrint(line));
 };

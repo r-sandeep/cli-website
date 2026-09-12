@@ -10,6 +10,12 @@ const shortcuts = {
 
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "PIPELINES": "pipe command output through filters from left to right",
+  "  COMMAND | %grep% [-ivn] PATTERN": "keep literal matching lines (-i case-insensitive, -v invert, -n number)",
+  "  COMMAND | %head% [N]": "keep the first N lines (default: 10; N must be positive)",
+  "  COMMAND | %tail% [N]": "keep the last N lines (default: 10; N must be positive)",
+  "  COMMAND | %wc% -l": "print the number of output lines",
+  "  %whois% | %grep% -i root | %head% 3": "example of a chained pipeline",
   "%whois%": "list all partners",
   "%whois% [partner]": "learn about a partner",
   "%whois% root": "learn about us",

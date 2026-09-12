@@ -1,6 +1,24 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Output pipelines
+
+Pipe the output of any terminal command through one or more filters with
+`COMMAND | FILTER [| FILTER ...]`. Filters run from left to right and do not
+replace the existing standalone commands with the same names.
+
+- `COMMAND | grep PATTERN` keeps lines containing the literal substring.
+  Add `-i` for case-insensitive matching, `-v` to invert the match, or `-n` to
+  prefix retained lines with their 1-based incoming line number. Flags may be
+  combined, as in `grep -ivn PATTERN`.
+- `COMMAND | head [N]` keeps the first N lines. N defaults to 10.
+- `COMMAND | tail [N]` keeps the last N lines. N defaults to 10.
+- `COMMAND | wc -l` prints the number of output lines.
+
+For example, `whois | grep -i root | head 3` chains three stages. Run
+`man pipe`, `man grep`, `man head`, `man tail`, or `man wc` in the terminal for
+the corresponding manual page.
+
 ## Terminal editing shortcuts
 
 - **Alt+Left** — move to the start of the previous word
