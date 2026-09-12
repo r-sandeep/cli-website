@@ -114,7 +114,7 @@ describe("apply", () => {
 // Loads the full command set with a fake terminal. `cd` is the one command with
 // real branching logic — a switch over ~, .., /home, /bin and team member names
 // — and it drives term.cwd, which the prompt renders on every keystroke.
-function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {}) {
+function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} }, help = {} } = {}) {
   const term = {
     cwd,
     user,
@@ -130,7 +130,7 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     jobs: productionJobs,
     firm: { blurb: "", email: "hello@example.com" },
     team,
-    help: {},
+    help,
     portfolio: {},
     colorText: (text) => text,
     window: {},
@@ -224,5 +224,59 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("documents pipeline syntax, every filter, flags, defaults, and chaining", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help();
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("PIPELINES");
+    expect(output).toContain("COMMAND | %grep% [-ivn] PATTERN");
+    expect(output).toContain("-i case-insensitive, -v invert, -n number");
+    expect(output).toContain("COMMAND | %head% [N]");
+    expect(output).toContain("COMMAND | %tail% [N]");
+    expect(output).toContain("default: 10");
+    expect(output).toContain("COMMAND | %wc% -l");
+    expect(output).toContain("%whois% | %grep% -i root | %head% 3");
+  });
+});
+
+describe("pipeline manual pages preserve standalone commands", () => {
+  it.each([
+    ["pipe", "COMMAND | FILTER [| FILTER ...]"],
+    ["grep", "COMMAND | %grep% [-ivn] PATTERN"],
+    ["head", "COMMAND | %head% [N]"],
+    ["tail", "COMMAND | %tail% [N]"],
+    ["wc", "COMMAND | %wc% -l"],
+  ])("documents man %s", (topic, expected) => {
+    const { commands, term } = loadCommands();
+    commands.man([topic]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {
+    const { commands } = loadCommands();
+    commands.tldr = vi.fn();
+
+    commands.man(["portfolio_company"]);
+    expect(commands.tldr).toHaveBeenLastCalledWith(["portfolio_company"]);
+    commands.man(["unknown_topic"]);
+    expect(commands.tldr).toHaveBeenLastCalledWith(["unknown_topic"]);
+  });
+
+  it("keeps standalone head and tail as cat aliases and woman as a tldr alias", () => {
+    const { commands } = loadCommands();
+    commands.cat = vi.fn();
+    commands.tldr = vi.fn();
+
+    commands.head(["README.md"]);
+    expect(commands.cat).toHaveBeenCalledWith(["README.md"]);
+    commands.tail(["welcome.htm"]);
+    expect(commands.cat).toHaveBeenCalledWith(["welcome.htm"]);
+    commands.woman(["root"]);
+    expect(commands.tldr).toHaveBeenCalledWith(["root"]);
+    expect(typeof commands.grep).toBe("function");
+    expect(commands.grep).not.toBe(commands.man);
   });
 });
