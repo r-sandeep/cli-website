@@ -973,3 +973,49 @@ const _aliases = {
 for (const [alias, target] of Object.entries(_aliases)) {
   commands[alias] = (args) => term.command([target, ...args].join(" ").trim());
 }
+
+// Pipeline filters are stages rather than replacements for the similarly named
+// standalone commands. Give them focused manual pages while retaining tldr as
+// man's fallback for portfolio companies and every other topic.
+const _pipelineManuals = {
+  pipe: [
+    "%PIPE(1)% — filter terminal command output",
+    "Usage: COMMAND | FILTER [| FILTER ...]",
+    "Stages run from left to right. A filter with no input prints nothing.",
+    "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  piping: [
+    "%PIPE(1)% — filter terminal command output",
+    "Usage: COMMAND | FILTER [| FILTER ...]",
+    "Stages run from left to right. A filter with no input prints nothing.",
+    "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  grep: [
+    "%GREP(1)% — retain lines containing a literal substring",
+    "Usage: COMMAND | %grep% [-ivn] PATTERN",
+    "-i ignores case; -v inverts the match; -n prefixes the incoming 1-based line number.",
+  ],
+  head: [
+    "%HEAD(1)% — retain the first output lines",
+    "Usage: COMMAND | %head% [N]",
+    "N defaults to 10 and must be a positive base-10 integer.",
+  ],
+  tail: [
+    "%TAIL(1)% — retain the last output lines",
+    "Usage: COMMAND | %tail% [N]",
+    "N defaults to 10 and must be a positive base-10 integer.",
+  ],
+  wc: [
+    "%WC(1)% — count output lines",
+    "Usage: COMMAND | %wc% -l",
+  ],
+};
+
+commands.man = function (args) {
+  const topic = (args[0] || "").toLowerCase();
+  const manual = _pipelineManuals[topic];
+  if (!manual) {
+    return term.command(["tldr", ...args].join(" ").trim());
+  }
+  manual.forEach((line) => term.stylePrint(line));
+};
