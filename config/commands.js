@@ -84,6 +84,11 @@ const commands = {
         term.stylePrint(desc);
       }
     });
+    term.stylePrint("");
+    term.stylePrint("Terminal editing shortcuts (see %man shortcuts%):");
+    Object.entries(shortcuts).forEach(function (kv) {
+      term.stylePrint(`${kv[0]}: ${kv[1]}`);
+    });
   },
 
   // Displays bio and ASCII art portrait for a team member, or the firm blurb.
@@ -1010,8 +1015,17 @@ const _pipelineManuals = {
   ],
 };
 
+// Keep `man` compatible with its long-standing `tldr` alias while providing focused
+// manual pages for the pipeline filters and for terminal editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
+  if (args.length === 1 && topic === "shortcuts") {
+    term.stylePrint("Terminal editing shortcuts:");
+    Object.entries(shortcuts).forEach(function (kv) {
+      term.stylePrint(`${kv[0]}: ${kv[1]}`);
+    });
+    return;
+  }
   const manual = _pipelineManuals[topic];
   if (!manual) {
     return term.command(["tldr", ...args].join(" ").trim());
