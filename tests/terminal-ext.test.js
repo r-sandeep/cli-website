@@ -53,6 +53,99 @@ afterEach(() => {
 });
 
 describe("terminal-ext", () => {
+  it("hydrates only valid persisted aliases, including prototype-shaped names", () => {
+    const { extend } = loadTerminalExt();
+    env.window.localStorage.setItem(
+      "rootvc.aliases",
+      JSON.stringify([
+        ["zebra", "echo last"],
+        ["constructor", "echo constructor"],
+        ["__proto__", "echo proto"],
+        ["bad-name", "ignored"],
+        ["missing-value"],
+        ["wrong-value", 42],
+      ])
+    );
+    const term = createTerm();
+
+    extend(term);
+
+    expect(term.getAliases()).toEqual([
+      ["__proto__", "echo proto"],
+      ["constructor", "echo constructor"],
+      ["zebra", "echo last"],
+    ]);
+    expect(term.getAlias("constructor")).toBe("echo constructor");
+    expect(term.getAlias("__proto__")).toBe("echo proto");
+  });
+
+  it.each(["not json", JSON.stringify({ alias: "echo nope" })])(
+    "starts with an empty alias map for malformed stored payload %s",
+    (payload) => {
+      const { extend } = loadTerminalExt();
+      env.window.localStorage.setItem("rootvc.aliases", payload);
+      const term = createTerm();
+
+      expect(() => extend(term)).not.toThrow();
+      expect(term.getAliases()).toEqual([]);
+    }
+  );
+
+  it("persists complete snapshots before committing define, redefine, and removal", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+
+    expect(term.defineAlias("constructor", "echo one")).toBe(true);
+    expect(term.defineAlias("Alpha", "echo alpha")).toBe(true);
+    expect(term.defineAlias("constructor", "echo two")).toBe(true);
+    expect(term.removeAlias("Alpha")).toBe(true);
+
+    expect(term.getAliases()).toEqual([["constructor", "echo two"]]);
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["constructor", "echo two"],
+    ]);
+
+    const reloaded = createTerm();
+    extend(reloaded);
+    expect(reloaded.getAliases()).toEqual([["constructor", "echo two"]]);
+  });
+
+  it("does not write or mutate for invalid and unknown state operations", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("kept", "echo safe");
+    const setItem = vi.spyOn(env.window.localStorage, "setItem");
+    setItem.mockClear();
+
+    expect(term.defineAlias("bad-name", "echo nope")).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+
+    expect(term.removeAlias("missing")).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+  });
+
+  it("leaves memory unchanged when storage rejects a mutation", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("kept", "echo safe");
+    vi.spyOn(env.window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    expect(() => term.defineAlias("newAlias", "echo new")).toThrow(
+      "storage unavailable"
+    );
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+
+    expect(() => term.removeAlias("kept")).toThrow("storage unavailable");
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+  });
+
   it("normalizes preload-only aliases before resolving assets", async () => {
     const { extend } = loadTerminalExt({
       getASCIIArtIdForCommand: vi.fn(() => "lee"),

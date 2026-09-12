@@ -22,6 +22,76 @@ const extend = (term) => {
   term.historyCursor = -1;
   term.busy = false;
 
+  // User aliases are closure-owned so command code can only change them through
+  // the storage-first methods below. Entry arrays preserve prototype-shaped
+  // names such as `constructor` and `__proto__` without object-key surprises.
+  const aliasStorageKey = "rootvc.aliases";
+  const aliasNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  let userAliases = new Map();
+
+  try {
+    const storedAliases = window.localStorage.getItem(aliasStorageKey);
+    if (storedAliases !== null) {
+      const entries = JSON.parse(storedAliases);
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          if (
+            Array.isArray(entry) &&
+            entry.length === 2 &&
+            typeof entry[0] === "string" &&
+            aliasNamePattern.test(entry[0]) &&
+            typeof entry[1] === "string"
+          ) {
+            userAliases.set(entry[0], entry[1]);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    // Storage can be unavailable or contain malformed JSON. In either case the
+    // terminal starts with a safe empty alias set rather than failing startup.
+    userAliases = new Map();
+  }
+
+  const persistAliases = (nextAliases) => {
+    const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+    window.localStorage.setItem(aliasStorageKey, JSON.stringify(entries));
+  };
+
+  term.getAliases = () =>
+    Array.from(userAliases.entries()).sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+
+  term.getAlias = (name) =>
+    userAliases.has(name) ? userAliases.get(name) : undefined;
+
+  term.defineAlias = (name, value) => {
+    if (!aliasNamePattern.test(name) || typeof value !== "string") {
+      return false;
+    }
+
+    const nextAliases = new Map(userAliases);
+    nextAliases.set(name, value);
+    persistAliases(nextAliases);
+    userAliases = nextAliases;
+    return true;
+  };
+
+  term.removeAlias = (name) => {
+    if (!aliasNamePattern.test(name) || !userAliases.has(name)) {
+      return false;
+    }
+
+    const nextAliases = new Map(userAliases);
+    nextAliases.delete(name);
+    persistAliases(nextAliases);
+    userAliases = nextAliases;
+    return true;
+  };
+
   // Tab completion state — reset on any non-tab keypress.
   term.tabIndex = 0;
   term.tabOptions = [];

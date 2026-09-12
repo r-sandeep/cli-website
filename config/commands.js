@@ -620,8 +620,76 @@ const commands = {
     term.stylePrint("Come on, don't mess with our immaculate file system.");
   },
 
-  alias: function () {
-    term.stylePrint("Just call me HAL.");
+  alias: function (args) {
+    const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+    if (args.length === 0) {
+      for (const [name, value] of term.getAliases()) {
+        term.stylePrint(`${name}=${value}`);
+      }
+      return;
+    }
+
+    const equalsAt = args[0].indexOf("=");
+    if (equalsAt === -1) {
+      if (args.length !== 1) {
+        term.stylePrint("alias: invalid form. Use alias name=value or alias name.");
+        return;
+      }
+
+      const name = args[0];
+      if (!namePattern.test(name)) {
+        term.stylePrint(`alias: invalid name: ${name}`);
+        return;
+      }
+
+      const value = term.getAlias(name);
+      if (typeof value === "undefined") {
+        term.stylePrint(`alias: ${name}: not defined`);
+        return;
+      }
+
+      term.stylePrint(`${name}=${value}`);
+      return;
+    }
+
+    const name = args[0].slice(0, equalsAt);
+    if (!namePattern.test(name)) {
+      term.stylePrint(`alias: invalid name: ${name || "(empty)"}`);
+      return;
+    }
+
+    const value = [args[0].slice(equalsAt + 1), ...args.slice(1)].join(" ");
+    try {
+      term.defineAlias(name, value);
+    } catch (error) {
+      term.stylePrint("alias: unable to save aliases; no changes were made");
+    }
+  },
+
+  unalias: function (args) {
+    const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    if (args.length !== 1) {
+      term.stylePrint("unalias: invalid form. Use unalias name.");
+      return;
+    }
+
+    const name = args[0];
+    if (!namePattern.test(name)) {
+      term.stylePrint(`unalias: invalid name: ${name}`);
+      return;
+    }
+
+    if (typeof term.getAlias(name) === "undefined") {
+      term.stylePrint(`unalias: ${name}: not defined`);
+      return;
+    }
+
+    try {
+      term.removeAlias(name);
+    } catch (error) {
+      term.stylePrint("unalias: unable to save aliases; no changes were made");
+    }
   },
 
   df: function () {
