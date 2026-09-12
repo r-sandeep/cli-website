@@ -27,6 +27,8 @@ const extend = (term) => {
   // names such as `constructor` and `__proto__` without object-key surprises.
   const aliasStorageKey = "rootvc.aliases";
   const aliasNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const compareAliasNames = (left, right) =>
+    left < right ? -1 : left > right ? 1 : 0;
   let userAliases = new Map();
 
   try {
@@ -55,14 +57,14 @@ const extend = (term) => {
 
   const persistAliases = (nextAliases) => {
     const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
-      left.localeCompare(right)
+      compareAliasNames(left, right)
     );
     window.localStorage.setItem(aliasStorageKey, JSON.stringify(entries));
   };
 
   term.getAliases = () =>
     Array.from(userAliases.entries()).sort(([left], [right]) =>
-      left.localeCompare(right)
+      compareAliasNames(left, right)
     );
 
   term.getAlias = (name) =>

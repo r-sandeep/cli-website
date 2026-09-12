@@ -45,6 +45,35 @@ function createTerm(overrides = {}) {
   return Object.assign(term, overrides);
 }
 
+function loadAliasTerminal() {
+  const term = createTerm();
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      team: {},
+      term,
+    },
+  });
+  env.loadScripts(["config/commands.js", "js/terminal-ext.js"]);
+  const { extend } = env.exportValues(["extend"]);
+  extend(term);
+  return { extend, term };
+}
+
 afterEach(() => {
   if (env) {
     env.cleanup();
@@ -91,6 +120,17 @@ describe("terminal-ext", () => {
     }
   );
 
+  it("starts safely when reading browser storage throws", () => {
+    const { extend } = loadTerminalExt();
+    vi.spyOn(env.window.Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    const term = createTerm();
+
+    expect(() => extend(term)).not.toThrow();
+    expect(term.getAliases()).toEqual([]);
+  });
+
   it("persists complete snapshots before committing define, redefine, and removal", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -116,7 +156,7 @@ describe("terminal-ext", () => {
     const term = createTerm();
     extend(term);
     term.defineAlias("kept", "echo safe");
-    const setItem = vi.spyOn(env.window.localStorage, "setItem");
+    const setItem = vi.spyOn(env.window.Storage.prototype, "setItem");
     setItem.mockClear();
 
     expect(term.defineAlias("bad-name", "echo nope")).toBe(false);
@@ -133,7 +173,7 @@ describe("terminal-ext", () => {
     const term = createTerm();
     extend(term);
     term.defineAlias("kept", "echo safe");
-    vi.spyOn(env.window.localStorage, "setItem").mockImplementation(() => {
+    vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
 
@@ -144,6 +184,68 @@ describe("terminal-ext", () => {
 
     expect(() => term.removeAlias("kept")).toThrow("storage unavailable");
     expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+  });
+
+  it("preserves state across the complete alias and unalias command sequence", () => {
+    const { extend, term } = loadAliasTerminal();
+    const setItem = vi.spyOn(env.window.Storage.prototype, "setItem");
+
+    term.command("alias");
+    expect(term.writeln).not.toHaveBeenCalled();
+
+    term.command("alias zebra=echo first");
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["zebra", "echo first"],
+    ]);
+
+    term.command("alias zebra=echo replaced");
+    expect(term.getAlias("zebra")).toBe("echo replaced");
+
+    setItem.mockClear();
+    term.command("alias bad-name=echo nope");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "alias: invalid name: bad-name"
+    );
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAlias("zebra")).toBe("echo replaced");
+
+    term.command("unalias missing");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "unalias: missing: not defined"
+    );
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAlias("zebra")).toBe("echo replaced");
+
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    expect(reloaded.getAlias("zebra")).toBe("echo replaced");
+
+    reloaded.command("unalias zebra");
+    expect(reloaded.getAliases()).toEqual([]);
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual(
+      []
+    );
+
+    const secondReload = createTerm();
+    env.window.term = secondReload;
+    extend(secondReload);
+    expect(secondReload.getAliases()).toEqual([]);
+  });
+
+  it("reports a failed unalias storage write without changing memory", () => {
+    const { term } = loadAliasTerminal();
+    term.command("alias kept=echo safe");
+    vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    term.command("unalias kept");
+
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "unalias: unable to save aliases; no changes were made"
+    );
+    expect(term.getAlias("kept")).toBe("echo safe");
   });
 
   it("normalizes preload-only aliases before resolving assets", async () => {

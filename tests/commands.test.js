@@ -115,6 +115,7 @@ describe("apply", () => {
 // real branching logic — a switch over ~, .., /home, /bin and team member names
 // — and it drives term.cwd, which the prompt renders on every keystroke.
 function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {}) {
+  const aliases = new Map();
   const term = {
     cwd,
     user,
@@ -124,6 +125,19 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     openURL: vi.fn(),
     displayURL: vi.fn(),
     cols: 100,
+    defineAlias: vi.fn((name, value) => {
+      aliases.set(name, value);
+      return true;
+    }),
+    getAlias: vi.fn((name) =>
+      aliases.has(name) ? aliases.get(name) : undefined
+    ),
+    getAliases: vi.fn(() =>
+      Array.from(aliases.entries()).sort(([left], [right]) =>
+        left < right ? -1 : left > right ? 1 : 0
+      )
+    ),
+    removeAlias: vi.fn((name) => aliases.delete(name)),
   };
   const context = vm.createContext({
     term,
@@ -144,6 +158,95 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
   };
   return { commands, term };
 }
+
+describe("alias management", () => {
+  it("defines, replaces, lists, and queries exact-case aliases", () => {
+    const { commands, term } = loadCommands();
+
+    commands.alias(["zebra=echo", "last"]);
+    expect(term.defineAlias).toHaveBeenLastCalledWith("zebra", "echo last");
+    commands.alias(["constructor=echo", "constructor"]);
+    expect(term.defineAlias).toHaveBeenLastCalledWith(
+      "constructor",
+      "echo constructor"
+    );
+    commands.alias(["__proto__=echo", "proto"]);
+    expect(term.defineAlias).toHaveBeenLastCalledWith("__proto__", "echo proto");
+    commands.alias(["zebra=echo", "replaced"]);
+    expect(term.defineAlias).toHaveBeenLastCalledWith("zebra", "echo replaced");
+
+    term.stylePrint.mockClear();
+    commands.alias([]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "__proto__=echo proto",
+      "constructor=echo constructor",
+      "zebra=echo replaced",
+    ]);
+
+    term.stylePrint.mockClear();
+    commands.alias(["constructor"]);
+    expect(term.stylePrint).toHaveBeenCalledOnce();
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "constructor=echo constructor"
+    );
+  });
+
+  it("removes an alias and reports an unknown name without mutation", () => {
+    const { commands, term } = loadCommands();
+    commands.alias(["kept=echo", "safe"]);
+    commands.alias(["gone=echo", "remove"]);
+
+    commands.unalias(["gone"]);
+    expect(term.removeAlias).toHaveBeenCalledOnce();
+    expect(term.removeAlias).toHaveBeenCalledWith("gone");
+    expect(term.getAlias("gone")).toBeUndefined();
+
+    term.removeAlias.mockClear();
+    commands.unalias(["missing"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "unalias: missing: not defined"
+    );
+    expect(term.removeAlias).not.toHaveBeenCalled();
+    expect(term.getAlias("kept")).toBe("echo safe");
+  });
+
+  it("rejects invalid names and malformed forms before state mutation", () => {
+    for (const args of [["bad-name=value"], ["9name=value"], ["=value"], ["name", "value"]]) {
+      const { commands, term } = loadCommands();
+      commands.alias(args);
+      expect(term.stylePrint).toHaveBeenCalledWith(
+        expect.stringContaining("alias: invalid")
+      );
+      expect(term.defineAlias).not.toHaveBeenCalled();
+      expect(term.removeAlias).not.toHaveBeenCalled();
+      expect(term.getAliases()).toEqual([]);
+    }
+
+    for (const args of [[], ["bad-name"], ["one", "two"]]) {
+      const { commands, term } = loadCommands();
+      commands.unalias(args);
+      expect(term.stylePrint).toHaveBeenCalledWith(
+        expect.stringContaining("unalias: invalid")
+      );
+      expect(term.defineAlias).not.toHaveBeenCalled();
+      expect(term.removeAlias).not.toHaveBeenCalled();
+      expect(term.getAliases()).toEqual([]);
+    }
+  });
+
+  it("reports persistence failures while preserving terminal state", () => {
+    const { commands, term } = loadCommands();
+    term.defineAlias.mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    commands.alias(["safe=echo", "safe"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "alias: unable to save aliases; no changes were made"
+    );
+    expect(term.getAliases()).toEqual([]);
+  });
+});
 
 describe("cd", () => {
   // Table ported from #51 (@astonm, 2021), which never landed. The cases still
