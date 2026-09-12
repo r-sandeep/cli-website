@@ -264,8 +264,16 @@ describe("terminal-ext", () => {
     expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
 
     term.runDeepLink = vi.fn();
+    term.history = ["historical mutation"];
+    term.command = vi.fn(() => term.environment.set("KEEP", "replayed"));
+    const persistedBeforeResize = env.window.localStorage.getItem(
+      environmentStorageKey
+    );
     term.resizeListener();
     expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedBeforeResize
+    );
   });
 
   it("normalizes preload-only aliases before resolving assets", async () => {

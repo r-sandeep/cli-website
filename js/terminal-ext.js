@@ -80,7 +80,13 @@ const extend = (term) => {
   }
 
   const environmentResult = (ok, code, message = "") => ({ ok, code, message });
+  let environmentPersistenceEnabled = true;
   const persistEnvironmentCandidate = (candidate) => {
+    if (!environmentPersistenceEnabled) {
+      environmentVariables = candidate;
+      return environmentResult(true, "updated");
+    }
+
     try {
       const serialized = serializeEnvironment(candidate);
       window.localStorage.setItem(ENV_STORAGE_KEY, serialized);
@@ -144,6 +150,19 @@ const extend = (term) => {
       return persistEnvironmentCandidate(candidate);
     },
   });
+
+  const replayWithoutEnvironmentSideEffects = (replay) => {
+    const activeVariables = environmentVariables;
+    const previousPersistenceSetting = environmentPersistenceEnabled;
+    environmentVariables = new Map(activeVariables);
+    environmentPersistenceEnabled = false;
+    try {
+      replay();
+    } finally {
+      environmentVariables = activeVariables;
+      environmentPersistenceEnabled = previousPersistenceSetting;
+    }
+  };
 
   // Tab completion state — reset on any non-tab keypress.
   term.tabIndex = 0;
@@ -476,10 +495,12 @@ const extend = (term) => {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
     term.runDeepLink({ replay: true });
-    for (const c of term.history) {
-      term.prompt("\r\n", ` ${c}\r\n`);
-      term.command(c);
-    }
+    replayWithoutEnvironmentSideEffects(() => {
+      for (const c of term.history) {
+        term.prompt("\r\n", ` ${c}\r\n`);
+        term.command(c);
+      }
+    });
     term.prompt();
     term.scrollToBottom();
     term._initialized = true;
