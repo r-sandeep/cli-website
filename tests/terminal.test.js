@@ -242,6 +242,64 @@ describe("runRootTerminal", () => {
     expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
+  it("handles physical Alt+KeyD independently of the layout-derived key", () => {
+    const open = vi.fn();
+    const { runRootTerminal } = loadTerminalScript({ open });
+    const editing = createEditingTerm({ line: "keep remove   tail", cursor: 5 });
+    const { term } = editing;
+    runRootTerminal(term);
+    const initialURL = env.window.location.href;
+    term.write.mockClear();
+    const preventDefault = vi.fn();
+
+    const handled = term._customKeyHandler(
+      keyEvent({ altKey: true, code: "KeyD", key: "∂" }, preventDefault)
+    );
+
+    expect(handled).toBe(false);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe("keep tail");
+    expect(editing.cursor()).toBe(5);
+    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
+      "\x1b[D".repeat(5),
+      "keep tail\x1b[K",
+      "\x1b[D".repeat(4),
+    ]);
+    expect(term.currentLine).not.toContain("∂");
+    expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.init).toHaveBeenCalledTimes(1);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.runDeepLink).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+    expect(env.window.location.href).toBe(initialURL);
+  });
+
+  it.each([
+    ["Shift", { altKey: true, code: "KeyD", key: "∂", shiftKey: true }],
+    ["Ctrl", { altKey: true, code: "KeyD", ctrlKey: true, key: "∂" }],
+    ["Meta", { altKey: true, code: "KeyD", key: "∂", metaKey: true }],
+    ["keyup", { altKey: true, code: "KeyD", key: "∂", type: "keyup" }],
+    ["another physical key", { altKey: true, code: "KeyX", key: "d" }],
+  ])("rejects physical Alt+D near miss: %s", (_name, chord) => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line: "keep remove", cursor: 5 });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+    const preventDefault = vi.fn();
+
+    const handled = term._customKeyHandler(keyEvent(chord, preventDefault));
+
+    expect(handled).toBe(true);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe("keep remove");
+    expect(editing.cursor()).toBe(5);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["Alt+Left crosses an all-space line", { altKey: true, key: "ArrowLeft" }, "   ", 3, "   ", 0],
     ["Alt+Right crosses an all-space line", { altKey: true, key: "ArrowRight" }, "   ", 0, "   ", 3],

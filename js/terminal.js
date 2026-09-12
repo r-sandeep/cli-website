@@ -100,7 +100,12 @@ function runRootTerminal(term) {
     if (event.altKey) {
       if (event.key === "ArrowLeft") return "previousWord";
       if (event.key === "ArrowRight") return "nextWord";
-      if (event.key.toLowerCase() === "d") return "deleteNextWord";
+      if (
+        event.code === "KeyD" ||
+        (!event.code && event.key.toLowerCase() === "d")
+      ) {
+        return "deleteNextWord";
+      }
     }
 
     if (event.ctrlKey) {
