@@ -1,5 +1,9 @@
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%bookmark% add NAME": "save the current directory as NAME",
+  "%bookmark% list": "list saved directory bookmarks",
+  "%bookmark% remove NAME": "remove a saved directory bookmark",
+  "%go% NAME": "go to the directory saved as NAME",
   "%whois%": "list all partners",
   "%whois% [partner]": "learn about a partner",
   "%whois% root": "learn about us",

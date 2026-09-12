@@ -1,6 +1,18 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Directory bookmarks
+
+The terminal supports persistent named bookmarks for quick directory navigation:
+
+- `bookmark add NAME` saves the current directory.
+- `bookmark list` lists saved bookmarks as `NAME -> path`.
+- `bookmark remove NAME` removes a saved bookmark.
+- `go NAME` moves to the directory saved under `NAME`.
+
+`NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
+browser storage, with a maximum of 25 saved bookmarks.
+
 [![Netlify Status](https://api.netlify.com/api/v1/badges/f3bfb854-9bc6-40a7-8d4c-2cccd3850764/deploy-status)](https://app.netlify.com/sites/rootvc-cli-website/deploys)
 
 ## Basic Commands

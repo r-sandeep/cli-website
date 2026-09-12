@@ -129,6 +129,7 @@ function loadCommands({
   user = "guest",
   team = { avidan: {} },
   storage = createMemoryStorage(),
+  help = {},
 } = {}) {
   const location = {
     assign: vi.fn(),
@@ -154,7 +155,7 @@ function loadCommands({
     jobs: productionJobs,
     firm: { blurb: "", email: "hello@example.com" },
     team,
-    help: {},
+    help,
     portfolio: {},
     colorText: (text) => text,
     localStorage: storage,
@@ -459,5 +460,20 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("advertises every bookmark and navigation form", () => {
+    expect(helpContext.helpEntries["%bookmark% add NAME"]).toContain("save");
+    expect(helpContext.helpEntries["%bookmark% list"]).toContain("list");
+    expect(helpContext.helpEntries["%bookmark% remove NAME"]).toContain("remove");
+    expect(helpContext.helpEntries["%go% NAME"]).toContain("NAME");
+
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help([]);
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output.some((line) => line.includes("%bookmark% add NAME"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
+    expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
   });
 });
