@@ -70,6 +70,38 @@ function keyEvent(chord, preventDefault = vi.fn()) {
   };
 }
 
+function createEditingTerm({ line = "", cursor = line.length, history = [] } = {}) {
+  let visualCursor = cursor;
+  const term = createTerm({
+    currentLine: line,
+    history: [...history],
+    pos: vi.fn(() => visualCursor),
+  });
+
+  term.write = vi.fn((output) => {
+    for (const token of output.matchAll(/\x1b\[([CDK])|([\s\S])/g)) {
+      if (token[1] === "C") visualCursor++;
+      else if (token[1] === "D") visualCursor--;
+      else if (!token[1]) visualCursor++;
+    }
+  });
+  term.clearCurrentLine = vi.fn((goToEndOfHistory = false) => {
+    term.currentLine = "";
+    visualCursor = 0;
+    if (goToEndOfHistory) term.historyCursor = -1;
+  });
+  term.setCurrentLine = vi.fn((newLine, preserveCursor = false) => {
+    const oldLength = term.currentLine.length;
+    const oldCursor = visualCursor;
+    term.currentLine = newLine;
+    visualCursor = preserveCursor
+      ? Math.max(0, newLine.length - (oldLength - oldCursor))
+      : newLine.length;
+  });
+
+  return { term, cursor: () => visualCursor };
+}
+
 afterEach(() => {
   if (env) {
     env.cleanup();
@@ -185,6 +217,194 @@ describe("runRootTerminal", () => {
       expect(term.write).not.toHaveBeenCalled();
       expect(term.executeCommandLine).not.toHaveBeenCalled();
     }
+  });
+
+  it.each([
+    ["Alt+Left crosses an all-space line", { altKey: true, key: "ArrowLeft" }, "   ", 3, "   ", 0],
+    ["Alt+Right crosses an all-space line", { altKey: true, key: "ArrowRight" }, "   ", 0, "   ", 3],
+    ["Alt+Left stops after leading spaces", { altKey: true, key: "ArrowLeft" }, "   word", 7, "   word", 3],
+    ["Alt+Right crosses trailing spaces", { altKey: true, key: "ArrowRight" }, "word   ", 0, "word   ", 7],
+    ["Alt+Right keeps punctuation in its word", { altKey: true, key: "ArrowRight" }, "one.two   next", 0, "one.two   next", 10],
+    ["Alt+Left keeps punctuation in its word", { altKey: true, key: "ArrowLeft" }, "one.two   next", 7, "one.two   next", 0],
+    ["Alt+Left stays at zero", { altKey: true, key: "ArrowLeft" }, "one", 0, "one", 0],
+    ["Alt+Right stays at line length", { altKey: true, key: "ArrowRight" }, "one", 3, "one", 3],
+    ["Ctrl+W removes all preceding spaces", { ctrlKey: true, key: "w" }, "   ", 3, "", 0],
+    ["Alt+D removes only leading spaces", { altKey: true, key: "d" }, "   word", 0, "word", 0],
+    ["Ctrl+W crosses trailing spaces and the word", { ctrlKey: true, key: "w" }, "word   ", 7, "", 0],
+    ["Alt+D treats punctuation as word content", { altKey: true, key: "d" }, "one.two   next", 0, "next", 0],
+    ["Ctrl+A stays at zero", { ctrlKey: true, key: "a" }, "one", 0, "one", 0],
+    ["Ctrl+E stays at line length", { ctrlKey: true, key: "e" }, "one", 3, "one", 3],
+    ["Ctrl+U clears an all-space line", { ctrlKey: true, key: "u" }, "   ", 1, "", 0],
+  ])("handles boundary case: %s", (_name, chord, line, start, result, end) => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line, cursor: start });
+
+    runRootTerminal(editing.term);
+    const preventDefault = vi.fn();
+    expect(editing.term._customKeyHandler(keyEvent(chord, preventDefault))).toBe(false);
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(editing.term.currentLine).toBe(result);
+    expect(editing.cursor()).toBe(end);
+    expect(editing.term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("suppresses every empty-input shortcut without any terminal or page side effect", () => {
+    const open = vi.fn();
+    const { runRootTerminal } = loadTerminalScript({ open });
+    const editing = createEditingTerm();
+    const { term } = editing;
+    runRootTerminal(term);
+    const initialURL = env.window.location.href;
+
+    for (const chord of [
+      { altKey: true, key: "ArrowLeft" },
+      { altKey: true, key: "ArrowRight" },
+      { ctrlKey: true, key: "w" },
+      { altKey: true, key: "d" },
+      { ctrlKey: true, key: "a" },
+      { ctrlKey: true, key: "e" },
+      { ctrlKey: true, key: "u" },
+    ]) {
+      const preventDefault = vi.fn();
+      const writesBefore = term.write.mock.calls.length;
+      const promptsBefore = term.prompt.mock.calls.length;
+      const deepLinksBefore = term.runDeepLink.mock.calls.length;
+
+      expect(term._customKeyHandler(keyEvent(chord, preventDefault))).toBe(false);
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(term.currentLine).toBe("");
+      expect(editing.cursor()).toBe(0);
+      expect(term.write).toHaveBeenCalledTimes(writesBefore);
+      expect(term.prompt).toHaveBeenCalledTimes(promptsBefore);
+      expect(term.runDeepLink).toHaveBeenCalledTimes(deepLinksBefore);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      expect(term.clearCurrentLine).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
+      expect(env.window.location.href).toBe(initialURL);
+    }
+  });
+
+  it("composes word actions with ordinary arrows and printable insertion", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line: "alpha   beta.gamma  delta" });
+    const { term } = editing;
+    runRootTerminal(term);
+
+    term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowLeft" }));
+    expect(editing.cursor()).toBe(20);
+    term._onData("\x1b[D");
+    expect(editing.cursor()).toBe(19);
+    term._customKeyHandler(keyEvent({ altKey: true, key: "d" }));
+    expect(term.currentLine).toBe("alpha   beta.gamma delta");
+    expect(editing.cursor()).toBe(19);
+    term._onData("\x1b[C");
+    expect(editing.cursor()).toBe(20);
+    term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowLeft" }));
+    expect(editing.cursor()).toBe(19);
+    term._onData("X");
+    expect(term.currentLine).toBe("alpha   beta.gamma Xdelta");
+    expect(editing.cursor()).toBe(20);
+    term._onData("\x1b[D");
+    expect(editing.cursor()).toBe(19);
+    term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowRight" }));
+    expect(editing.cursor()).toBe(term.currentLine.length);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("preserves history ordering and the post-newest sentinel while editing a recall", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const history = ["oldest command", "newest   command"];
+    const editing = createEditingTerm({ history });
+    const { term } = editing;
+    runRootTerminal(term);
+
+    term._onData("\x1b[A");
+    expect([term.currentLine, term.historyCursor]).toEqual(["newest   command", 0]);
+    term._onData("\x1b[A");
+    expect([term.currentLine, term.historyCursor]).toEqual(["oldest command", 1]);
+    term._onData("\x1b[B");
+    expect([term.currentLine, term.historyCursor]).toEqual(["newest   command", 0]);
+    term._onData("\x1b[B");
+    expect([term.currentLine, term.historyCursor]).toEqual(["", -1]);
+    term._onData("\x1b[A");
+    expect([term.currentLine, term.historyCursor]).toEqual(["newest   command", 0]);
+
+    term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowLeft" }));
+    term._onData("\x1b[D");
+    term._customKeyHandler(keyEvent({ altKey: true, key: "d" }));
+    term._onData("\x1b[C");
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "w" }));
+    term._onData("X");
+    expect(term.currentLine).toBe("newest  Xommand");
+    expect(editing.cursor()).toBe(9);
+    expect(term.history).toEqual(history);
+    expect(term.historyCursor).toBe(0);
+
+    term._onData("\x1b[B");
+    expect([term.currentLine, term.historyCursor]).toEqual(["", -1]);
+    term._onData("\x1b[A");
+    expect([term.currentLine, term.historyCursor]).toEqual(["newest   command", 0]);
+    expect(term.history).toEqual(history);
+  });
+
+  it("passes near misses to the existing data path without inserting shortcut bytes", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line: "ac", cursor: 1 });
+    const { term } = editing;
+    runRootTerminal(term);
+
+    for (const chord of [
+      { altKey: true, key: "ArrowRight", shiftKey: true },
+      { ctrlKey: true, key: "u", shiftKey: true },
+      { altKey: true, ctrlKey: true, key: "ArrowLeft" },
+      { altKey: true, key: "d", metaKey: true },
+      { ctrlKey: true, key: "e", type: "keyup" },
+    ]) {
+      const writesBefore = term.write.mock.calls.length;
+      expect(term._customKeyHandler(keyEvent(chord))).toBe(true);
+      expect(term.currentLine).toBe("ac");
+      expect(editing.cursor()).toBe(1);
+      expect(term.write).toHaveBeenCalledTimes(writesBefore);
+    }
+
+    term._onData("b");
+    expect(term.currentLine).toBe("abc");
+    expect(editing.cursor()).toBe(2);
+    term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowRight" }));
+    expect(term.currentLine).toBe("abc");
+    expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("redraws middle deletion and complete clearing without disturbing the prompt", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line: "keep remove tail", cursor: 11 });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "w" }));
+    expect(term.currentLine).toBe("keep  tail");
+    expect(editing.cursor()).toBe(5);
+    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
+      "\x1b[D".repeat(11),
+      "keep  tail\x1b[K",
+      "\x1b[D".repeat(5),
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+
+    term.write.mockClear();
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
+    expect(term.currentLine).toBe("");
+    expect(editing.cursor()).toBe(0);
+    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
+      "\x1b[D".repeat(5),
+      "\x1b[K",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
   it("debounces resize handling with requestAnimationFrame", () => {
