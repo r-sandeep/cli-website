@@ -28,7 +28,22 @@ function loadTerminalExt(globals = {}) {
 function createTerm(overrides = {}) {
   const term = {
     VERSION: 4,
-    _core: { buffer: { x: 0 }
+    _core: { buffer: { x: 0 } },
+    cols: 80,
+    command: vi.fn(() => 0),
+    currentLine: "",
+    focus: vi.fn(),
+    history: [],
+    loadAddon: vi.fn(),
+    open: vi.fn(),
+    reset: vi.fn(),
+    scrollToBottom: vi.fn(),
+    write: vi.fn(),
+    writeln: vi.fn(),
+  };
+
+  return Object.assign(term, overrides);
+}
 
 function installApplyCommand(term, { inputs, response }) {
   const inputValues = [...inputs];
@@ -47,21 +62,6 @@ function installApplyCommand(term, { inputs, response }) {
   );
   env.loadScript("config/commands.js");
   return env.window.fetch;
-} },
-    cols: 80,
-    command: vi.fn(() => 0),
-    currentLine: "",
-    focus: vi.fn(),
-    history: [],
-    loadAddon: vi.fn(),
-    open: vi.fn(),
-    reset: vi.fn(),
-    scrollToBottom: vi.fn(),
-    write: vi.fn(),
-    writeln: vi.fn(),
-  };
-
-  return Object.assign(term, overrides);
 }
 
 afterEach(() => {
@@ -345,7 +345,7 @@ describe("terminal-ext", () => {
       name: "successful submission",
       inputs: ["Ada", "ada@example.com", "", "", ""],
       response: { ok: true, json: vi.fn().mockResolvedValue({}) },
-      expected: "Application submitted successfully!",
+      expected: "Thanks for applying! We'll review your application and get back to you",
       fetches: 1,
     },
     {
