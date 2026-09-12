@@ -50,8 +50,11 @@ function createTerminalEnvironment(storage, cwd = "~") {
       _DIRS: { "~": [], home: [], work: [] },
       _filesHere: () => [],
       analyticsEvent: vi.fn(),
-      config: { firm: { name: "Root Ventures" } },
+      config: {},
+      firm: { name: "Root Ventures" },
       fitAddon: { fit: vi.fn() },
+      portfolio: {},
+      team: {},
       getArt: vi.fn(() => ""),
       help: {},
       jobs: {},
@@ -73,6 +76,8 @@ function createTerminalEnvironment(storage, cwd = "~") {
   ]);
   const { extend } = env.exportValues(["extend"]);
   extend(term);
+  term.cwd = cwd;
+  term.pos = () => term.currentLine.length;
 
   term.init = vi.fn();
   term.prompt = vi.fn();
@@ -91,7 +96,7 @@ function createTerminalEnvironment(storage, cwd = "~") {
 }
 
 async function submit(term, line) {
-  term.input(line);
+  for (const character of line) term.input(character);
   expect(term.currentLine).toBe(line);
   term.input("\r");
   await vi.waitFor(() => expect(term.busy).toBe(false));
