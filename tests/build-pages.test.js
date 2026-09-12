@@ -134,6 +134,14 @@ describe("script load order", () => {
       appBundleSources.indexOf("config/commands.js")
     );
   });
+
+  it("the app bundle lists js/bookmarks.js before config/commands.js", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/bookmarks.js");
+    expect(appBundleSources.indexOf("js/bookmarks.js")).toBeLessThan(
+      appBundleSources.indexOf("config/commands.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {
