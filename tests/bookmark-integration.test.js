@@ -42,7 +42,7 @@ function createTerm(cwd = "~") {
   return term;
 }
 
-function createTerminalEnvironment(storage, cwd = "~") {
+function createTerminalEnvironment(storage, cwd = "~", storageGetter) {
   const env = createBrowserEnv({
     url: "https://root.vc/terminal?bookmark-test=1",
     globals: {
@@ -66,7 +66,7 @@ function createTerminalEnvironment(storage, cwd = "~") {
   });
   Object.defineProperty(env.window, "localStorage", {
     configurable: true,
-    value: storage,
+    ...(storageGetter ? { get: storageGetter } : { value: storage }),
   });
 
   const term = createTerm(cwd);
@@ -112,6 +112,45 @@ afterEach(() => {
 });
 
 describe("bookmark terminal integration", () => {
+  it("fails closed when the browser localStorage accessor throws and keeps later scripts interactive", async () => {
+    const storageGetter = vi.fn(() => {
+      throw new Error("storage access denied");
+    });
+    const broken = createTerminalEnvironment(undefined, "work", storageGetter);
+    environments.push(broken);
+    const initialURL = broken.env.window.location.href;
+    const beforeUnload = vi.fn();
+    broken.env.window.addEventListener("beforeunload", beforeUnload);
+
+    expect(storageGetter).toHaveBeenCalledTimes(1);
+    expect(typeof broken.term.input).toBe("function");
+
+    for (const [line, output] of [
+      ["bookmark add desk", 'Could not save bookmark "desk": browser storage is unavailable.'],
+      ["bookmark list", "Could not list bookmarks: browser storage is unavailable or corrupt."],
+      ["bookmark remove desk", 'Could not remove bookmark "desk": browser storage is unavailable.'],
+      ["go desk", 'Could not open bookmark "desk": browser storage is unavailable.'],
+    ]) {
+      broken.term.stylePrint.mockClear();
+      broken.term.prompt.mockClear();
+      broken.term.clearCurrentLine.mockClear();
+
+      await submit(broken.term, line);
+
+      expect(broken.term.stylePrint).toHaveBeenLastCalledWith(output);
+      expect(broken.term.cwd).toBe("work");
+      expect(broken.term.prompt).toHaveBeenCalledTimes(1);
+      expect(broken.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+      expect(broken.term.currentLine).toBe("");
+      expect(broken.term.locked).toBe(false);
+      expect(broken.term.busy).toBe(false);
+      expect(broken.env.window.location.href).toBe(initialURL);
+      expect(beforeUnload).not.toHaveBeenCalled();
+    }
+
+    expect(storageGetter).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps bookmark and go in the normal interactive Enter-key lifecycle", async () => {
     const storage = createSharedStorage();
     const first = createTerminalEnvironment(storage, "home");
