@@ -26,9 +26,6 @@ function createTerm(overrides = {}) {
   const term = {
     _initialized: false,
     busy: false,
-    attachCustomKeyEventHandler: vi.fn((handler) => {
-      term._customKeyHandler = handler;
-    }),
     clearCurrentLine: vi.fn(),
     currentLine: "",
     executeCommandLine: vi.fn(),
@@ -50,12 +47,27 @@ function createTerm(overrides = {}) {
     write: vi.fn(),
   };
 
+  term.attachCustomKeyEventHandler = vi.fn((handler) => {
+    term._customKeyHandler = handler;
+  });
   term.onData = vi.fn((handler) => {
     term._onData = handler;
     return { dispose: vi.fn() };
   });
 
   return Object.assign(term, overrides);
+}
+
+function keyEvent(chord, preventDefault = vi.fn()) {
+  return {
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    type: "keydown",
+    preventDefault,
+    ...chord,
+  };
 }
 
 afterEach(() => {
@@ -75,6 +87,7 @@ describe("runRootTerminal", () => {
     expect(term.init).toHaveBeenCalledTimes(1);
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.runDeepLink).toHaveBeenCalledTimes(1);
+    expect(term.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1);
     expect(term.onData).toHaveBeenCalledTimes(1);
     expect(term._initialized).toBe(true);
   });
@@ -88,15 +101,25 @@ describe("runRootTerminal", () => {
       tabOptions: ["help"],
     });
 
+    runRootTerminal(term);
+    term._onData("\r");
+
+    expect(term.executeCommandLine).toHaveBeenCalledWith("help");
+    expect(term.tabBase).toBe("");
+    expect(term.tabIndex).toBe(0);
+    expect(term.tabOptions).toEqual([]);
+    expect(term.scrollToBottom).toHaveBeenCalled();
+  });
+
   it.each([
-    ["Alt+Left", { altKey: true, key: "ArrowLeft" }, 11, "one   two", 6],
-    ["Alt+Right", { altKey: true, key: "ArrowRight" }, 0, "one   two", 6],
-    ["Ctrl+W", { ctrlKey: true, key: "w" }, 9, "one   two! end", 6, "one   end"],
-    ["Alt+D", { altKey: true, key: "d" }, 3, "one   two! end", 3, "oneend"],
-    ["Ctrl+A", { ctrlKey: true, key: "a" }, 7, "one two", 0],
-    ["Ctrl+E", { ctrlKey: true, key: "e" }, 0, "one two", 7],
+    ["Alt+Left", { altKey: true, key: "ArrowLeft" }, 9, "one   two", 6, "one   two"],
+    ["Alt+Right", { altKey: true, key: "ArrowRight" }, 0, "one   two", 6, "one   two"],
+    ["Ctrl+W", { ctrlKey: true, key: "w" }, 11, "one   two! end", 6, "one   end"],
+    ["Alt+D", { altKey: true, key: "d" }, 6, "one   two! end", 6, "one   end"],
+    ["Ctrl+A", { ctrlKey: true, key: "a" }, 7, "one two", 0, "one two"],
+    ["Ctrl+E", { ctrlKey: true, key: "e" }, 0, "one two", 7, "one two"],
     ["Ctrl+U", { ctrlKey: true, key: "u" }, 4, "one two", 0, ""],
-  ])("handles %s without submitting", (_name, chord, start, line, end, result = line) => {
+  ])("handles %s without submitting", (_name, chord, start, line, end, result) => {
     const { runRootTerminal } = loadTerminalScript();
     let cursor = start;
     const term = createTerm({ currentLine: line, pos: vi.fn(() => cursor) });
@@ -111,15 +134,7 @@ describe("runRootTerminal", () => {
     const preventDefault = vi.fn();
 
     runRootTerminal(term);
-    const handled = term._customKeyHandler({
-      altKey: false,
-      ctrlKey: false,
-      metaKey: false,
-      shiftKey: false,
-      type: "keydown",
-      preventDefault,
-      ...chord,
-    });
+    const handled = term._customKeyHandler(keyEvent(chord, preventDefault));
 
     expect(handled).toBe(false);
     expect(preventDefault).toHaveBeenCalledTimes(1);
@@ -130,13 +145,14 @@ describe("runRootTerminal", () => {
     expect(term.runDeepLink).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves empty input unchanged and passes near-miss modifiers through", () => {
+  it("keeps all shortcuts harmless on empty input", () => {
     const { runRootTerminal } = loadTerminalScript();
     const term = createTerm();
     runRootTerminal(term);
 
     for (const chord of [
       { altKey: true, key: "ArrowLeft" },
+      { altKey: true, key: "ArrowRight" },
       { ctrlKey: true, key: "w" },
       { altKey: true, key: "d" },
       { ctrlKey: true, key: "a" },
@@ -144,44 +160,31 @@ describe("runRootTerminal", () => {
       { ctrlKey: true, key: "u" },
     ]) {
       const preventDefault = vi.fn();
-      expect(term._customKeyHandler({
-        altKey: false,
-        ctrlKey: false,
-        metaKey: false,
-        shiftKey: false,
-        type: "keydown",
-        preventDefault,
-        ...chord,
-      })).toBe(false);
+      expect(term._customKeyHandler(keyEvent(chord, preventDefault))).toBe(false);
       expect(preventDefault).toHaveBeenCalledTimes(1);
       expect(term.currentLine).toBe("");
       expect(term.executeCommandLine).not.toHaveBeenCalled();
       expect(term.write).not.toHaveBeenCalled();
     }
+  });
+
+  it("passes modifier near misses and unrelated keys through unchanged", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ currentLine: "one two", pos: vi.fn(() => 4) });
+    runRootTerminal(term);
 
     for (const chord of [
       { altKey: true, key: "ArrowLeft", shiftKey: true },
       { altKey: true, ctrlKey: true, key: "d" },
       { ctrlKey: true, key: "w", metaKey: true },
       { altKey: false, ctrlKey: false, key: "a" },
+      { altKey: true, key: "x" },
     ]) {
-      expect(term._customKeyHandler({
-        metaKey: false,
-        shiftKey: false,
-        type: "keydown",
-        ...chord,
-      })).toBe(true);
+      expect(term._customKeyHandler(keyEvent(chord))).toBe(true);
+      expect(term.currentLine).toBe("one two");
+      expect(term.write).not.toHaveBeenCalled();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
     }
-  });
-
-    runRootTerminal(term);
-    term._onData("\r");
-
-    expect(term.executeCommandLine).toHaveBeenCalledWith("help");
-    expect(term.tabBase).toBe("");
-    expect(term.tabIndex).toBe(0);
-    expect(term.tabOptions).toEqual([]);
-    expect(term.scrollToBottom).toHaveBeenCalled();
   });
 
   it("debounces resize handling with requestAnimationFrame", () => {
