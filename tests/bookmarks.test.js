@@ -66,14 +66,14 @@ describe("bookmark store", () => {
     expect(listed).toEqual({
       ok: true,
       entries: [
-        { name: "__proto__", path: "/prototype" },
         { name: "A_first", path: "/a" },
+        { name: "__proto__", path: "/prototype" },
         { name: "constructor", path: "/constructor" },
         { name: "z-last", path: "/z" },
       ],
     });
 
-    listed.entries[0].path = "/changed";
+    listed.entries[1].path = "/changed";
     listed.entries.pop();
     expect(store.lookup("__proto__")).toEqual({ ok: true, path: "/prototype" });
     expect(store.list().entries).toHaveLength(4);

@@ -49,7 +49,9 @@ function createBookmarkStore(storage) {
         ok: true,
         entries: bookmarks
           .map(([name, path]) => ({ name, path }))
-          .sort((left, right) => left.name.localeCompare(right.name)),
+          .sort((left, right) =>
+            left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+          ),
       };
     },
 
