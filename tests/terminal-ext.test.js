@@ -172,6 +172,23 @@ describe("terminal-ext", () => {
     expect(term.busy).toBe(false);
   });
 
+  it("does not match ANSI control bytes as visible producer text", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+
+    extend(term);
+    term.command = vi.fn(() => term.writeln("\x1b[31mred\x1b[0m"));
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("fake | grep 31m", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.command).toHaveBeenCalledOnce();
+    expect(term.writeln).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["fake | head nope", "head: count must be a positive base-10 integer"],
     ["fake | tail 0", "tail: count must be a positive base-10 integer"],

@@ -617,7 +617,7 @@ function _captureTerminalOutput(term) {
 function _visibleTerminalText(text) {
   return String(text)
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1b(?:[@-_]|\[[0-?]*[ -\/]*[@-~])/g, "");
+    .replace(/\x1b(?:\[[0-?]*[ -\/]*[@-~]|[@-_])/g, "");
 }
 
 // Wraps str at word boundaries to fit within maxWidth characters per line.
