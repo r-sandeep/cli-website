@@ -7,6 +7,11 @@ const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
 const testJobs = { ...productionJobs, 2: ["Platform Engineer"] };
+const helpContext = vm.createContext({ module: { exports: {} } });
+vm.runInContext(
+  `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts;`,
+  helpContext
+);
 
 function loadApply({ inputs = [], jobs = testJobs, response } = {}) {
   const term = {
@@ -130,7 +135,8 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     jobs: productionJobs,
     firm: { blurb: "", email: "hello@example.com" },
     team,
-    help: {},
+    help: helpContext.helpEntries,
+    shortcuts: helpContext.shortcutEntries,
     portfolio: {},
     colorText: (text) => text,
     window: {},
@@ -206,12 +212,6 @@ describe("help stays in sync with commands", () => {
   // command can be listed without existing — which is exactly what happened
   // when a bad merge dropped `swag` from commands.js while help.js kept
   // advertising it, leaving `help` pointing at a command that did nothing.
-  const helpContext = vm.createContext({ module: { exports: {} } });
-  vm.runInContext(
-    `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help;`,
-    helpContext
-  );
-
   it("advertises no command that does not exist", () => {
     const { commands } = loadCommands();
     const advertised = Object.keys(helpContext.helpEntries)
@@ -224,5 +224,54 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+});
+
+describe("terminal editing documentation", () => {
+  const expectedShortcuts = [
+    "Alt+Left",
+    "Alt+Right",
+    "Ctrl+W",
+    "Alt+D",
+    "Ctrl+A",
+    "Ctrl+E",
+    "Ctrl+U",
+  ];
+
+  it("prints every shortcut in help and man shortcuts", () => {
+    const helpRun = loadCommands();
+    helpRun.commands.help([]);
+    const helpOutput = helpRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    const manRun = loadCommands();
+    manRun.commands.man(["shortcuts"]);
+    const manOutput = manRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    for (const chord of expectedShortcuts) {
+      expect(helpOutput).toContain(
+        `${chord}: ${helpContext.shortcutEntries[chord]}`
+      );
+      expect(manOutput).toContain(
+        `${chord}: ${helpContext.shortcutEntries[chord]}`
+      );
+    }
+    expect(manRun.term.command).not.toHaveBeenCalled;
+  });
+
+  it("keeps bare man, company man, woman, and tldr on the existing tldr path", () => {
+    const { commands, term } = loadCommands();
+    term.command = vi.fn(term.command);
+
+    commands.man([]);
+    expect(term.command).toHaveBeenLastCalledWith("tldr");
+
+    commands.man(["fictiv"]);
+    expect(term.command).toHaveBeenLastCalledWith("tldr fictiv");
+
+    commands.woman(["fictiv"]);
+    expect(term.command).toHaveBeenLastCalledWith("tldr fictiv");
+
+    commands.tldr([]);
+    expect(term.stylePrint).toHaveBeenCalled();
   });
 });

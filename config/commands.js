@@ -84,6 +84,11 @@ const commands = {
         term.stylePrint(desc);
       }
     });
+    term.stylePrint("");
+    term.stylePrint("Terminal editing shortcuts (see %man shortcuts%):");
+    Object.entries(shortcuts).forEach(function (kv) {
+      term.stylePrint(`${kv[0]}: ${kv[1]}`);
+    });
   },
 
   // Displays bio and ASCII art portrait for a team member, or the firm blurb.
@@ -973,3 +978,16 @@ const _aliases = {
 for (const [alias, target] of Object.entries(_aliases)) {
   commands[alias] = (args) => term.command([target, ...args].join(" ").trim());
 }
+
+// Keep `man` compatible with its long-standing `tldr` alias while providing a
+// focused manual topic for terminal editing.
+commands.man = function (args) {
+  if (args.length === 1 && args[0].toLowerCase() === "shortcuts") {
+    term.stylePrint("Terminal editing shortcuts:");
+    Object.entries(shortcuts).forEach(function (kv) {
+      term.stylePrint(`${kv[0]}: ${kv[1]}`);
+    });
+    return;
+  }
+  term.command(["tldr", ...args].join(" ").trim());
+};

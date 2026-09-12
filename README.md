@@ -1,6 +1,18 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Terminal editing shortcuts
+
+- **Alt+Left** — move to the start of the previous word
+- **Alt+Right** — move to the start of the next word
+- **Ctrl+W** — delete back to the start of the previous word
+- **Alt+D** — delete forward to the start of the next word
+- **Ctrl+A** — move to the start of the line
+- **Ctrl+E** — move to the end of the line
+- **Ctrl+U** — clear the whole line
+
+Run `man shortcuts` in the terminal to view the same reference.
+
 [![Netlify Status](https://api.netlify.com/api/v1/badges/f3bfb854-9bc6-40a7-8d4c-2cccd3850764/deploy-status)](https://app.netlify.com/sites/rootvc-cli-website/deploys)
 
 ## Basic Commands

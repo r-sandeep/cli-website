@@ -1,3 +1,13 @@
+const shortcuts = {
+  "Alt+Left": "move to the start of the previous word",
+  "Alt+Right": "move to the start of the next word",
+  "Ctrl+W": "delete back to the start of the previous word",
+  "Alt+D": "delete forward to the start of the next word",
+  "Ctrl+A": "move to the start of the line",
+  "Ctrl+E": "move to the end of the line",
+  "Ctrl+U": "clear the whole line",
+};
+
 const help = {
   "%help%": "list all commands (you're looking at it)",
   "%whois%": "list all partners",
