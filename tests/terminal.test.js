@@ -26,6 +26,9 @@ function createTerm(overrides = {}) {
   const term = {
     _initialized: false,
     busy: false,
+    attachCustomKeyEventHandler: vi.fn((handler) => {
+      term._customKeyHandler = handler;
+    }),
     clearCurrentLine: vi.fn(),
     currentLine: "",
     executeCommandLine: vi.fn(),
@@ -84,6 +87,92 @@ describe("runRootTerminal", () => {
       tabIndex: 2,
       tabOptions: ["help"],
     });
+
+  it.each([
+    ["Alt+Left", { altKey: true, key: "ArrowLeft" }, 11, "one   two", 6],
+    ["Alt+Right", { altKey: true, key: "ArrowRight" }, 0, "one   two", 6],
+    ["Ctrl+W", { ctrlKey: true, key: "w" }, 9, "one   two! end", 6, "one   end"],
+    ["Alt+D", { altKey: true, key: "d" }, 3, "one   two! end", 3, "oneend"],
+    ["Ctrl+A", { ctrlKey: true, key: "a" }, 7, "one two", 0],
+    ["Ctrl+E", { ctrlKey: true, key: "e" }, 0, "one two", 7],
+    ["Ctrl+U", { ctrlKey: true, key: "u" }, 4, "one two", 0, ""],
+  ])("handles %s without submitting", (_name, chord, start, line, end, result = line) => {
+    const { runRootTerminal } = loadTerminalScript();
+    let cursor = start;
+    const term = createTerm({ currentLine: line, pos: vi.fn(() => cursor) });
+    term.write = vi.fn((output) => {
+      for (const match of output.matchAll(/\x1b\[([CD])/g)) {
+        cursor += match[1] === "C" ? 1 : -1;
+      }
+      if (!output.startsWith("\x1b[")) {
+        cursor = output.replace(/\x1b\[K$/, "").length;
+      }
+    });
+    const preventDefault = vi.fn();
+
+    runRootTerminal(term);
+    const handled = term._customKeyHandler({
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      type: "keydown",
+      preventDefault,
+      ...chord,
+    });
+
+    expect(handled).toBe(false);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe(result);
+    expect(cursor).toBe(end);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.runDeepLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves empty input unchanged and passes near-miss modifiers through", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm();
+    runRootTerminal(term);
+
+    for (const chord of [
+      { altKey: true, key: "ArrowLeft" },
+      { ctrlKey: true, key: "w" },
+      { altKey: true, key: "d" },
+      { ctrlKey: true, key: "a" },
+      { ctrlKey: true, key: "e" },
+      { ctrlKey: true, key: "u" },
+    ]) {
+      const preventDefault = vi.fn();
+      expect(term._customKeyHandler({
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        type: "keydown",
+        preventDefault,
+        ...chord,
+      })).toBe(false);
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(term.currentLine).toBe("");
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      expect(term.write).not.toHaveBeenCalled();
+    }
+
+    for (const chord of [
+      { altKey: true, key: "ArrowLeft", shiftKey: true },
+      { altKey: true, ctrlKey: true, key: "d" },
+      { ctrlKey: true, key: "w", metaKey: true },
+      { altKey: false, ctrlKey: false, key: "a" },
+    ]) {
+      expect(term._customKeyHandler({
+        metaKey: false,
+        shiftKey: false,
+        type: "keydown",
+        ...chord,
+      })).toBe(true);
+    }
+  });
 
     runRootTerminal(term);
     term._onData("\r");
