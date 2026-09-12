@@ -293,6 +293,7 @@ const extend = (term) => {
       ...options,
     };
     const parsed = term.parseCommandLine(line);
+    const parsedPipeline = Pipeline.parsePipeline(parsed.line);
     let exitStatus;
 
     try {
@@ -300,26 +301,97 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      await term.preloadCommandAssets(parsed.line);
+      if (parsedPipeline) {
+        const validation = Pipeline.validatePipeline(parsedPipeline);
 
-      if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-        term.writeln("");
-      }
+        if (!validation.ok) {
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
+          }
 
-      if (parsed.line.length > 0) {
-        if (settings.addToHistory) {
-          term.history.push(parsed.line);
+          if (parsed.line.length > 0 && settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
+
+          term.stylePrint(validation.error.message);
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
+        } else {
+          await term.preloadCommandAssets(validation.producer);
+
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
+          }
+
+          if (settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
+
+          const capture = _captureTerminalOutput(term);
+          try {
+            exitStatus = await term.command(validation.producer);
+          } finally {
+            capture.restore();
+          }
+
+          const result = Pipeline.applyPipeline(capture.lines(), validation.filters, {
+            getText: _visibleTerminalText,
+            prefixLine: (outputLine, lineNumber) => `${lineNumber}:${outputLine}`,
+          });
+
+          if (result.error) {
+            term.stylePrint(result.error.message);
+          } else {
+            for (const outputLine of result.lines) {
+              term.writeln(outputLine);
+            }
+          }
+
+          // Interactive producers own their normal prompt cleanup. Defer that
+          // cleanup until their captured continuation and all filters settle.
+          capture.flushPromptCleanup();
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
+        }
+      } else {
+        await term.preloadCommandAssets(parsed.line);
+
+        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          term.writeln("");
         }
 
-        exitStatus = term.command(parsed.line);
+        if (parsed.line.length > 0) {
+          if (settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
 
-        if (settings.trackAnalytics) {
-          window.dataLayer = window.dataLayer || [];
-          window.dataLayer.push({
-            event: "commandSent",
-            command: parsed.cmd,
-            args: parsed.args.join(" "),
-          });
+          // Commands may own an interactive continuation. Await its final
+          // status so standalone prompt cleanup observes the same lifecycle as
+          // a piped producer.
+          exitStatus = await term.command(parsed.line);
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
         }
       }
     } catch (error) {
@@ -488,6 +560,91 @@ const extend = (term) => {
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// Captures the rendered stream emitted by one producer command. Writers are
+// restored by the caller in a finally block before filtering or prompting.
+function _captureTerminalOutput(term) {
+  const originalWrite = term.write;
+  const originalWriteln = term.writeln;
+  const originalCollectInput = term.collectInput;
+  const originalPrompt = term.prompt;
+  const originalClearCurrentLine = term.clearCurrentLine;
+  let active = true;
+  let output = "";
+  let promptRequested = false;
+  let clearCurrentLineArgs = null;
+
+  const captureWrite = (text, callback) => {
+    output += text == null ? "" : String(text);
+    if (typeof callback === "function") callback();
+  };
+  const captureWriteln = (text, callback) => {
+    output += (text == null ? "" : String(text)) + "\r\n";
+    if (typeof callback === "function") callback();
+  };
+
+  term.write = captureWrite;
+  term.writeln = captureWriteln;
+  term.prompt = () => {
+    promptRequested = true;
+  };
+  term.clearCurrentLine = (...args) => {
+    clearCurrentLineArgs = args;
+  };
+
+  // Interactive input control text and user echo are terminal UI, not producer
+  // records. Display them normally, then resume capture when input completes.
+  if (typeof originalCollectInput === "function") {
+    term.collectInput = async (...args) => {
+      term.write = originalWrite;
+      term.writeln = originalWriteln;
+      try {
+        return await originalCollectInput.apply(term, args);
+      } finally {
+        // The producer may start an interactive flow without returning its
+        // promise. Do not let that displaced work reinstate capture after the
+        // pipeline has already restored terminal ownership.
+        if (active) {
+          term.write = captureWrite;
+          term.writeln = captureWriteln;
+        }
+      }
+    };
+  }
+
+  return {
+    lines: () => {
+      if (output.length === 0) return [];
+      const lines = output.split(/\r\n|\n|\r/);
+      if (lines[lines.length - 1] === "") lines.pop();
+      return lines;
+    },
+    restore: () => {
+      active = false;
+      term.write = originalWrite;
+      term.writeln = originalWriteln;
+      term.prompt = originalPrompt;
+      term.clearCurrentLine = originalClearCurrentLine;
+      if (typeof originalCollectInput === "function") {
+        term.collectInput = originalCollectInput;
+      }
+    },
+    flushPromptCleanup: () => {
+      if (clearCurrentLineArgs) {
+        originalClearCurrentLine.apply(term, clearCurrentLineArgs);
+      } else if (promptRequested) {
+        originalPrompt.call(term);
+      }
+    },
+  };
+}
+
+// ANSI styling is retained in output records but ignored by matching/counting.
+function _visibleTerminalText(text) {
+  return String(text)
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b(?:\[[0-?]*[ -\/]*[@-~]|[@-_])/g, "");
+}
 
 // Wraps str at word boundaries to fit within maxWidth characters per line.
 // Falls back to a hard break at maxWidth if no whitespace is found.
