@@ -113,6 +113,17 @@ describe("head and tail", () => {
       expect(result.error.message).toContain("positive base-10 integer");
     }
   );
+
+  it.each(["0", "two"])(
+    "classifies invalid tail count %s as a pre-dispatch error",
+    (count) => {
+      const result = compile(`cmd | tail ${count}`);
+      expect(result.ok).toBe(false);
+      expect(result.error.type).toBe("pre-dispatch");
+      expect(result.error.stageName).toBe("tail");
+      expect(result.error.message).toContain("positive base-10 integer");
+    }
+  );
 });
 
 describe("wc, empty input, and composition", () => {
