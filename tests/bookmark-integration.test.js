@@ -56,6 +56,8 @@ function createTerminalEnvironment(storage, cwd = "~") {
       portfolio: {},
       team: {},
       getArt: vi.fn(() => ""),
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getPreloadFileForCommand: vi.fn(() => null),
       help: {},
       jobs: {},
       preloadASCIIArt: vi.fn(),
@@ -78,6 +80,7 @@ function createTerminalEnvironment(storage, cwd = "~") {
   extend(term);
   term.cwd = cwd;
   term.pos = () => term.currentLine.length;
+  term.stylePrint = vi.fn();
 
   term.init = vi.fn();
   term.prompt = vi.fn();
