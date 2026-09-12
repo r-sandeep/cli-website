@@ -22,6 +22,129 @@ const extend = (term) => {
   term.historyCursor = -1;
   term.busy = false;
 
+  // Environment variables are private to this extended terminal. Persist only
+  // complete, validated snapshots so failed browser storage writes cannot leave
+  // memory and localStorage describing different states.
+  const ENV_STORAGE_KEY = "rootvc.cli.environment.v1";
+  const ENV_STORAGE_VERSION = 1;
+  const ENV_LIMIT = 50;
+  const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+  const parseEnvironmentPayload = (serialized) => {
+    if (serialized === null) return new Map();
+
+    const payload = JSON.parse(serialized);
+    if (
+      payload === null ||
+      typeof payload !== "object" ||
+      Object.getPrototypeOf(payload) !== Object.prototype ||
+      Object.keys(payload).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(payload, "version") ||
+      payload.version !== ENV_STORAGE_VERSION ||
+      !Object.prototype.hasOwnProperty.call(payload, "variables") ||
+      !Array.isArray(payload.variables) ||
+      payload.variables.length > ENV_LIMIT
+    ) {
+      throw new Error("Invalid environment payload");
+    }
+
+    const hydrated = new Map();
+    for (const entry of payload.variables) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        !ENV_NAME_PATTERN.test(entry[0]) ||
+        typeof entry[1] !== "string" ||
+        hydrated.has(entry[0])
+      ) {
+        throw new Error("Invalid environment entry");
+      }
+      hydrated.set(entry[0], entry[1]);
+    }
+    return hydrated;
+  };
+
+  const serializeEnvironment = (variables) =>
+    JSON.stringify({
+      version: ENV_STORAGE_VERSION,
+      variables: [...variables.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    });
+
+  let environmentVariables;
+  try {
+    environmentVariables = parseEnvironmentPayload(
+      window.localStorage.getItem(ENV_STORAGE_KEY)
+    );
+  } catch (_error) {
+    environmentVariables = new Map();
+  }
+
+  const environmentResult = (ok, code, message = "") => ({ ok, code, message });
+  const persistEnvironmentCandidate = (candidate) => {
+    try {
+      const serialized = serializeEnvironment(candidate);
+      window.localStorage.setItem(ENV_STORAGE_KEY, serialized);
+    } catch (_error) {
+      return environmentResult(
+        false,
+        "storage",
+        "Environment variables could not be saved. Storage is unavailable."
+      );
+    }
+    environmentVariables = candidate;
+    return environmentResult(true, "updated");
+  };
+
+  term.environment = Object.freeze({
+    isValidName(name) {
+      return typeof name === "string" && ENV_NAME_PATTERN.test(name);
+    },
+    snapshot() {
+      return new Map(environmentVariables);
+    },
+    entries() {
+      return [...environmentVariables.entries()].sort(([a], [b]) =>
+        a.localeCompare(b)
+      );
+    },
+    get(name) {
+      return environmentVariables.get(name);
+    },
+    set(name, value) {
+      if (
+        typeof name !== "string" ||
+        !ENV_NAME_PATTERN.test(name) ||
+        typeof value !== "string"
+      ) {
+        return environmentResult(
+          false,
+          "invalid",
+          "Invalid environment variable name. Use letters, digits, and underscores, starting with a letter or underscore."
+        );
+      }
+      if (!environmentVariables.has(name) && environmentVariables.size >= ENV_LIMIT) {
+        return environmentResult(
+          false,
+          "capacity",
+          `Environment variable limit of ${ENV_LIMIT} reached.`
+        );
+      }
+
+      const candidate = new Map(environmentVariables);
+      candidate.set(name, value);
+      return persistEnvironmentCandidate(candidate);
+    },
+    unset(name) {
+      if (!environmentVariables.has(name)) {
+        return environmentResult(true, "absent");
+      }
+
+      const candidate = new Map(environmentVariables);
+      candidate.delete(name);
+      return persistEnvironmentCandidate(candidate);
+    },
+  });
+
   // Tab completion state — reset on any non-tab keypress.
   term.tabIndex = 0;
   term.tabOptions = [];
