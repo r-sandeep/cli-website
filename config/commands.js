@@ -157,6 +157,32 @@ const commands = {
     }
   },
 
+  // Documents local terminal commands and preserves the historical tldr
+  // delegation for every other manual target.
+  man: function (args) {
+    if (args.length === 1 && args[0] === "bookmark") {
+      term.stylePrint(
+        "bookmark - save and manage directory bookmarks\r\n" +
+        "Usage:\r\n" +
+        "  bookmark add NAME      Save the current directory\r\n" +
+        "  bookmark list          List saved bookmarks\r\n" +
+        "  bookmark remove NAME   Remove a bookmark\r\n" +
+        "NAME must match [A-Za-z0-9_-]+. Up to 25 bookmarks persist across reloads."
+      );
+      return;
+    }
+    if (args.length === 1 && args[0] === "go") {
+      term.stylePrint(
+        "go - navigate to a saved directory bookmark\r\n" +
+        "Usage: go NAME\r\n" +
+        "Changes the terminal's current directory to the path saved under NAME."
+      );
+      return;
+    }
+
+    term.command(["tldr", ...args].join(" ").trim());
+  },
+
   // ── Social & Contact ────────────────────────────────────────────────────────
 
   git: function () {
@@ -347,6 +373,81 @@ const commands = {
       default:
         term.stylePrint(`No such directory: ${dir}`);
         break;
+    }
+  },
+
+  // Saves, lists, and removes named locations without taking ownership of the
+  // terminal's input or prompt lifecycle.
+  bookmark: function (args) {
+    const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME";
+    const subcommand = args[0];
+
+    if (subcommand === "add" && args.length === 2) {
+      const name = args[1];
+      const result = bookmarkStore.add(name, term.cwd);
+      if (result.ok) {
+        term.stylePrint(`Bookmark ${name} saved: ${term.cwd}`);
+      } else if (result.error === "invalid-name") {
+        term.stylePrint(`Invalid bookmark name "${name}". NAME must match [A-Za-z0-9_-]+.`);
+      } else if (result.error === "duplicate") {
+        term.stylePrint(`Bookmark "${name}" already exists.`);
+      } else if (result.error === "limit") {
+        term.stylePrint(`Cannot add bookmark "${name}": limit of 25 reached.`);
+      } else {
+        term.stylePrint(`Could not save bookmark "${name}": browser storage is unavailable.`);
+      }
+      return;
+    }
+
+    if (subcommand === "list" && args.length === 1) {
+      const result = bookmarkStore.list();
+      if (!result.ok) {
+        term.stylePrint("Could not list bookmarks: browser storage is unavailable or corrupt.");
+      } else if (result.entries.length === 0) {
+        term.stylePrint("No bookmarks saved.");
+      } else {
+        result.entries.forEach(({ name, path }) => {
+          term.stylePrint(`${name} -> ${path}`);
+        });
+      }
+      return;
+    }
+
+    if (subcommand === "remove" && args.length === 2) {
+      const name = args[1];
+      const result = bookmarkStore.remove(name);
+      if (result.ok) {
+        term.stylePrint(`Bookmark "${name}" removed.`);
+      } else if (result.error === "invalid-name") {
+        term.stylePrint(`Invalid bookmark name "${name}". NAME must match [A-Za-z0-9_-]+.`);
+      } else if (result.error === "not-found") {
+        term.stylePrint(`Bookmark "${name}" not found.`);
+      } else {
+        term.stylePrint(`Could not remove bookmark "${name}": browser storage is unavailable.`);
+      }
+      return;
+    }
+
+    term.stylePrint(usage);
+  },
+
+  // Navigates by assigning the terminal's established cwd representation only.
+  go: function (args) {
+    if (args.length !== 1) {
+      term.stylePrint("Usage: go NAME");
+      return;
+    }
+
+    const name = args[0];
+    const result = bookmarkStore.lookup(name);
+    if (result.ok) {
+      term.cwd = result.path;
+    } else if (result.error === "invalid-name") {
+      term.stylePrint(`Invalid bookmark name "${name}". NAME must match [A-Za-z0-9_-]+.`);
+    } else if (result.error === "not-found") {
+      term.stylePrint(`Bookmark "${name}" not found.`);
+    } else {
+      term.stylePrint(`Could not open bookmark "${name}": browser storage is unavailable.`);
     }
   },
 
@@ -951,8 +1052,9 @@ const _aliases = {
   tail: "cat", less: "cat", head: "cat", more: "cat",
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
-  // man/woman both show the tldr for a portfolio company
-  man: "tldr", woman: "tldr",
+  // woman retains the historical tldr delegation; man handles local manuals
+  // before following the same fallback path.
+  woman: "tldr",
   // Session control
   quit: "exit", stop: "exit",
   // Process management
