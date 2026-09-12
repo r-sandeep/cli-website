@@ -819,8 +819,9 @@ const commands = {
   },
 
   // Multi-step async application form. The terminal is locked during collection
-  // so normal keypress handling is suspended. Returns 1 to tell the main input
-  // loop not to re-render the prompt — the async IIFE does that itself when done.
+  // so normal keypress handling is suspended. Resolves to 1 after the form has
+  // settled to tell the main input loop not to re-render the prompt — the form
+  // does that itself when done.
   //
   // collectInput() resolves to: a string on submit, "" if skipped (optional
   // fields), or null on Ctrl+C. Null means the user cancelled.
@@ -832,7 +833,7 @@ const commands = {
     if (hasJob) {
       term.locked = true;
 
-      (async () => {
+      return (async () => {
         // Shared cancellation handler — restores the terminal to a usable state.
         const cancel = () => {
           term.stylePrint("\r\nApplication cancelled.");
@@ -846,22 +847,22 @@ const commands = {
         );
 
         const name = await term.collectInput("What's your name?");
-        if (!name) { cancel(); return; }
+        if (!name) { cancel(); return 1; }
 
         const email = await term.collectInput("Email address");
-        if (!email) { cancel(); return; }
+        if (!email) { cancel(); return 1; }
 
         const linkedin = await term.collectInput("LinkedIn profile URL", true);
-        if (linkedin === null) { cancel(); return; }
+        if (linkedin === null) { cancel(); return 1; }
 
         const github = await term.collectInput("GitHub username", true);
-        if (github === null) { cancel(); return; }
+        if (github === null) { cancel(); return 1; }
 
         const notes = await term.collectInput(
           "Why Root? What makes you a great fit?",
           true
         );
-        if (notes === null) { cancel(); return; }
+        if (notes === null) { cancel(); return 1; }
 
         term.stylePrint("\r\nSubmitting application...");
 
@@ -912,10 +913,8 @@ const commands = {
         term.prompt();
         term.clearCurrentLine(true);
         term.locked = false;
+        return 1;
       })();
-
-      // Return 1 synchronously so terminal.js skips its automatic prompt render.
-      return 1;
     } else if (!args || args == "" || args.length === 0) {
       term.stylePrint(
         "Please provide a job id. Use %jobs% to list all current jobs."

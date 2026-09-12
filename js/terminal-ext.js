@@ -354,6 +354,10 @@ const extend = (term) => {
             }
           }
 
+          // Interactive producers own their normal prompt cleanup. Defer that
+          // cleanup until their captured continuation and all filters settle.
+          capture.flushPromptCleanup();
+
           if (settings.trackAnalytics) {
             window.dataLayer = window.dataLayer || [];
             window.dataLayer.push({
@@ -375,7 +379,10 @@ const extend = (term) => {
             term.history.push(parsed.line);
           }
 
-          exitStatus = term.command(parsed.line);
+          // Commands may own an interactive continuation. Await its final
+          // status so standalone prompt cleanup observes the same lifecycle as
+          // a piped producer.
+          exitStatus = await term.command(parsed.line);
 
           if (settings.trackAnalytics) {
             window.dataLayer = window.dataLayer || [];
@@ -560,8 +567,12 @@ function _captureTerminalOutput(term) {
   const originalWrite = term.write;
   const originalWriteln = term.writeln;
   const originalCollectInput = term.collectInput;
+  const originalPrompt = term.prompt;
+  const originalClearCurrentLine = term.clearCurrentLine;
   let active = true;
   let output = "";
+  let promptRequested = false;
+  let clearCurrentLineArgs = null;
 
   const captureWrite = (text, callback) => {
     output += text == null ? "" : String(text);
@@ -574,6 +585,12 @@ function _captureTerminalOutput(term) {
 
   term.write = captureWrite;
   term.writeln = captureWriteln;
+  term.prompt = () => {
+    promptRequested = true;
+  };
+  term.clearCurrentLine = (...args) => {
+    clearCurrentLineArgs = args;
+  };
 
   // Interactive input control text and user echo are terminal UI, not producer
   // records. Display them normally, then resume capture when input completes.
@@ -606,8 +623,17 @@ function _captureTerminalOutput(term) {
       active = false;
       term.write = originalWrite;
       term.writeln = originalWriteln;
+      term.prompt = originalPrompt;
+      term.clearCurrentLine = originalClearCurrentLine;
       if (typeof originalCollectInput === "function") {
         term.collectInput = originalCollectInput;
+      }
+    },
+    flushPromptCleanup: () => {
+      if (clearCurrentLineArgs) {
+        originalClearCurrentLine.apply(term, clearCurrentLineArgs);
+      } else if (promptRequested) {
+        originalPrompt.call(term);
       }
     },
   };

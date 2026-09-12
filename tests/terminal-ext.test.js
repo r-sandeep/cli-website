@@ -28,7 +28,26 @@ function loadTerminalExt(globals = {}) {
 function createTerm(overrides = {}) {
   const term = {
     VERSION: 4,
-    _core: { buffer: { x: 0 } },
+    _core: { buffer: { x: 0 }
+
+function installApplyCommand(term, { inputs, response }) {
+  const inputValues = [...inputs];
+  term.collectInput = vi.fn(async (question) => {
+    term.write(`INPUT UI: ${question}`);
+    return inputValues.shift();
+  });
+  env.window.term = term;
+  env.window.jobs = { 1: ["Platform Engineer"] };
+  env.window.firm = { blurb: "", email: "hello@example.com" };
+  env.window.team = {};
+  env.window.help = {};
+  env.window.portfolio = {};
+  env.window.fetch = vi.fn().mockResolvedValue(
+    response || { ok: true, json: vi.fn().mockResolvedValue({}) }
+  );
+  env.loadScript("config/commands.js");
+  return env.window.fetch;
+} },
     cols: 80,
     command: vi.fn(() => 0),
     currentLine: "",
@@ -319,6 +338,83 @@ describe("terminal-ext", () => {
     expect(term.write).toBe(originalWrite);
     expect(term.writeln).toBe(originalWriteln);
     expect(term.collectInput).toBe(originalCollectInput);
+  });
+
+  it.each([
+    {
+      name: "successful submission",
+      inputs: ["Ada", "ada@example.com", "", "", ""],
+      response: { ok: true, json: vi.fn().mockResolvedValue({}) },
+      expected: "Application submitted successfully!",
+      fetches: 1,
+    },
+    {
+      name: "cancellation",
+      inputs: [null],
+      response: { ok: true, json: vi.fn().mockResolvedValue({}) },
+      expected: "Application cancelled.",
+      fetches: 0,
+    },
+    {
+      name: "rejected submission",
+      inputs: ["Ada", "ada@example.com", "", "", ""],
+      response: {
+        ok: false,
+        json: vi.fn().mockResolvedValue({ error: "Server failed" }),
+      },
+      expected: "Error submitting application: Server failed",
+      fetches: 1,
+    },
+  ])("retains a piped apply through $name", async ({ inputs, response, expected, fetches }) => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    const fetch = installApplyCommand(term, { inputs, response });
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    const originalCollectInput = term.collectInput;
+    const dispatch = vi.spyOn(term, "command");
+    const prompt = vi.spyOn(term, "prompt");
+    const clearCurrentLine = vi.spyOn(term, "clearCurrentLine");
+    term.write.mockClear();
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("apply 1 | grep -i application | tail 1", {
+      showLeadingNewline: false,
+    });
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(fetches);
+    expect(term.history).toEqual(["apply 1 | grep -i application | tail 1"]);
+    expect(env.window.dataLayer).toEqual([
+      {
+        args: "1 | grep -i application | tail 1",
+        command: "apply",
+        event: "commandSent",
+      },
+    ]);
+    expect(term.writeln).toHaveBeenCalledWith(expect.stringContaining(expected));
+    expect(term.writeln).not.toHaveBeenCalledWith(expect.stringContaining("Great!"));
+    expect(term.write).toHaveBeenCalledWith(expect.stringContaining("INPUT UI:"));
+    expect(term.writeln).not.toHaveBeenCalledWith(expect.stringContaining("INPUT UI:"));
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+    expect(term.collectInput).toBe(originalCollectInput);
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("jobs", {
+      addToHistory: false,
+      promptAfter: false,
+      showLeadingNewline: false,
+      trackAnalytics: false,
+    });
+    expect(term.writeln).toHaveBeenCalledWith(expect.stringContaining("Open positions:"));
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
   });
 
   it("routes deep links through executeCommandLine without double prompts", () => {

@@ -46,8 +46,7 @@ describe("apply", () => {
   it("submits each selected registry title for jobs 1 and 2 without a live request", async () => {
     for (const [id, jobs] of [["1", productionJobs], ["2", testJobs]]) {
       const { apply, fetch } = loadApply({ jobs, inputs: ["Ada", "ada@example.com", "", "", ""] });
-      expect(apply([id])).toBe(1);
-      await waitFor(() => fetch.mock.calls.length === 1);
+      await expect(apply([id])).resolves.toBe(1);
       expect(fetch).toHaveBeenCalledWith(
         "/.netlify/functions/submit-application",
         expect.objectContaining({ body: expect.stringContaining(`"position":"${jobs[id][0]}"`) })
@@ -79,8 +78,7 @@ describe("apply", () => {
 
   it("cancels without fetching and restores the terminal", async () => {
     const { apply, term, fetch } = loadApply({ inputs: [null] });
-    expect(apply(["1"])).toBe(1);
-    await waitFor(() => term.prompt.mock.calls.length === 1);
+    await expect(apply(["1"])).resolves.toBe(1);
     expect(term.stylePrint).toHaveBeenCalledWith("\r\nApplication cancelled.");
     expect(term.prompt).toHaveBeenCalled();
     expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
@@ -100,8 +98,7 @@ describe("apply", () => {
       ],
     ]) {
       const { apply, term, fetch } = loadApply({ inputs: ["Ada", "ada@example.com", "", "", ""], response });
-      expect(apply(["1"])).toBe(1);
-      await waitFor(() => fetch.mock.calls.length === 1);
+      await expect(apply(["1"])).resolves.toBe(1);
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(term.stylePrint).toHaveBeenCalledWith(output);
       expect(term.prompt).toHaveBeenCalled();
