@@ -144,10 +144,10 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
   // cd recurses through term.command for the paths that resolve via another cd.
-  term.command = (line) => {
+  term.command = vi.fn((line) => {
     const [name, ...args] = line.split(" ");
     return commands[name](args);
-  };
+  });
   return { commands, term };
 }
 
@@ -255,12 +255,11 @@ describe("terminal editing documentation", () => {
         `${chord}: ${helpContext.shortcutEntries[chord]}`
       );
     }
-    expect(manRun.term.command).not.toHaveBeenCalled;
+    expect(manRun.term.command).not.toHaveBeenCalled();
   });
 
   it("keeps bare man, company man, woman, and tldr on the existing tldr path", () => {
     const { commands, term } = loadCommands();
-    term.command = vi.fn(term.command);
 
     commands.man([]);
     expect(term.command).toHaveBeenLastCalledWith("tldr");
@@ -273,5 +272,16 @@ describe("terminal editing documentation", () => {
 
     commands.tldr([]);
     expect(term.stylePrint).toHaveBeenCalled();
+  });
+
+  it("keeps the README shortcut list consistent with terminal output", () => {
+    const readme = readFileSync("README.md", "utf8");
+
+    for (const chord of expectedShortcuts) {
+      expect(readme).toContain(
+        `**${chord}** — ${helpContext.shortcutEntries[chord]}`
+      );
+    }
+    expect(readme).toContain("`man shortcuts`");
   });
 });
