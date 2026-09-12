@@ -118,8 +118,10 @@ function runRootTerminal(term) {
     if (!action) return true;
 
     event.preventDefault();
-    editInput(action);
-    term.scrollToBottom();
+    if (term._initialized && !term.locked && !term.busy) {
+      editInput(action);
+      term.scrollToBottom();
+    }
     return false;
   });
 

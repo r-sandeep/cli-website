@@ -220,6 +220,29 @@ describe("runRootTerminal", () => {
   });
 
   it.each([
+    ["locked", { locked: true }],
+    ["busy", { busy: true }],
+  ])("suppresses shortcuts without editing while the terminal is %s", (_state, overrides) => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line: "one two", cursor: 7 });
+    const { term } = editing;
+    runRootTerminal(term);
+    Object.assign(term, overrides);
+    const preventDefault = vi.fn();
+
+    expect(
+      term._customKeyHandler(
+        keyEvent({ altKey: true, key: "ArrowLeft" }, preventDefault)
+      )
+    ).toBe(false);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe("one two");
+    expect(editing.cursor()).toBe(7);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["Alt+Left crosses an all-space line", { altKey: true, key: "ArrowLeft" }, "   ", 3, "   ", 0],
     ["Alt+Right crosses an all-space line", { altKey: true, key: "ArrowRight" }, "   ", 0, "   ", 3],
     ["Alt+Left stops after leading spaces", { altKey: true, key: "ArrowLeft" }, "   word", 7, "   word", 3],
