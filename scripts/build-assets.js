@@ -1,4 +1,5 @@
 const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const { minify } = require("terser");
 const { writePages } = require("./build-pages");
