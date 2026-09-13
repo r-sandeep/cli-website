@@ -143,16 +143,23 @@ describe("script load order", () => {
     );
   });
 
-  it("uses one fixed metadata snapshot in the raw page and bundle topologies", () => {
+  it("uses one fixed metadata snapshot in the emitted raw page and bundle topologies", async () => {
     const {
       createAppBundleSource,
       createBuildInfo,
-      createBuildInfoSource,
+      main,
     } = buildAssetsModule;
-    const buildInfo = createBuildInfo(new Date("2026-02-03T23:59:58.000Z"));
-    const metadataSource = createBuildInfoSource(buildInfo);
+    const buildTime = new Date("2026-02-03T23:59:58.000Z");
+    const buildInfo = createBuildInfo(buildTime);
+
+    await main(buildTime);
+
+    const metadataSource = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/js/build-info.js"),
+      "utf8"
+    );
     const welcomeSource = fs.readFileSync(
-      path.join(REPO_ROOT, "welcome.htm"),
+      path.join(REPO_ROOT, "dist/welcome.htm"),
       "utf8"
     );
     const welcomeScripts = [
@@ -168,6 +175,13 @@ describe("script load order", () => {
       "js/build-info.js",
       "config/commands.js",
     ]);
+
+    const emittedBundle = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/js/app.bundle.js"),
+      "utf8"
+    );
+    expect(emittedBundle).toContain(buildInfo.version);
+    expect(emittedBundle).toContain(buildInfo.buildDate);
 
     const bundleSource = createAppBundleSource(buildInfo);
     const commandPrefix = bundleSource.slice(
