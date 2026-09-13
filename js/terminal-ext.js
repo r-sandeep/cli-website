@@ -7,6 +7,36 @@
 //
 // TODO: make this a proper xterm addon
 
+const _parseCommandLine = (line) => {
+  const tokens = [];
+  let token = "";
+  let quote = null;
+  let started = false;
+
+  for (const character of String(line)) {
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      else token += character;
+      started = true;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        tokens.push(token);
+        token = "";
+        started = false;
+      }
+    } else {
+      token += character;
+      started = true;
+    }
+  }
+
+  if (started) tokens.push(token);
+  return tokens;
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
