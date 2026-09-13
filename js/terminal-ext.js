@@ -37,6 +37,12 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+// Produces a raw representation that the parser above will decode to exactly
+// one token. Double quotes inside a token are emitted as adjacent single-quoted
+// segments so arbitrary cooked arguments remain representable.
+const _serializeCommandToken = (token) =>
+  `"${String(token).split('"').join(`"'"'"`)}"`;
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -358,7 +364,7 @@ const extend = (term) => {
     ];
     const [name = "", ...args] = replacementTokens;
     return {
-      line: [value.trim(), ...parsed.args.map((arg) => JSON.stringify(arg))].join(" "),
+      line: replacementTokens.map(_serializeCommandToken).join(" "),
       name,
       cmd: name.toLowerCase(),
       args,

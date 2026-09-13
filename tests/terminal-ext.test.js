@@ -344,6 +344,27 @@ describe("terminal-ext", () => {
     expect(target).toHaveBeenCalledWith(args);
   });
 
+  it.each([`target ''`, `target ""`])(
+    "preserves a standalone empty quoted word in %s",
+    async (line) => {
+      const target = vi.fn();
+      const { extend } = loadTerminalExt({ commands: { target } });
+      const term = createTerm();
+      extend(term);
+      term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+      await term.executeCommandLine(line);
+
+      expect(target).toHaveBeenCalledWith([""]);
+      expect(term.preloadCommandAssets).toHaveBeenCalledWith({
+        args: [""],
+        cmd: "target",
+        line,
+        name: "target",
+      });
+    }
+  );
+
   it("expands an exact-case user alias once and appends grouped caller arguments", async () => {
     const target = vi.fn();
     const second = vi.fn();
@@ -359,7 +380,7 @@ describe("terminal-ext", () => {
     expect(term.preloadCommandAssets).toHaveBeenCalledWith({
       args: ["alias group", "caller group", "tail"],
       cmd: "target",
-      line: `target "alias group" "caller group" "tail"`,
+      line: `"target" "alias group" "caller group" "tail"`,
       name: "target",
     });
     expect(target).toHaveBeenCalledWith([
@@ -389,16 +410,45 @@ describe("terminal-ext", () => {
     term.defineAlias("run", `target "alias group"`);
     term.preloadCommandAssets = vi.fn(() => Promise.resolve());
 
-    await term.executeCommandLine(`run '' before "" after`);
+    await term.executeCommandLine(`run '' before "" after '' ""`);
 
-    const args = ["alias group", "", "before", "", "after"];
+    const args = ["alias group", "", "before", "", "after", "", ""];
     expect(term.preloadCommandAssets).toHaveBeenCalledWith({
       args,
       cmd: "target",
-      line: `target "alias group" "" "before" "" "after"`,
+      line: `"target" "alias group" "" "before" "" "after" "" ""`,
       name: "target",
     });
     expect(target).toHaveBeenCalledWith(args);
+  });
+
+  it("runs a persisted maker alias through the production whois handler after reload", async () => {
+    const { extend, term } = loadAliasTerminal();
+
+    term.command("alias maker=whois");
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["maker", "whois"],
+    ]);
+
+    await term.executeCommandLine("maker root");
+    expect(term.printArt).toHaveBeenCalledWith("rootvc-square");
+
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    reloaded.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await reloaded.executeCommandLine("maker root");
+
+    expect(reloaded.preloadCommandAssets).toHaveBeenCalledWith({
+      args: ["root"],
+      cmd: "whois",
+      line: `"whois" "root"`,
+      name: "whois",
+    });
+    expect(reloaded.printArt).toHaveBeenCalledWith("rootvc-square");
+    reloaded.command("alias maker");
+    expect(reloaded.writeln).toHaveBeenLastCalledWith("maker=whois");
   });
 
   it("preloads expanded asset commands and preserves unknown-command errors", async () => {
