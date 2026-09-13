@@ -61,6 +61,39 @@ function SpawnRickRollPointers() {
   }
 }
 
+// `export` and `env` intentionally share one renderer so their output cannot
+// drift. Sort a copied entry list even though the terminal state API currently
+// returns sorted entries, keeping the command contract explicit at this seam.
+function _printEnvironment() {
+  term.environment
+    .entries()
+    .slice()
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([name, value]) => term.stylePrint(`${name}=${value}`));
+}
+
+const _environmentManuals = {
+  export: [
+    "export — store or list environment variables",
+    "Usage: export NAME=value",
+    "Use export with no arguments to list variables as NAME=value sorted by name.",
+    "NAME must match [A-Za-z_][A-Za-z0-9_]*; export NAME= stores an empty value.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+  env: [
+    "env — list environment variables",
+    "Usage: env",
+    "Prints the same name-sorted NAME=value listing as export with no arguments.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+  unset: [
+    "unset — remove an environment variable",
+    "Usage: unset NAME",
+    "Removes NAME and produces no output when NAME does not exist.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+};
+
 const commands = {
 
   // ── Info & Discovery ────────────────────────────────────────────────────────
@@ -162,6 +195,10 @@ const commands = {
     }
   },
 
+  // `man` is defined once, below the pipeline manuals: it serves the environment
+  // topics (export/env/unset), the pipeline filters, and `shortcuts`, and every
+  // other topic retains the established portfolio lookup behavior via tldr.
+
   // ── Social & Contact ────────────────────────────────────────────────────────
 
   git: function () {
@@ -211,6 +248,45 @@ const commands = {
   echo: function (args) {
     const message = args.join(" ");
     term.stylePrint(message);
+  },
+
+  // Stores one exact NAME=value assignment through the terminal's validated,
+  // persistent environment API. Splitting on the first equals sign preserves
+  // empty values and any subsequent equals signs.
+  export: function (args) {
+    if (args.length === 0) {
+      _printEnvironment();
+      return;
+    }
+
+    if (args.length !== 1 || !args[0].includes("=")) {
+      term.stylePrint("export: expected one NAME=value assignment.");
+      return;
+    }
+
+    const assignment = args[0];
+    const separator = assignment.indexOf("=");
+    const result = term.environment.set(
+      assignment.slice(0, separator),
+      assignment.slice(separator + 1)
+    );
+    if (!result.ok) {
+      term.stylePrint(`export: ${result.message}`);
+    }
+  },
+
+  // Displays the same sorted representation as argument-free `export`.
+  env: function () {
+    _printEnvironment();
+  },
+
+  // The state API makes absent (including invalid) names a silent no-op and
+  // commits present removals atomically before reporting success.
+  unset: function (args) {
+    const result = term.environment.unset(args[0]);
+    if (!result.ok) {
+      term.stylePrint(`unset: ${result.message}`);
+    }
   },
 
   say: function (args) {
@@ -270,7 +346,7 @@ const commands = {
     const relativeHomeMatch = dir.match(/^\.\.\/home\/(.+)$/);
     if (relativeHomeMatch) {
       if (term.cwd === "~" || term.cwd === "bin") {
-        term.command(`cd ${relativeHomeMatch[1]}`);
+        term.dispatchCommand("cd", [relativeHomeMatch[1]]);
       } else {
         term.stylePrint(`No such directory: ${dir}`);
       }
@@ -301,9 +377,9 @@ const commands = {
         break;
       case "..":
         if (term.cwd === "~") {
-          term.command("cd /home");
+          term.dispatchCommand("cd", ["/home"]);
         } else if (term.cwd === "home" || term.cwd === "bin") {
-          term.command("cd /");
+          term.dispatchCommand("cd", ["/"]);
         }
         break;
       // Any deeply nested upward traversal just lands at root.
@@ -316,7 +392,7 @@ const commands = {
       case "home":
         // `home` alone is only reachable from /
         if (term.cwd === "/") {
-          term.command("cd /home");
+          term.dispatchCommand("cd", ["/home"]);
         } else {
           term.stylePrint(`You do not have permission to access this directory`);
         }
@@ -329,7 +405,7 @@ const commands = {
       case "root":
         if (term.cwd === "home") {
           if (term.user === dir) {
-            term.command("cd ~");
+            term.dispatchCommand("cd", ["~"]);
           } else {
             term.stylePrint(`You do not have permission to access this directory`);
           }
@@ -415,7 +491,7 @@ const commands = {
     } else if (args.join(" ") == "the pod bay doors") {
       term.stylePrint("I'm sorry Dave, I'm afraid I can't do that.");
     } else {
-      term.command(`cat ${args.join(" ")}`);
+      term.dispatchCommand("cat", args);
     }
   },
 
@@ -483,7 +559,7 @@ const commands = {
   // Only root can sudo; otherwise logs an incident (just like real life).
   sudo: function (args) {
     if (term.user == "root") {
-      term.command(args.join(" "));
+      term.dispatchCommand((args[0] || "").toLowerCase(), args.slice(1));
     } else {
       term.stylePrint(
         `${colorText(
@@ -500,7 +576,7 @@ const commands = {
 
     if (user == "root" || user == "guest") {
       term.user = user;
-      term.command("cd ~");
+      term.dispatchCommand("cd", ["~"]);
     } else {
       term.stylePrint("su: Sorry");
     }
@@ -597,7 +673,7 @@ const commands = {
 
   // Opens the GeoCities-style welcome page (welcome.htm).
   exit: function () {
-    term.command("open welcome.htm");
+    term.dispatchCommand("open", ["welcome.htm"]);
   },
 
   // Reinitializes the terminal, clearing history and resetting the prompt.
@@ -955,8 +1031,9 @@ const _aliases = {
   tail: "cat", less: "cat", head: "cat", more: "cat",
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
-  // man/woman both show the tldr for a portfolio company
-  man: "tldr", woman: "tldr",
+  // woman retains the original portfolio-manual alias; man handles its three
+  // environment topics directly and delegates every other topic to tldr.
+  woman: "tldr",
   // Session control
   quit: "exit", stop: "exit",
   // Process management
@@ -975,7 +1052,7 @@ const _aliases = {
   privacy: "privacy_dynamics",
 };
 for (const [alias, target] of Object.entries(_aliases)) {
-  commands[alias] = (args) => term.command([target, ...args].join(" ").trim());
+  commands[alias] = (args) => term.dispatchCommand(target, args);
 }
 
 // Pipeline filters are stages rather than replacements for the similarly named
@@ -1016,7 +1093,8 @@ const _pipelineManuals = {
 };
 
 // Keep `man` compatible with its long-standing `tldr` alias while providing focused
-// manual pages for the pipeline filters and for terminal editing shortcuts.
+// manual pages for the environment commands, the pipeline filters, and terminal
+// editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
   if (args.length === 1 && topic === "shortcuts") {
@@ -1026,7 +1104,9 @@ commands.man = function (args) {
     });
     return;
   }
-  const manual = _pipelineManuals[topic];
+  const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
+    ? _environmentManuals[topic]
+    : _pipelineManuals[topic];
   if (!manual) {
     return term.command(["tldr", ...args].join(" ").trim());
   }

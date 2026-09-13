@@ -65,6 +65,7 @@ function installApplyCommand(term, { inputs, response }) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (env) {
     env.cleanup();
     env = null;
@@ -72,6 +73,228 @@ afterEach(() => {
 });
 
 describe("terminal-ext", () => {
+  const environmentStorageKey = "rootvc.cli.environment.v1";
+
+  it("keeps environment state private and returns sorted defensive copies", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+
+    extend(term);
+
+    expect(term.environment.set("ZED", "last")).toMatchObject({ ok: true });
+    expect(term.environment.set("_EMPTY", "")).toMatchObject({ ok: true });
+    expect(term.environment.entries()).toEqual([
+      ["_EMPTY", ""],
+      ["ZED", "last"],
+    ]);
+
+    const snapshot = term.environment.snapshot();
+    snapshot.set("INTRUDER", "mutated copy");
+    const entries = term.environment.entries();
+    entries[0][1] = "mutated entry";
+
+    expect(term.environment.snapshot()).toEqual(
+      new env.window.Map([
+        ["ZED", "last"],
+        ["_EMPTY", ""],
+      ])
+    );
+    expect(env.window.environmentVariables).toBeUndefined();
+    expect(Object.isFrozen(term.environment)).toBe(true);
+  });
+
+  it("rejects invalid names without changing memory or persisted state", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("VALID_1", "before");
+    const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
+
+    for (const invalidName of ["", "1BAD", "BAD-NAME", "HAS SPACE", "é"] ) {
+      const snapshotBefore = [...term.environment.snapshot()];
+      const result = term.environment.set(invalidName, "after");
+
+      expect(result).toMatchObject({ ok: false, code: "invalid" });
+      expect(result.message).toContain("Invalid environment variable name");
+      expect([...term.environment.snapshot()]).toEqual(snapshotBefore);
+      expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+        persistedBefore
+      );
+    }
+  });
+
+  it("supports every mutation transition including overwrite and unset at capacity", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+
+    for (let index = 0; index < 50; index += 1) {
+      expect(term.environment.set(`VAR_${index}`, String(index))).toMatchObject({
+        ok: true,
+      });
+    }
+    expect(term.environment.snapshot().size).toBe(50);
+
+    expect(term.environment.set("VAR_0", "overwritten")).toMatchObject({
+      ok: true,
+    });
+    expect(term.environment.get("VAR_0")).toBe("overwritten");
+
+    const persistedAtCapacity = env.window.localStorage.getItem(
+      environmentStorageKey
+    );
+    const rejected = term.environment.set("ONE_TOO_MANY", "nope");
+    expect(rejected).toMatchObject({ ok: false, code: "capacity" });
+    expect(rejected.message).toContain("50");
+    expect(term.environment.get("ONE_TOO_MANY")).toBeUndefined();
+    expect(term.environment.snapshot().size).toBe(50);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedAtCapacity
+    );
+
+    expect(term.environment.unset("VAR_1")).toMatchObject({
+      ok: true,
+      code: "updated",
+    });
+    expect(term.environment.get("VAR_1")).toBeUndefined();
+    const afterPresentUnset = env.window.localStorage.getItem(environmentStorageKey);
+
+    expect(term.environment.unset("ABSENT")).toEqual({
+      ok: true,
+      code: "absent",
+      message: "",
+    });
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      afterPresentUnset
+    );
+    expect(term.environment.set("REFILLED", "")).toMatchObject({ ok: true });
+    expect(term.environment.get("REFILLED")).toBe("");
+    expect(term.environment.snapshot().size).toBe(50);
+  });
+
+  it("hydrates a replacement terminal from the persisted versioned payload", () => {
+    const { extend } = loadTerminalExt();
+    const first = createTerm();
+    extend(first);
+    first.environment.set("ZED", "last");
+    first.environment.set("ALPHA", "first");
+    first.environment.set("EMPTY", "");
+    const persisted = env.window.localStorage.getItem(environmentStorageKey);
+
+    const replacement = createTerm();
+    extend(replacement);
+
+    expect(replacement.environment.entries()).toEqual([
+      ["ALPHA", "first"],
+      ["EMPTY", ""],
+      ["ZED", "last"],
+    ]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(persisted);
+
+    first.environment.set("LATER", "only in first live map");
+    expect(replacement.environment.get("LATER")).toBeUndefined();
+  });
+
+  it.each([
+    ["invalid JSON", "{"],
+    ["unsupported version", JSON.stringify({ version: 2, variables: [] })],
+    ["wrong shape", JSON.stringify({ version: 1, variables: {} })],
+    [
+      "extra field",
+      JSON.stringify({ version: 1, variables: [], extra: "data" }),
+    ],
+    [
+      "prototype-sensitive field",
+      '{"version":1,"variables":[],"__proto__":{"POLLUTED":"yes"}}',
+    ],
+    ["invalid name", JSON.stringify({ version: 1, variables: [["1BAD", "x"]] })],
+    ["non-string value", JSON.stringify({ version: 1, variables: [["GOOD", 1]] })],
+    [
+      "duplicate name",
+      JSON.stringify({ version: 1, variables: [["GOOD", "1"], ["GOOD", "2"]] }),
+    ],
+    [
+      "over capacity",
+      JSON.stringify({
+        version: 1,
+        variables: Array.from({ length: 51 }, (_, index) => [
+          `VAR_${index}`,
+          String(index),
+        ]),
+      }),
+    ],
+  ])("ignores a %s persisted payload", (_description, serialized) => {
+    const { extend } = loadTerminalExt();
+    env.window.localStorage.setItem(environmentStorageKey, serialized);
+    const term = createTerm();
+
+    expect(() => extend(term)).not.toThrow();
+    expect(term.environment.entries()).toEqual([]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(serialized);
+  });
+
+  it("treats inaccessible storage as empty without throwing", () => {
+    const { extend } = loadTerminalExt();
+    vi.spyOn(env.window.Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    const term = createTerm();
+
+    expect(() => extend(term)).not.toThrow();
+    expect(term.environment.entries()).toEqual([]);
+  });
+
+  it("leaves live and persisted state unchanged when persistence fails", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("SAFE", "persisted");
+    const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
+    vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+
+    const failedSet = term.environment.set("NEW", "not committed");
+    expect(failedSet).toMatchObject({ ok: false, code: "storage" });
+    expect(failedSet.message).toContain("could not be saved");
+    expect(term.environment.entries()).toEqual([["SAFE", "persisted"]]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedBefore
+    );
+
+    const failedUnset = term.environment.unset("SAFE");
+    expect(failedUnset).toMatchObject({ ok: false, code: "storage" });
+    expect(term.environment.entries()).toEqual([["SAFE", "persisted"]]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedBefore
+    );
+  });
+
+  it("preserves environment state across init, shell reset, and resize replay", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("KEEP", "value");
+
+    term.init();
+    expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+
+    term.init(term.user);
+    expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+
+    term.runDeepLink = vi.fn();
+    term.history = ["historical mutation"];
+    term.command = vi.fn(() => term.environment.set("KEEP", "replayed"));
+    const persistedBeforeResize = env.window.localStorage.getItem(
+      environmentStorageKey
+    );
+    term.resizeListener();
+    expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedBeforeResize
+    );
+  });
+
   it("normalizes preload-only aliases before resolving assets", async () => {
     const { extend } = loadTerminalExt({
       getASCIIArtIdForCommand: vi.fn(() => "lee"),
@@ -109,7 +332,7 @@ describe("terminal-ext", () => {
     term.preloadCommandAssets = vi.fn(async () => {
       order.push("preload");
     });
-    term.command = vi.fn(() => {
+    term.dispatchCommand = vi.fn(() => {
       order.push("command");
       return 0;
     });
@@ -122,7 +345,172 @@ describe("terminal-ext", () => {
       { args: "", command: "help", event: "commandSent" },
     ]);
     expect(term.busy).toBe(false);
-    expect(term.command).toHaveBeenCalledWith("help");
+    expect(term.dispatchCommand).toHaveBeenCalledWith("help", []);
+  });
+
+  it("expands every recognized argument reference once without changing token boundaries", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("NAME", "hello world");
+    term.environment.set("EMPTY", "");
+    term.environment.set("DOLLAR", "$NAME");
+
+    const prepared = term.prepareCommandLine(
+      "EcHo $NAME ${NAME} $MISSING pre$NAME${EMPTY}post $DOLLAR \\$NAME path\\keep $9 ${BAD-NAME} cash$"
+    );
+
+    expect(prepared.cmd).toBe("echo");
+    expect(prepared.args).toEqual([
+      "hello world",
+      "hello world",
+      "",
+      "prehello worldpost",
+      "$NAME",
+      "$NAME",
+      String.raw`path\keep`,
+      "$9",
+      "${BAD-NAME}",
+      "cash$",
+    ]);
+    expect(term.prepareCommandLine("$NAME $NAME")).toMatchObject({
+      cmd: "$name",
+      args: ["hello world"],
+    });
+  });
+
+  it("captures one prepared vector before preload while retaining raw history and analytics", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("NAME", "before");
+    let releasePreload;
+    const preloadPending = new Promise((resolve) => {
+      releasePreload = resolve;
+    });
+    let preloadedArgs;
+    term.preloadCommandAssets = vi.fn((_cmd, args) => {
+      preloadedArgs = args;
+      return preloadPending;
+    });
+    term.dispatchCommand = vi.fn();
+
+    const execution = term.executeCommandLine("EcHo $NAME");
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", ["before"]);
+    term.environment.set("NAME", "after");
+    releasePreload();
+    await execution;
+
+    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", ["before"]);
+    expect(term.dispatchCommand.mock.calls[0][1]).toBe(preloadedArgs);
+    expect(term.history).toEqual(["EcHo $NAME"]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "$NAME", command: "echo", event: "commandSent" },
+    ]);
+  });
+
+  it("completes one interactive environment command lifecycle without disturbing the prompt", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("NAME", "expanded value");
+    term.preloadCommandAssets = vi.fn(async () => {});
+    term.dispatchCommand = vi.fn();
+    term.prompt = vi.fn();
+    term.clearCurrentLine = vi.fn();
+
+    await term.executeCommandLine("echo $NAME");
+
+    expect(term.history).toEqual(["echo $NAME"]);
+    expect(term.preloadCommandAssets).toHaveBeenCalledTimes(1);
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", [
+      "expanded value",
+    ]);
+    expect(term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", [
+      "expanded value",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
+    expect(term.busy).toBe(false);
+  });
+
+  it("persists both sides of a full-store reject, unset, and refill transition", () => {
+    const { extend } = loadTerminalExt();
+    const fullEntries = Array.from({ length: 50 }, (_, index) => [
+      `V${index}`,
+      String(index),
+    ]);
+    env.window.localStorage.setItem(
+      environmentStorageKey,
+      JSON.stringify({ version: 1, variables: fullEntries })
+    );
+
+    const fullReload = createTerm();
+    extend(fullReload);
+    const persistedAtCapacity = env.window.localStorage.getItem(
+      environmentStorageKey
+    );
+    expect(fullReload.environment.set("OVER", "rejected")).toMatchObject({
+      ok: false,
+      code: "capacity",
+    });
+    expect(fullReload.environment.snapshot().size).toBe(50);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedAtCapacity
+    );
+
+    expect(fullReload.environment.unset("V0")).toMatchObject({ ok: true });
+    const afterUnsetReload = createTerm();
+    extend(afterUnsetReload);
+    expect(afterUnsetReload.environment.snapshot().size).toBe(49);
+    expect(afterUnsetReload.environment.get("V0")).toBeUndefined();
+
+    expect(afterUnsetReload.environment.set("REFILLED", "ready")).toMatchObject({
+      ok: true,
+    });
+    const afterRefillReload = createTerm();
+    extend(afterRefillReload);
+    expect(afterRefillReload.environment.snapshot().size).toBe(50);
+    expect(afterRefillReload.environment.get("REFILLED")).toBe("ready");
+    expect(afterRefillReload.environment.get("OVER")).toBeUndefined();
+  });
+
+  it("replays environment history for output without changing active or persisted state", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("ACTIVE", "later value");
+    term.history = [
+      "export TEMP=one",
+      "export TEMP=two",
+      "env",
+      "unset TEMP",
+      "env",
+    ];
+    term.runDeepLink = vi.fn();
+    env.window.commands.export = (args) => {
+      const assignment = args[0];
+      const split = assignment.indexOf("=");
+      term.environment.set(assignment.slice(0, split), assignment.slice(split + 1));
+    };
+    env.window.commands.env = () => {
+      for (const [name, value] of term.environment.entries()) {
+        term.stylePrint(`${name}=${value}`);
+      }
+    };
+    env.window.commands.unset = (args) => term.environment.unset(args[0]);
+    const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
+
+    term.resizeListener();
+
+    expect(term.writeln).toHaveBeenCalledWith("ACTIVE=later value");
+    expect(term.writeln).toHaveBeenCalledWith("TEMP=two");
+    expect(term.environment.entries()).toEqual([["ACTIVE", "later value"]]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedBefore
+    );
   });
 
   it("runs a producer once and applies ANSI-aware pipeline stages left to right", async () => {

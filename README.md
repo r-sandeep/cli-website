@@ -63,7 +63,9 @@ Run `man shortcuts` in the terminal to view the same reference.
  - df
  - echo
  - emacs
+ - env: list stored environment variables
  - exit
+ - export NAME=value: store an environment variable (or use `export` to list all)
  - fdisk
  - find
  - finger
@@ -100,10 +102,16 @@ Run `man shortcuts` in the terminal to view the same reference.
  - top
  - touch
  - uname
+ - unset NAME: remove an environment variable
  - vi
  - vim
  - wget
  - zsh
+
+Environment variables persist across page reloads. Command arguments can use
+`$NAME` or `${NAME}`; an undefined variable expands to an empty string. Prefix
+the dollar sign with a backslash, as in `\$NAME`, to pass the reference
+literally without expansion.
 
 Missing a favorite one? Make a PR!
 

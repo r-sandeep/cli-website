@@ -22,6 +22,148 @@ const extend = (term) => {
   term.historyCursor = -1;
   term.busy = false;
 
+  // Environment variables are private to this extended terminal. Persist only
+  // complete, validated snapshots so failed browser storage writes cannot leave
+  // memory and localStorage describing different states.
+  const ENV_STORAGE_KEY = "rootvc.cli.environment.v1";
+  const ENV_STORAGE_VERSION = 1;
+  const ENV_LIMIT = 50;
+  const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+  const parseEnvironmentPayload = (serialized) => {
+    if (serialized === null) return new Map();
+
+    const payload = JSON.parse(serialized);
+    if (
+      payload === null ||
+      typeof payload !== "object" ||
+      Object.getPrototypeOf(payload) !== Object.prototype ||
+      Object.keys(payload).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(payload, "version") ||
+      payload.version !== ENV_STORAGE_VERSION ||
+      !Object.prototype.hasOwnProperty.call(payload, "variables") ||
+      !Array.isArray(payload.variables) ||
+      payload.variables.length > ENV_LIMIT
+    ) {
+      throw new Error("Invalid environment payload");
+    }
+
+    const hydrated = new Map();
+    for (const entry of payload.variables) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        !ENV_NAME_PATTERN.test(entry[0]) ||
+        typeof entry[1] !== "string" ||
+        hydrated.has(entry[0])
+      ) {
+        throw new Error("Invalid environment entry");
+      }
+      hydrated.set(entry[0], entry[1]);
+    }
+    return hydrated;
+  };
+
+  const serializeEnvironment = (variables) =>
+    JSON.stringify({
+      version: ENV_STORAGE_VERSION,
+      variables: [...variables.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    });
+
+  let environmentVariables;
+  try {
+    environmentVariables = parseEnvironmentPayload(
+      window.localStorage.getItem(ENV_STORAGE_KEY)
+    );
+  } catch (_error) {
+    environmentVariables = new Map();
+  }
+
+  const environmentResult = (ok, code, message = "") => ({ ok, code, message });
+  let environmentPersistenceEnabled = true;
+  const persistEnvironmentCandidate = (candidate) => {
+    if (!environmentPersistenceEnabled) {
+      environmentVariables = candidate;
+      return environmentResult(true, "updated");
+    }
+
+    try {
+      const serialized = serializeEnvironment(candidate);
+      window.localStorage.setItem(ENV_STORAGE_KEY, serialized);
+    } catch (_error) {
+      return environmentResult(
+        false,
+        "storage",
+        "Environment variables could not be saved. Storage is unavailable."
+      );
+    }
+    environmentVariables = candidate;
+    return environmentResult(true, "updated");
+  };
+
+  term.environment = Object.freeze({
+    isValidName(name) {
+      return typeof name === "string" && ENV_NAME_PATTERN.test(name);
+    },
+    snapshot() {
+      return new Map(environmentVariables);
+    },
+    entries() {
+      return [...environmentVariables.entries()].sort(([a], [b]) =>
+        a.localeCompare(b)
+      );
+    },
+    get(name) {
+      return environmentVariables.get(name);
+    },
+    set(name, value) {
+      if (
+        typeof name !== "string" ||
+        !ENV_NAME_PATTERN.test(name) ||
+        typeof value !== "string"
+      ) {
+        return environmentResult(
+          false,
+          "invalid",
+          "Invalid environment variable name. Use letters, digits, and underscores, starting with a letter or underscore."
+        );
+      }
+      if (!environmentVariables.has(name) && environmentVariables.size >= ENV_LIMIT) {
+        return environmentResult(
+          false,
+          "capacity",
+          `Environment variable limit of ${ENV_LIMIT} reached.`
+        );
+      }
+
+      const candidate = new Map(environmentVariables);
+      candidate.set(name, value);
+      return persistEnvironmentCandidate(candidate);
+    },
+    unset(name) {
+      if (!environmentVariables.has(name)) {
+        return environmentResult(true, "absent");
+      }
+
+      const candidate = new Map(environmentVariables);
+      candidate.delete(name);
+      return persistEnvironmentCandidate(candidate);
+    },
+  });
+
+  const replayWithoutEnvironmentSideEffects = (replay) => {
+    const activeVariables = environmentVariables;
+    const previousPersistenceSetting = environmentPersistenceEnabled;
+    environmentVariables = new Map(activeVariables);
+    environmentPersistenceEnabled = false;
+    try {
+      replay();
+    } finally {
+      environmentVariables = activeVariables;
+      environmentPersistenceEnabled = previousPersistenceSetting;
+    }
+  };
+
   // Tab completion state — reset on any non-tab keypress.
   term.tabIndex = 0;
   term.tabOptions = [];
@@ -210,18 +352,56 @@ const extend = (term) => {
 
   // ── Command Dispatch ───────────────────────────────────────────────────────
 
-  // Parses and executes a command line string. Called both by the Enter handler
-  // in terminal.js and internally by commands that redirect to other commands.
-  term.command = (line) => {
-    const parts = line.split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1, parts.length);
+  // Dispatches an already prepared command. Redirecting commands use this seam
+  // so expanded values remain opaque data rather than being parsed or expanded
+  // for a second time.
+  term.dispatchCommand = (cmd, args) => {
     const fn = commands[cmd];
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
     } else {
       return fn(args);
     }
+  };
+
+  const expandArgument = (argument, variables) => {
+    let expanded = "";
+    let index = 0;
+
+    const referenceAt = (start) => {
+      if (argument[start] !== "$") return null;
+      if (argument[start + 1] === "{") {
+        const close = argument.indexOf("}", start + 2);
+        if (close === -1) return null;
+        const name = argument.slice(start + 2, close);
+        return ENV_NAME_PATTERN.test(name) ? { end: close + 1, name } : null;
+      }
+
+      const match = argument.slice(start + 1).match(/^[A-Za-z_][A-Za-z0-9_]*/);
+      return match ? { end: start + 1 + match[0].length, name: match[0] } : null;
+    };
+
+    while (index < argument.length) {
+      const escapedReference =
+        argument[index] === "\\" ? referenceAt(index + 1) : null;
+      if (escapedReference) {
+        expanded += argument.slice(index + 1, escapedReference.end);
+        index = escapedReference.end;
+        continue;
+      }
+
+      const reference = referenceAt(index);
+      if (reference) {
+        expanded += variables.get(reference.name) ?? "";
+        index = reference.end;
+        continue;
+      }
+
+      expanded += argument[index];
+      index += 1;
+    }
+
+    return expanded;
   };
 
   term.parseCommandLine = (line) => {
@@ -232,6 +412,22 @@ const extend = (term) => {
       cmd: (parts[0] || "").toLowerCase(),
       args: parts.slice(1),
     };
+  };
+
+  term.prepareCommandLine = (line) => {
+    const parsed = term.parseCommandLine(line);
+    const variables = term.environment.snapshot();
+    return {
+      ...parsed,
+      args: parsed.args.map((argument) => expandArgument(argument, variables)),
+    };
+  };
+
+  // Parses and executes a raw command line. Interactive execution prepares once
+  // before preload; this remains the compatible raw-line seam used by replay.
+  term.command = (line) => {
+    const prepared = term.prepareCommandLine(line);
+    return term.dispatchCommand(prepared.cmd, prepared.args);
   };
 
   term.normalizeCommandForPreload = (cmd, args) => {
@@ -263,9 +459,11 @@ const extend = (term) => {
     }
   };
 
-  term.preloadCommandAssets = async (line) => {
-    const parsed = term.parseCommandLine(line);
-    const normalized = term.normalizeCommandForPreload(parsed.cmd, parsed.args);
+  term.preloadCommandAssets = async (cmdOrLine, preparedArgs) => {
+    const prepared = Array.isArray(preparedArgs)
+      ? { cmd: cmdOrLine, args: preparedArgs }
+      : term.prepareCommandLine(cmdOrLine);
+    const normalized = term.normalizeCommandForPreload(prepared.cmd, prepared.args);
     const tasks = [];
     const artId = getASCIIArtIdForCommand(normalized.cmd, normalized.args);
     const preloadFile = getPreloadFileForCommand(normalized.cmd, normalized.args);
@@ -368,7 +566,11 @@ const extend = (term) => {
           }
         }
       } else {
-        await term.preloadCommandAssets(parsed.line);
+        // Interactive execution prepares (expands) the line exactly once, before
+        // preload, and dispatches the prepared command so expanded values stay
+        // opaque data instead of being parsed or expanded a second time.
+        const prepared = term.prepareCommandLine(parsed.line);
+        await term.preloadCommandAssets(prepared.cmd, prepared.args);
 
         if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
           term.writeln("");
@@ -382,7 +584,7 @@ const extend = (term) => {
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
-          exitStatus = await term.command(parsed.line);
+          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args);
 
           if (settings.trackAnalytics) {
             window.dataLayer = window.dataLayer || [];
@@ -425,10 +627,12 @@ const extend = (term) => {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
     term.runDeepLink({ replay: true });
-    for (const c of term.history) {
-      term.prompt("\r\n", ` ${c}\r\n`);
-      term.command(c);
-    }
+    replayWithoutEnvironmentSideEffects(() => {
+      for (const c of term.history) {
+        term.prompt("\r\n", ` ${c}\r\n`);
+        term.command(c);
+      }
+    });
     term.prompt();
     term.scrollToBottom();
     term._initialized = true;

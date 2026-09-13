@@ -143,6 +143,35 @@ describe("runRootTerminal", () => {
     expect(term.scrollToBottom).toHaveBeenCalled();
   });
 
+  it("retains bounded input-history navigation after environment commands", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({
+      history: ["export NAME=value", "echo $NAME"],
+    });
+
+    runRootTerminal(term);
+    term._onData("\x1b[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+
+    term._onData("\x1b[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith(
+      "export NAME=value",
+      false
+    );
+
+    term._onData("\x1b[B");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+
+    term._onData("\x1b[B");
+    expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
+
+    term._onData("\x1b[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith(
+      "export NAME=value",
+      false
+    );
+  });
+
   it.each([
     ["Alt+Left", { altKey: true, key: "ArrowLeft" }, 9, "one   two", 6, "one   two"],
     ["Alt+Right", { altKey: true, key: "ArrowRight" }, 0, "one   two", 6, "one   two"],
