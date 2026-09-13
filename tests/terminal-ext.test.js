@@ -766,6 +766,90 @@ describe("terminal-ext", () => {
     ]);
   });
 
+  it("runs whois through reverse sort and head once in source order", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+
+    extend(term);
+    const producer = vi.fn((line) => {
+      expect(line).toBe("whois");
+      term.writeln("apple");
+      term.writeln("\x1b[35mzebra\x1b[0m");
+      term.writeln("banana");
+      term.writeln("delta");
+      return 0;
+    });
+    term.command = producer;
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("whois | sort -r | head 3", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.preloadCommandAssets).toHaveBeenCalledOnce();
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("whois");
+    expect(producer).toHaveBeenCalledOnce();
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "\x1b[35mzebra\x1b[0m",
+      "delta",
+      "banana",
+    ]);
+    expect(env.window.dataLayer).toEqual([
+      {
+        args: "| sort -r | head 3",
+        command: "whois",
+        event: "commandSent",
+      },
+    ]);
+    expect(term.history).toEqual(["whois | sort -r | head 3"]);
+    expect(term.busy).toBe(false);
+  });
+
+  it("counts ANSI-equivalent uniq runs and numerically sorts styled results", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+
+    extend(term);
+    const producer = vi.fn((line) => {
+      expect(line).toBe("tldr");
+      term.writeln("\x1b[31mapple\x1b[0m");
+      term.writeln("apple");
+      term.writeln("banana");
+      term.writeln("\x1b[36mzulu\x1b[0m");
+      term.writeln("zulu");
+      term.writeln("\x1b[32mzulu\x1b[0m");
+      return 0;
+    });
+    term.command = producer;
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("tldr | uniq -c | sort -rn", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.preloadCommandAssets).toHaveBeenCalledOnce();
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("tldr");
+    expect(producer).toHaveBeenCalledOnce();
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "3 \x1b[36mzulu\x1b[0m",
+      "2 \x1b[31mapple\x1b[0m",
+      "1 banana",
+    ]);
+    expect(env.window.dataLayer).toEqual([
+      {
+        args: "| uniq -c | sort -rn",
+        command: "tldr",
+        event: "commandSent",
+      },
+    ]);
+    expect(term.history).toEqual(["tldr | uniq -c | sort -rn"]);
+    expect(term.busy).toBe(false);
+  });
+
   it("prints no transformed records when a pipeline producer emits no output", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -807,6 +891,10 @@ describe("terminal-ext", () => {
   it.each([
     ["fake | head nope", "head: count must be a positive base-10 integer"],
     ["fake | tail 0", "tail: count must be a positive base-10 integer"],
+    ["fake | sort -x", "sort: supported flags are -r, -n, -u"],
+    ["fake | sort misplaced", "sort: supported flags are -r, -n, -u"],
+    ["fake | uniq -x", "uniq: supported flags are -c, -d"],
+    ["fake | uniq misplaced", "uniq: supported flags are -c, -d"],
   ])("rejects %s before producer preload and dispatch", async (line, message) => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -824,6 +912,13 @@ describe("terminal-ext", () => {
     expect(producer).not.toHaveBeenCalled();
     expect(stylePrint).toHaveBeenCalledWith(message);
     expect(term.history).toEqual([line]);
+    expect(env.window.dataLayer).toEqual([
+      {
+        args: line.slice(line.indexOf(" ") + 1),
+        command: "fake",
+        event: "commandSent",
+      },
+    ]);
     expect(clearCurrentLine).toHaveBeenCalledOnce();
     expect(term.busy).toBe(false);
   });

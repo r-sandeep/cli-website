@@ -940,6 +940,10 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("COMMAND | %tail% [N]");
     expect(output).toContain("default: 10");
     expect(output).toContain("COMMAND | %wc% -l");
+    expect(output).toContain("COMMAND | %sort% [-rnu]");
+    expect(output).toContain("-r reverse, -n numeric, -u unique");
+    expect(output).toContain("COMMAND | %uniq% [-cd]");
+    expect(output).toContain("-c count, -d repeated only");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
   });
 });
@@ -951,10 +955,31 @@ describe("pipeline manual pages preserve standalone commands", () => {
     ["head", "COMMAND | %head% [N]"],
     ["tail", "COMMAND | %tail% [N]"],
     ["wc", "COMMAND | %wc% -l"],
+    ["sort", "COMMAND | %sort% [-rnu]"],
+    ["uniq", "COMMAND | %uniq% [-cd]"],
   ])("documents man %s", (topic, expected) => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
     expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it("documents every sort and uniq flag", () => {
+    const sortRun = loadCommands();
+    sortRun.commands.man(["sort"]);
+    const sortOutput = sortRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(sortOutput).toContain("-r reverses the order");
+    expect(sortOutput).toContain("-n compares leading numeric values");
+    expect(sortOutput).toContain("-u removes exact duplicates after sorting");
+    expect(sortOutput).toContain("Flags may be combined, for example -rn");
+    expect(sortOutput).toContain("ANSI color and escape sequences are ignored");
+
+    const uniqRun = loadCommands();
+    uniqRun.commands.man(["uniq"]);
+    const uniqOutput = uniqRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(uniqOutput).toContain("-c prefixes each survivor with its run count and one space");
+    expect(uniqOutput).toContain("-d keeps only repeated runs");
+    expect(uniqOutput).toContain("Flags may be combined as -cd");
+    expect(uniqOutput).toContain("ANSI color and escape sequences are ignored");
   });
 
   it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {
