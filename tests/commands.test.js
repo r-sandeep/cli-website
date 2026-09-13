@@ -191,6 +191,19 @@ describe("alias management", () => {
     );
   });
 
+  it("reports an undefined alias query without mutating aliases", () => {
+    const { commands, term } = loadCommands();
+
+    commands.alias(["missing"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "alias: missing: not defined"
+    );
+    expect(term.defineAlias).not.toHaveBeenCalled();
+    expect(term.removeAlias).not.toHaveBeenCalled();
+    expect(term.getAliases()).toEqual([]);
+  });
+
 describe("alias documentation", () => {
   it("prints command-specific manuals for alias and unalias", () => {
     const { commands, term } = loadCommands();
