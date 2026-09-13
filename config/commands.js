@@ -124,6 +124,22 @@ const commands = {
     });
   },
 
+  // Prints the metadata fixed into the application bundle by build-assets.js.
+  version: function (args) {
+    if (args.length !== 0 && !(args.length === 1 && args[0] === "--json")) {
+      term.stylePrint("Usage: version [--json]", false);
+      return;
+    }
+
+    const output = args.length === 1
+      ? JSON.stringify({
+          version: buildInfo.version,
+          buildDate: buildInfo.buildDate,
+        })
+      : `Root Ventures terminal v${buildInfo.version} (build ${buildInfo.buildDate})`;
+    term.stylePrint(output, false);
+  },
+
   // `man` is defined once, below the pipeline manuals: it serves the alias and
   // unalias manuals, the bookmark and go manuals, the environment topics, the
   // pipeline filters, and `shortcuts`, and every other topic retains the
