@@ -699,6 +699,7 @@ const extend = (term) => {
           const result = Pipeline.applyPipeline(capture.lines(), validation.filters, {
             getText: _visibleTerminalText,
             prefixLine: (outputLine, lineNumber) => `${lineNumber}:${outputLine}`,
+            prefixCount: (outputLine, count) => `${count} ${outputLine}`,
           });
 
           if (result.error) {
