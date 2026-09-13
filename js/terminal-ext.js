@@ -358,7 +358,7 @@ const extend = (term) => {
     ];
     const [name = "", ...args] = replacementTokens;
     return {
-      line: value.trim(),
+      line: [value.trim(), ...parsed.args.map((arg) => JSON.stringify(arg))].join(" "),
       name,
       cmd: name.toLowerCase(),
       args,

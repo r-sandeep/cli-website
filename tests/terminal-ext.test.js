@@ -325,6 +325,25 @@ describe("terminal-ext", () => {
     expect(help).toHaveBeenCalledWith(parsed.args);
   });
 
+  it("preserves positional empty quoted words for preload and dispatch", async () => {
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { target } });
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`target '' before "" between '' after ""`);
+
+    const args = ["", "before", "", "between", "", "after", ""];
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith({
+      args,
+      cmd: "target",
+      line: `target '' before "" between '' after ""`,
+      name: "target",
+    });
+    expect(target).toHaveBeenCalledWith(args);
+  });
+
   it("expands an exact-case user alias once and appends grouped caller arguments", async () => {
     const target = vi.fn();
     const second = vi.fn();
@@ -340,7 +359,7 @@ describe("terminal-ext", () => {
     expect(term.preloadCommandAssets).toHaveBeenCalledWith({
       args: ["alias group", "caller group", "tail"],
       cmd: "target",
-      line: `target "alias group"`,
+      line: `target "alias group" "caller group" "tail"`,
       name: "target",
     });
     expect(target).toHaveBeenCalledWith([
@@ -360,6 +379,26 @@ describe("terminal-ext", () => {
     expect(term.writeln).toHaveBeenLastCalledWith(
       "Command not found: run. Try 'help' to get started."
     );
+  });
+
+  it("keeps empty quoted caller arguments in an expanded command", async () => {
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { target } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("run", `target "alias group"`);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`run '' before "" after`);
+
+    const args = ["alias group", "", "before", "", "after"];
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith({
+      args,
+      cmd: "target",
+      line: `target "alias group" "" "before" "" "after"`,
+      name: "target",
+    });
+    expect(target).toHaveBeenCalledWith(args);
   });
 
   it("preloads expanded asset commands and preserves unknown-command errors", async () => {
