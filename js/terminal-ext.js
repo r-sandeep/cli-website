@@ -458,7 +458,10 @@ const extend = (term) => {
           term.history.push(parsed.line);
         }
 
-        exitStatus = term.command(expanded);
+        // Preserve the historical string dispatch shape for commands that were
+        // not expanded. Alias expansions carry their already-coherent parsed
+        // representation so lexical rawArgs reach handlers without reparsing.
+        exitStatus = term.command(expanded === parsed ? parsed.line : expanded);
 
         if (settings.trackAnalytics) {
           window.dataLayer = window.dataLayer || [];

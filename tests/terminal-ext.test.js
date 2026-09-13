@@ -298,12 +298,7 @@ describe("terminal-ext", () => {
       { args: "", command: "help", event: "commandSent" },
     ]);
     expect(term.busy).toBe(false);
-    expect(term.command).toHaveBeenCalledWith({
-      args: [],
-      cmd: "help",
-      line: "help",
-      name: "help",
-    });
+    expect(term.command).toHaveBeenCalledWith("help");
   });
 
   it("uses one quote-aware parse for preload and dispatch", async () => {
