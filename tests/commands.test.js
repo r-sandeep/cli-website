@@ -842,6 +842,18 @@ describe("bookmark and go", () => {
 });
 
 describe("man", () => {
+  it("documents both version output forms without delegating", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["version"]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output).toContain("Usage: version [--json]");
+    expect(output).toContain("With no option, print the human-readable version line.");
+    expect(output).toContain("With --json, print a compact object with version and buildDate.");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
   it("documents bookmark and go without delegating", () => {
     const { commands, term } = loadCommands();
     commands.man(["bookmark"]);
@@ -913,6 +925,18 @@ describe("help stays in sync with commands", () => {
       "%alias% [name[=value]]": "define, list, or query command aliases",
       "%unalias% name": "remove a command alias",
     });
+  });
+
+  it("advertises version with its optional JSON form", () => {
+    expect(helpContext.helpEntries).toMatchObject({
+      "%version% [--json]": "show the terminal version and build date",
+    });
+
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help([]);
+    expect(term.stylePrint.mock.calls.flat().join("\n")).toContain(
+      "%version% [--json]"
+    );
   });
 
   it("advertises every bookmark and navigation form", () => {

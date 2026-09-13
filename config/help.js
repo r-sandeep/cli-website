@@ -11,6 +11,7 @@ const shortcuts = {
 
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%version% [--json]": "show the terminal version and build date",
   "%alias% [name[=value]]": "define, list, or query command aliases",
   "%unalias% name": "remove a command alias",
   "%bookmark% add NAME": "save the current directory as NAME",

@@ -1306,6 +1306,13 @@ commands.man = function (args) {
     term.stylePrint("%unalias% name");
     return;
   }
+  if (args.length === 1 && topic === "version") {
+    term.stylePrint("version — show the terminal version and build date");
+    term.stylePrint("Usage: version [--json]");
+    term.stylePrint("With no option, print the human-readable version line.");
+    term.stylePrint("With --json, print a compact object with version and buildDate.");
+    return;
+  }
   if (args.length === 1 && topic === "bookmark") {
     term.stylePrint(
       "bookmark - save and manage directory bookmarks\r\n" +
