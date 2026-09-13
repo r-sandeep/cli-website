@@ -47,6 +47,10 @@ Run `man shortcuts` in the terminal to view the same reference.
 
 ## Basic Commands
   - help: list all commands
+  - alias [name[=value]]: define, list, or query command aliases
+  - unalias name: remove a command alias
+  - man alias: show alias usage
+  - man unalias: show unalias usage
   - whois root: learn about us
   - whois [partner]: learn about a partner
   - tldr: list all portfolio companies

@@ -64,6 +64,35 @@ function installApplyCommand(term, { inputs, response }) {
   return env.window.fetch;
 }
 
+function loadAliasTerminal() {
+  const term = createTerm();
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      team: {},
+      term,
+    },
+  });
+  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  const { commands, extend } = env.exportValues(["commands", "extend"]);
+  extend(term);
+  return { commands, extend, term };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   if (env) {
@@ -270,7 +299,7 @@ describe("terminal-ext", () => {
     );
   });
 
-  it("preserves environment state across init, shell reset, and resize replay", () => {
+  it("preserves environment state across init, shell reset, and resize replay", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
     extend(term);
@@ -284,15 +313,184 @@ describe("terminal-ext", () => {
 
     term.runDeepLink = vi.fn();
     term.history = ["historical mutation"];
-    term.command = vi.fn(() => term.environment.set("KEEP", "replayed"));
+    // Replay now runs each history line through executeCommandLine, so the
+    // replayed mutation happens at the dispatch seam.
+    term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
     const persistedBeforeResize = env.window.localStorage.getItem(
       environmentStorageKey
     );
-    term.resizeListener();
+    await term.resizeListener();
+    expect(term.dispatchCommand).toHaveBeenCalledTimes(1);
     expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
     expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
       persistedBeforeResize
     );
+  });
+
+  it("hydrates only valid persisted aliases, including prototype-shaped names", () => {
+    const { extend } = loadTerminalExt();
+    env.window.localStorage.setItem(
+      "rootvc.aliases",
+      JSON.stringify([
+        ["zebra", "echo last"],
+        ["constructor", "echo constructor"],
+        ["__proto__", "echo proto"],
+        ["bad-name", "ignored"],
+        ["missing-value"],
+        ["wrong-value", 42],
+      ])
+    );
+    const term = createTerm();
+
+    extend(term);
+
+    expect(term.getAliases()).toEqual([
+      ["__proto__", "echo proto"],
+      ["constructor", "echo constructor"],
+      ["zebra", "echo last"],
+    ]);
+    expect(term.getAlias("constructor")).toBe("echo constructor");
+    expect(term.getAlias("__proto__")).toBe("echo proto");
+  });
+
+  it.each(["not json", JSON.stringify({ alias: "echo nope" })])(
+    "starts with an empty alias map for malformed stored payload %s",
+    (payload) => {
+      const { extend } = loadTerminalExt();
+      env.window.localStorage.setItem("rootvc.aliases", payload);
+      const term = createTerm();
+
+      expect(() => extend(term)).not.toThrow();
+      expect(term.getAliases()).toEqual([]);
+    }
+  );
+
+  it("starts safely when reading browser storage throws", () => {
+    const { extend } = loadTerminalExt();
+    vi.spyOn(env.window.Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    const term = createTerm();
+
+    expect(() => extend(term)).not.toThrow();
+    expect(term.getAliases()).toEqual([]);
+  });
+
+  it("persists complete snapshots before committing define, redefine, and removal", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+
+    expect(term.defineAlias("constructor", "echo one")).toBe(true);
+    expect(term.defineAlias("Alpha", "echo alpha")).toBe(true);
+    expect(term.defineAlias("constructor", "echo two")).toBe(true);
+    expect(term.removeAlias("Alpha")).toBe(true);
+
+    expect(term.getAliases()).toEqual([["constructor", "echo two"]]);
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["constructor", "echo two"],
+    ]);
+
+    const reloaded = createTerm();
+    extend(reloaded);
+    expect(reloaded.getAliases()).toEqual([["constructor", "echo two"]]);
+  });
+
+  it("does not write or mutate for invalid and unknown state operations", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("kept", "echo safe");
+    const setItem = vi.spyOn(env.window.Storage.prototype, "setItem");
+    setItem.mockClear();
+
+    expect(term.defineAlias("bad-name", "echo nope")).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+
+    expect(term.removeAlias("missing")).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+  });
+
+  it("leaves memory unchanged when storage rejects a mutation", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("kept", "echo safe");
+    vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    expect(() => term.defineAlias("newAlias", "echo new")).toThrow(
+      "storage unavailable"
+    );
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+
+    expect(() => term.removeAlias("kept")).toThrow("storage unavailable");
+    expect(term.getAliases()).toEqual([["kept", "echo safe"]]);
+  });
+
+  it("preserves state across the complete alias and unalias command sequence", () => {
+    const { extend, term } = loadAliasTerminal();
+    const setItem = vi.spyOn(env.window.Storage.prototype, "setItem");
+
+    term.command("alias");
+    expect(term.writeln).not.toHaveBeenCalled();
+
+    term.command("alias zebra=echo first");
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["zebra", "echo first"],
+    ]);
+
+    term.command("alias zebra=echo replaced");
+    expect(term.getAlias("zebra")).toBe("echo replaced");
+
+    setItem.mockClear();
+    term.command("alias bad-name=echo nope");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "alias: invalid name: bad-name"
+    );
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAlias("zebra")).toBe("echo replaced");
+
+    term.command("unalias missing");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "unalias: missing: not defined"
+    );
+    expect(setItem).not.toHaveBeenCalled();
+    expect(term.getAlias("zebra")).toBe("echo replaced");
+
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    expect(reloaded.getAlias("zebra")).toBe("echo replaced");
+
+    reloaded.command("unalias zebra");
+    expect(reloaded.getAliases()).toEqual([]);
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual(
+      []
+    );
+
+    const secondReload = createTerm();
+    env.window.term = secondReload;
+    extend(secondReload);
+    expect(secondReload.getAliases()).toEqual([]);
+  });
+
+  it("reports a failed unalias storage write without changing memory", () => {
+    const { term } = loadAliasTerminal();
+    term.command("alias kept=echo safe");
+    vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    term.command("unalias kept");
+
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "unalias: unable to save aliases; no changes were made"
+    );
+    expect(term.getAlias("kept")).toBe("echo safe");
   });
 
   it("normalizes preload-only aliases before resolving assets", async () => {
@@ -345,7 +543,11 @@ describe("terminal-ext", () => {
       { args: "", command: "help", event: "commandSent" },
     ]);
     expect(term.busy).toBe(false);
-    expect(term.dispatchCommand).toHaveBeenCalledWith("help", []);
+    expect(term.dispatchCommand).toHaveBeenCalledWith(
+      "help",
+      [],
+      expect.objectContaining({ cmd: "help", args: [], line: "help" })
+    );
   });
 
   it("expands every recognized argument reference once without changing token boundaries", () => {
@@ -401,7 +603,11 @@ describe("terminal-ext", () => {
     releasePreload();
     await execution;
 
-    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", ["before"]);
+    expect(term.dispatchCommand).toHaveBeenCalledWith(
+      "echo",
+      ["before"],
+      expect.objectContaining({ cmd: "echo", line: "EcHo $NAME" })
+    );
     expect(term.dispatchCommand.mock.calls[0][1]).toBe(preloadedArgs);
     expect(term.history).toEqual(["EcHo $NAME"]);
     expect(env.window.dataLayer).toEqual([
@@ -427,9 +633,11 @@ describe("terminal-ext", () => {
       "expanded value",
     ]);
     expect(term.dispatchCommand).toHaveBeenCalledTimes(1);
-    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", [
-      "expanded value",
-    ]);
+    expect(term.dispatchCommand).toHaveBeenCalledWith(
+      "echo",
+      ["expanded value"],
+      expect.objectContaining({ cmd: "echo", line: "echo $NAME" })
+    );
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
@@ -477,7 +685,7 @@ describe("terminal-ext", () => {
     expect(afterRefillReload.environment.get("OVER")).toBeUndefined();
   });
 
-  it("replays environment history for output without changing active or persisted state", () => {
+  it("replays environment history for output without changing active or persisted state", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
     extend(term);
@@ -503,7 +711,7 @@ describe("terminal-ext", () => {
     env.window.commands.unset = (args) => term.environment.unset(args[0]);
     const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
 
-    term.resizeListener();
+    await term.resizeListener();
 
     expect(term.writeln).toHaveBeenCalledWith("ACTIVE=later value");
     expect(term.writeln).toHaveBeenCalledWith("TEMP=two");
@@ -805,6 +1013,272 @@ describe("terminal-ext", () => {
     expect(term.writeln).toBe(originalWriteln);
   });
 
+  it("uses one quote-aware parse for preload and dispatch", async () => {
+    const help = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help } });
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`help "double space" 'single space' plain`);
+
+    const args = ["double space", "single space", "plain"];
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("help", args);
+    expect(help).toHaveBeenCalledWith(args);
+  });
+
+  it("preserves positional empty quoted words for preload and dispatch", async () => {
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { target } });
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`target '' before "" between '' after ""`);
+
+    const args = ["", "before", "", "between", "", "after", ""];
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("target", args);
+    expect(target).toHaveBeenCalledWith(args);
+  });
+
+  it.each([`target ''`, `target ""`])(
+    "preserves a standalone empty quoted word in %s",
+    async (line) => {
+      const target = vi.fn();
+      const { extend } = loadTerminalExt({ commands: { target } });
+      const term = createTerm();
+      extend(term);
+      term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+      await term.executeCommandLine(line);
+
+      expect(target).toHaveBeenCalledWith([""]);
+      expect(term.preloadCommandAssets).toHaveBeenCalledWith("target", [""]);
+    }
+  );
+
+  it("expands an exact-case user alias once and appends grouped caller arguments", async () => {
+    const target = vi.fn();
+    const second = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { target, second } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("Run", `target "alias group"`);
+    term.defineAlias("target", "second");
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`Run 'caller group' tail`);
+
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("target", [
+      "alias group",
+      "caller group",
+      "tail",
+    ]);
+    expect(target).toHaveBeenCalledWith([
+      "alias group",
+      "caller group",
+      "tail",
+    ]);
+    expect(second).not.toHaveBeenCalled();
+    expect(term.history).toEqual([`Run 'caller group' tail`]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "caller group tail", command: "run", event: "commandSent" },
+    ]);
+
+    target.mockClear();
+    await term.executeCommandLine("run untouched");
+    expect(target).not.toHaveBeenCalled();
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "Command not found: run. Try 'help' to get started."
+    );
+  });
+
+  it("keeps empty quoted caller arguments in an expanded command", async () => {
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { target } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("run", `target "alias group"`);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`run '' before "" after '' ""`);
+
+    const args = ["alias group", "", "before", "", "after", "", ""];
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("target", args);
+    expect(target).toHaveBeenCalledWith(args);
+  });
+
+  it("runs a persisted maker alias through the production whois handler after reload", async () => {
+    const { extend, term } = loadAliasTerminal();
+    term.printArt = vi.fn(term.printArt.bind(term));
+
+    term.command("alias maker=whois");
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["maker", "whois"],
+    ]);
+
+    await term.executeCommandLine("maker root");
+    expect(term.printArt).toHaveBeenCalledWith("rootvc-square");
+
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    reloaded.printArt = vi.fn(reloaded.printArt.bind(reloaded));
+    reloaded.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await reloaded.executeCommandLine("maker root");
+
+    expect(reloaded.preloadCommandAssets).toHaveBeenCalledWith("whois", ["root"]);
+    expect(reloaded.printArt).toHaveBeenCalledWith("rootvc-square");
+    reloaded.command("alias maker");
+    expect(reloaded.writeln).toHaveBeenLastCalledWith("maker=whois");
+  });
+
+  it("preloads expanded asset commands and preserves unknown-command errors", async () => {
+    const cat = vi.fn();
+    const getPreloadFileForCommand = vi.fn(() => "README.md");
+    const ensureFileLoaded = vi.fn(() => Promise.resolve());
+    const { extend } = loadTerminalExt({
+      commands: { cat },
+      ensureFileLoaded,
+      getPreloadFileForCommand,
+    });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("read", `cat "README.md"`);
+    term.defineAlias("lost", `missing "grouped arg"`);
+
+    await term.executeCommandLine("read");
+    expect(getPreloadFileForCommand).toHaveBeenCalledWith("cat", ["README.md"]);
+    expect(ensureFileLoaded).toHaveBeenCalledWith("README.md");
+    expect(cat).toHaveBeenCalledWith(["README.md"]);
+
+    await term.executeCommandLine("lost tail");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "Command not found: missing. Try 'help' to get started."
+    );
+  });
+
+  it("allows an alias to shadow a command until it is removed", async () => {
+    const help = vi.fn();
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help, target } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("help", "target shadowed");
+
+    await term.executeCommandLine("help caller");
+    expect(target).toHaveBeenCalledWith(["shadowed", "caller"]);
+    expect(help).not.toHaveBeenCalled();
+
+    term.removeAlias("help");
+    await term.executeCommandLine("help caller");
+    expect(help).toHaveBeenCalledWith(["caller"]);
+  });
+
+  it("preserves quoted alias values through public definition and reload", async () => {
+    const target = vi.fn();
+    const { commands, extend, term } = loadAliasTerminal();
+    commands.target = target;
+
+    await term.executeCommandLine('alias run=target "two words"');
+    expect(term.getAlias("run")).toBe('target "two words"');
+    expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
+      ["run", 'target "two words"'],
+    ]);
+    await term.executeCommandLine("run tail");
+    expect(target).toHaveBeenLastCalledWith(["two words", "tail"]);
+
+    const reloadedTarget = vi.fn();
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    commands.target = reloadedTarget;
+    expect(reloaded.getAlias("run")).toBe('target "two words"');
+    reloaded.command("alias run");
+    expect(reloaded.writeln).toHaveBeenLastCalledWith('run=target "two words"');
+    await reloaded.executeCommandLine("run tail");
+    expect(reloadedTarget).toHaveBeenLastCalledWith(["two words", "tail"]);
+  });
+
+  it("preserves lexical metadata when an alias expands to the alias command", async () => {
+    const target = vi.fn();
+    const { commands, extend, term } = loadAliasTerminal();
+    commands.target = target;
+    term.defineAlias("meta", 'alias run=target "two words"');
+    term.defineAlias("alias", "target recursive");
+    const getAlias = vi.spyOn(term, "getAlias");
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+
+    await term.executeCommandLine(`meta 'from meta'`);
+
+    expect(getAlias).toHaveBeenCalledTimes(1);
+    expect(getAlias).toHaveBeenCalledWith("meta");
+    // The caller's raw argument text follows the alias value verbatim, so the
+    // single quotes typed by the caller survive into the stored value.
+    expect(dispatch.mock.calls[0][0]).toBe("alias");
+    expect(dispatch.mock.calls[0][2].line).toBe(
+      `alias run=target "two words" 'from meta'`
+    );
+    expect(dispatch.mock.calls[0][2].rawArgs).toBe(
+      `run=target "two words" 'from meta'`
+    );
+    expect(dispatch.mock.calls[0][2].args).toEqual([
+      "run=target",
+      "two words",
+      "from meta",
+    ]);
+    expect(target).not.toHaveBeenCalled();
+    expect(term.getAlias("run")).toBe(`target "two words" 'from meta'`);
+    term.command("alias run");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      `run=target "two words" 'from meta'`
+    );
+    const snapshot = env.window.localStorage.getItem("rootvc.aliases");
+    expect(JSON.parse(snapshot)).toEqual([
+      ["alias", "target recursive"],
+      ["meta", 'alias run=target "two words"'],
+      ["run", `target "two words" 'from meta'`],
+    ]);
+
+    await term.executeCommandLine(`run 'from caller'`);
+    expect(target).toHaveBeenLastCalledWith([
+      "two words",
+      "from meta",
+      "from caller",
+    ]);
+
+    const reloadedTarget = vi.fn();
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    commands.target = reloadedTarget;
+    expect(env.window.localStorage.getItem("rootvc.aliases")).toBe(snapshot);
+    expect(reloaded.getAlias("run")).toBe(`target "two words" 'from meta'`);
+    reloaded.command("alias run");
+    expect(reloaded.writeln).toHaveBeenLastCalledWith(
+      `run=target "two words" 'from meta'`
+    );
+    await reloaded.executeCommandLine(`run 'after reload'`);
+    expect(reloadedTarget).toHaveBeenLastCalledWith([
+      "two words",
+      "from meta",
+      "after reload",
+    ]);
+  });
+
+  it("treats an empty alias value as an empty replacement token stream", async () => {
+    const help = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("empty", "");
+
+    await term.executeCommandLine("empty help grouped");
+
+    expect(help).toHaveBeenCalledWith(["grouped"]);
+  });
+
   it("routes deep links through executeCommandLine without double prompts", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -842,6 +1316,62 @@ describe("terminal-ext", () => {
       "whois lee",
       expect.objectContaining({ trackAnalytics: false })
     );
+  });
+
+  it("replays alias-backed history through execution without submission side effects", async () => {
+    const target = vi.fn((args) => term.writeln(`target:${args.join("|")}`));
+    const { extend } = loadTerminalExt({ commands: { target } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("run", 'target "alias group"');
+
+    await term.executeCommandLine("run tail");
+    expect(target).toHaveBeenLastCalledWith(["alias group", "tail"]);
+    const historyBeforeResize = [...term.history];
+    const analyticsBeforeResize = [...env.window.dataLayer];
+
+    target.mockClear();
+    term.write.mockClear();
+    term.writeln.mockClear();
+    term.scrollToBottom.mockClear();
+    await expect(term.resizeListener()).resolves.toBeUndefined();
+
+    expect(target).toHaveBeenCalledTimes(1);
+    expect(target).toHaveBeenCalledWith(["alias group", "tail"]);
+    expect(term.writeln).toHaveBeenCalledWith("target:alias group|tail");
+    expect(term.history).toEqual(historyBeforeResize);
+    expect(env.window.dataLayer).toEqual(analyticsBeforeResize);
+    expect(term.write).toHaveBeenCalledWith("\r\nguest:rootpc ~ $ run tail\r\n");
+    expect(term.write).toHaveBeenLastCalledWith("\r\nguest:rootpc ~ $ ");
+    expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["help caller", "help", ["caller"]],
+    ["missing caller", null, null],
+  ])("retains non-alias resize replay for %s", async (line, command, args) => {
+    const help = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help } });
+    const term = createTerm();
+    extend(term);
+
+    await term.executeCommandLine(line);
+    help.mockClear();
+    term.writeln.mockClear();
+    const historyBeforeResize = [...term.history];
+    const analyticsBeforeResize = [...env.window.dataLayer];
+
+    await expect(term.resizeListener()).resolves.toBeUndefined();
+
+    if (command === "help") {
+      expect(help).toHaveBeenCalledWith(args);
+    } else {
+      expect(term.writeln).toHaveBeenCalledWith(
+        "Command not found: missing. Try 'help' to get started."
+      );
+    }
+    expect(term.history).toEqual(historyBeforeResize);
+    expect(env.window.dataLayer).toEqual(analyticsBeforeResize);
   });
 
   it.each([

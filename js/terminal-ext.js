@@ -7,6 +7,36 @@
 //
 // TODO: make this a proper xterm addon
 
+const _parseCommandLine = (line) => {
+  const tokens = [];
+  let token = "";
+  let quote = null;
+  let started = false;
+
+  for (const character of String(line)) {
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      else token += character;
+      started = true;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        tokens.push(token);
+        token = "";
+        started = false;
+      }
+    } else {
+      token += character;
+      started = true;
+    }
+  }
+
+  if (started) tokens.push(token);
+  return tokens;
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -21,6 +51,78 @@ const extend = (term) => {
   term.history = [];
   term.historyCursor = -1;
   term.busy = false;
+
+  // User aliases are closure-owned so command code can only change them through
+  // the storage-first methods below. Entry arrays preserve prototype-shaped
+  // names such as `constructor` and `__proto__` without object-key surprises.
+  const aliasStorageKey = "rootvc.aliases";
+  const aliasNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const compareAliasNames = (left, right) =>
+    left < right ? -1 : left > right ? 1 : 0;
+  let userAliases = new Map();
+
+  try {
+    const storedAliases = window.localStorage.getItem(aliasStorageKey);
+    if (storedAliases !== null) {
+      const entries = JSON.parse(storedAliases);
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          if (
+            Array.isArray(entry) &&
+            entry.length === 2 &&
+            typeof entry[0] === "string" &&
+            aliasNamePattern.test(entry[0]) &&
+            typeof entry[1] === "string"
+          ) {
+            userAliases.set(entry[0], entry[1]);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    // Storage can be unavailable or contain malformed JSON. In either case the
+    // terminal starts with a safe empty alias set rather than failing startup.
+    userAliases = new Map();
+  }
+
+  const persistAliases = (nextAliases) => {
+    const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
+      compareAliasNames(left, right)
+    );
+    window.localStorage.setItem(aliasStorageKey, JSON.stringify(entries));
+  };
+
+  term.getAliases = () =>
+    Array.from(userAliases.entries()).sort(([left], [right]) =>
+      compareAliasNames(left, right)
+    );
+
+  term.getAlias = (name) =>
+    userAliases.has(name) ? userAliases.get(name) : undefined;
+
+  term.defineAlias = (name, value) => {
+    if (!aliasNamePattern.test(name) || typeof value !== "string") {
+      return false;
+    }
+
+    const nextAliases = new Map(userAliases);
+    nextAliases.set(name, value);
+    persistAliases(nextAliases);
+    userAliases = nextAliases;
+    return true;
+  };
+
+  term.removeAlias = (name) => {
+    if (!aliasNamePattern.test(name) || !userAliases.has(name)) {
+      return false;
+    }
+
+    const nextAliases = new Map(userAliases);
+    nextAliases.delete(name);
+    persistAliases(nextAliases);
+    userAliases = nextAliases;
+    return true;
+  };
 
   // Environment variables are private to this extended terminal. Persist only
   // complete, validated snapshots so failed browser storage writes cannot leave
@@ -151,13 +253,16 @@ const extend = (term) => {
     },
   });
 
-  const replayWithoutEnvironmentSideEffects = (replay) => {
+  // The replay may be asynchronous (resize replays each history line through
+  // executeCommandLine so aliases and pipelines apply); the guard is held for
+  // its whole duration and restored afterwards.
+  const replayWithoutEnvironmentSideEffects = async (replay) => {
     const activeVariables = environmentVariables;
     const previousPersistenceSetting = environmentPersistenceEnabled;
     environmentVariables = new Map(activeVariables);
     environmentPersistenceEnabled = false;
     try {
-      replay();
+      await replay();
     } finally {
       environmentVariables = activeVariables;
       environmentPersistenceEnabled = previousPersistenceSetting;
@@ -352,13 +457,34 @@ const extend = (term) => {
 
   // ── Command Dispatch ───────────────────────────────────────────────────────
 
+  const parseCommandLine = (line) => {
+    const trimmedLine = String(line).trim();
+    const [name = "", ...args] = _parseCommandLine(trimmedLine);
+    const argumentStart = trimmedLine.search(/\s/);
+    const parsed = {
+      line: trimmedLine,
+      name,
+      cmd: name.toLowerCase(),
+      args,
+    };
+    // Keep lexical syntax available to handlers without changing the parsed
+    // command's longstanding enumerable shape used by preload and dispatch.
+    Object.defineProperty(parsed, "rawArgs", {
+      value: argumentStart === -1 ? "" : trimmedLine.slice(argumentStart).trimStart(),
+    });
+    return parsed;
+  };
+
   // Dispatches an already prepared command. Redirecting commands use this seam
   // so expanded values remain opaque data rather than being parsed or expanded
-  // for a second time.
-  term.dispatchCommand = (cmd, args) => {
+  // for a second time. The alias handler additionally receives the parsed
+  // record so the lexical rawArgs span reaches it.
+  term.dispatchCommand = (cmd, args, parsed) => {
     const fn = commands[cmd];
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
+    } else if (cmd === "alias") {
+      return fn(args, parsed);
     } else {
       return fn(args);
     }
@@ -404,30 +530,54 @@ const extend = (term) => {
     return expanded;
   };
 
-  term.parseCommandLine = (line) => {
-    const trimmedLine = line.trim();
-    const parts = trimmedLine ? trimmedLine.split(/\s+/) : [""];
-    return {
-      line: trimmedLine,
-      cmd: (parts[0] || "").toLowerCase(),
-      args: parts.slice(1),
-    };
+  // Public quote-aware parse of a raw line (no alias or variable expansion).
+  term.parseCommandLine = parseCommandLine;
+
+  const expandUserAlias = (parsed) => {
+    const value = term.getAlias(parsed.name);
+    if (typeof value === "undefined") {
+      return parsed;
+    }
+
+    // Shell-style first-word replacement: the stored value substitutes for the
+    // command word and the caller's raw argument text follows verbatim. One
+    // lexical parse of the result keeps line, cooked arguments, and the
+    // non-enumerable rawArgs consumed by the alias handler coherent, while the
+    // caller's own quoting, empty quoted words, and pipeline separators keep
+    // exactly the meaning they had before expansion.
+    const expandedLine =
+      parsed.rawArgs.length > 0 ? `${value} ${parsed.rawArgs}` : value;
+    return parseCommandLine(expandedLine);
   };
 
-  term.prepareCommandLine = (line) => {
-    const parsed = term.parseCommandLine(line);
+  // Expands environment variables in a parsed record's arguments exactly once.
+  // The lexical rawArgs span is carried verbatim: an alias value keeps `$NAME`
+  // for expansion at use time rather than at definition time.
+  const prepareParsed = (parsed) => {
     const variables = term.environment.snapshot();
-    return {
-      ...parsed,
+    const name = typeof parsed.name === "string" ? parsed.name : parsed.cmd;
+    const prepared = {
+      line: parsed.line,
+      name,
+      cmd: String(parsed.cmd).toLowerCase(),
       args: parsed.args.map((argument) => expandArgument(argument, variables)),
     };
+    Object.defineProperty(prepared, "rawArgs", {
+      value: typeof parsed.rawArgs === "string" ? parsed.rawArgs : "",
+    });
+    return prepared;
   };
 
-  // Parses and executes a raw command line. Interactive execution prepares once
-  // before preload; this remains the compatible raw-line seam used by replay.
+  term.prepareCommandLine = (line) => prepareParsed(parseCommandLine(line));
+
+  // Parses a raw line (or accepts a parsed record for an internal redirect),
+  // expands environment variables once, and dispatches. User aliases are never
+  // applied here: expansion belongs only to executeCommandLine below so a
+  // redirect or replay cannot trigger a second alias lookup.
   term.command = (line) => {
-    const prepared = term.prepareCommandLine(line);
-    return term.dispatchCommand(prepared.cmd, prepared.args);
+    const parsed = typeof line === "string" ? parseCommandLine(line) : line;
+    const prepared = prepareParsed(parsed);
+    return term.dispatchCommand(prepared.cmd, prepared.args, prepared);
   };
 
   term.normalizeCommandForPreload = (cmd, args) => {
@@ -459,10 +609,13 @@ const extend = (term) => {
     }
   };
 
+  // Accepts a prepared (cmd, args) pair, a raw line, or a parsed record.
   term.preloadCommandAssets = async (cmdOrLine, preparedArgs) => {
     const prepared = Array.isArray(preparedArgs)
       ? { cmd: cmdOrLine, args: preparedArgs }
-      : term.prepareCommandLine(cmdOrLine);
+      : typeof cmdOrLine === "string"
+        ? term.prepareCommandLine(cmdOrLine)
+        : prepareParsed(cmdOrLine);
     const normalized = term.normalizeCommandForPreload(prepared.cmd, prepared.args);
     const tasks = [];
     const artId = getASCIIArtIdForCommand(normalized.cmd, normalized.args);
@@ -488,10 +641,14 @@ const extend = (term) => {
       promptAfter: true,
       showLeadingNewline: true,
       trackAnalytics: true,
+      scrollAfter: true,
       ...options,
     };
-    const parsed = term.parseCommandLine(line);
-    const parsedPipeline = Pipeline.parsePipeline(parsed.line);
+    const parsed = parseCommandLine(line);
+    // User aliases expand exactly once, on the interactive line and before
+    // pipeline parsing; redirects and replays never expand a second time.
+    const expanded = expandUserAlias(parsed);
+    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
     let exitStatus;
 
     try {
@@ -566,10 +723,11 @@ const extend = (term) => {
           }
         }
       } else {
-        // Interactive execution prepares (expands) the line exactly once, before
-        // preload, and dispatches the prepared command so expanded values stay
-        // opaque data instead of being parsed or expanded a second time.
-        const prepared = term.prepareCommandLine(parsed.line);
+        // Interactive execution prepares (expands) the alias-expanded line
+        // exactly once, before preload, and dispatches the prepared record so
+        // expanded values stay opaque data instead of being parsed or expanded
+        // a second time, and so the lexical rawArgs reach the alias handler.
+        const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
 
         if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
@@ -584,7 +742,7 @@ const extend = (term) => {
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
-          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args);
+          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
 
           if (settings.trackAnalytics) {
             window.dataLayer = window.dataLayer || [];
@@ -609,7 +767,9 @@ const extend = (term) => {
         term.busy = false;
       }
 
-      term.scrollToBottom();
+      if (settings.scrollAfter) {
+        term.scrollToBottom();
+      }
     }
 
     return exitStatus;
@@ -620,17 +780,27 @@ const extend = (term) => {
   // Called on window resize. xterm clears its buffer on resize, so we
   // reinitialize the terminal and replay the entire command history to restore
   // the visible output, then re-render the prompt at the bottom.
-  term.resizeListener = () => {
+  term.resizeListener = async () => {
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
-    term.runDeepLink({ replay: true });
-    replayWithoutEnvironmentSideEffects(() => {
+    await term.runDeepLink({ replay: true });
+    // Replay serially through the full execution boundary so aliases and
+    // pipelines apply exactly as they did interactively, while environment
+    // mutations replayed from history never persist a second time.
+    await replayWithoutEnvironmentSideEffects(async () => {
       for (const c of term.history) {
         term.prompt("\r\n", ` ${c}\r\n`);
-        term.command(c);
+        await term.executeCommandLine(c, {
+          addToHistory: false,
+          manageBusy: false,
+          promptAfter: false,
+          showLeadingNewline: false,
+          trackAnalytics: false,
+          scrollAfter: false,
+        });
       }
     });
     term.prompt();
@@ -687,11 +857,11 @@ const extend = (term) => {
   //
   // `replay` is set by the resize listener, which reruns this to redraw a
   // buffer xterm cleared. That is the same visit, not a new arrival, so it must
-  // not be counted again — the history replay right below it calls term.command
-  // directly rather than executeCommandLine for exactly this reason.
+  // not be counted again. History replay uses the same execution boundary with
+  // its user-visible submission side effects disabled for the same reason.
   term.runDeepLink = ({ replay = false } = {}) => {
     if (term.deepLink != "") {
-      term.executeCommandLine(term.deepLink, {
+      return term.executeCommandLine(term.deepLink, {
         addToHistory: false,
         promptAfter: false,
         showLeadingNewline: false,
@@ -703,6 +873,8 @@ const extend = (term) => {
         console.error("Deep link failed", error);
       });
     }
+
+    return Promise.resolve();
   };
 
   // ── Interactive Input ──────────────────────────────────────────────────────

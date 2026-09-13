@@ -124,6 +124,11 @@ const commands = {
     });
   },
 
+  // `man` is defined once, below the pipeline manuals: it serves the alias and
+  // unalias manuals, the bookmark and go manuals, the environment topics, the
+  // pipeline filters, and `shortcuts`, and every other topic retains the
+  // established portfolio lookup behavior via tldr.
+
   // Displays bio and ASCII art portrait for a team member, or the firm blurb.
   whois: function (args) {
     const name = args[0];
@@ -777,8 +782,88 @@ const commands = {
     term.stylePrint("Come on, don't mess with our immaculate file system.");
   },
 
-  alias: function () {
-    term.stylePrint("Just call me HAL.");
+  alias: function (args, parsed) {
+    const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+    if (args.length === 0) {
+      for (const [name, value] of term.getAliases()) {
+        term.stylePrint(`${name}=${value}`);
+      }
+      return;
+    }
+
+    const equalsAt = args[0].indexOf("=");
+    if (equalsAt === -1) {
+      if (args.length !== 1) {
+        term.stylePrint("alias: invalid form. Use alias name=value or alias name.");
+        return;
+      }
+
+      const name = args[0];
+      if (!namePattern.test(name)) {
+        term.stylePrint(`alias: invalid name: ${name}`);
+        return;
+      }
+
+      const value = term.getAlias(name);
+      if (typeof value === "undefined") {
+        term.stylePrint(`alias: ${name}: not defined`);
+        return;
+      }
+
+      term.stylePrint(`${name}=${value}`);
+      return;
+    }
+
+    const name = args[0].slice(0, equalsAt);
+    if (!namePattern.test(name)) {
+      term.stylePrint(`alias: invalid name: ${name || "(empty)"}`);
+      return;
+    }
+
+    // Public command dispatch includes the original lexical argument span.
+    // Preserve it so quotes and empty quoted words retain their meaning when
+    // the stored alias value is parsed during expansion. Direct handler calls
+    // keep the legacy cooked-token reconstruction used by command unit tests.
+    const rawEqualsAt = parsed && typeof parsed.rawArgs === "string"
+      ? parsed.rawArgs.indexOf("=")
+      : -1;
+    const value = rawEqualsAt !== -1
+      ? parsed.rawArgs.slice(rawEqualsAt + 1)
+      : [
+          args[0].slice(equalsAt + 1),
+          ...args.slice(1).map((part) => (/\s/.test(part) ? `"${part}"` : part)),
+        ].join(" ");
+    try {
+      term.defineAlias(name, value);
+    } catch (error) {
+      term.stylePrint("alias: unable to save aliases; no changes were made");
+    }
+  },
+
+  unalias: function (args) {
+    const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    if (args.length !== 1) {
+      term.stylePrint("unalias: invalid form. Use unalias name.");
+      return;
+    }
+
+    const name = args[0];
+    if (!namePattern.test(name)) {
+      term.stylePrint(`unalias: invalid name: ${name}`);
+      return;
+    }
+
+    if (typeof term.getAlias(name) === "undefined") {
+      term.stylePrint(`unalias: ${name}: not defined`);
+      return;
+    }
+
+    try {
+      term.removeAlias(name);
+    } catch (error) {
+      term.stylePrint("unalias: unable to save aliases; no changes were made");
+    }
   },
 
   df: function () {
@@ -1108,8 +1193,8 @@ const _aliases = {
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
   // woman retains the original portfolio-manual alias; man handles its local
-  // manuals (bookmark, go, the environment topics, the pipeline filters,
-  // shortcuts) directly and delegates every other topic to tldr.
+  // manuals (alias, unalias, bookmark, go, the environment topics, the pipeline
+  // filters, shortcuts) directly and delegates every other topic to tldr.
   woman: "tldr",
   // Session control
   quit: "exit", stop: "exit",
@@ -1179,6 +1264,18 @@ commands.man = function (args) {
     Object.entries(shortcuts).forEach(function (kv) {
       term.stylePrint(`${kv[0]}: ${kv[1]}`);
     });
+    return;
+  }
+  if (args.length === 1 && topic === "alias") {
+    term.stylePrint("alias: define, list, or query command aliases - usage:");
+    term.stylePrint("%alias% name=value  define or replace an alias");
+    term.stylePrint("%alias%             list all aliases sorted by name");
+    term.stylePrint("%alias% name        print one alias");
+    return;
+  }
+  if (args.length === 1 && topic === "unalias") {
+    term.stylePrint("unalias: remove a command alias - usage:");
+    term.stylePrint("%unalias% name");
     return;
   }
   if (args.length === 1 && topic === "bookmark") {

@@ -10,6 +10,8 @@ const shortcuts = {
 
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%alias% [name[=value]]": "define, list, or query command aliases",
+  "%unalias% name": "remove a command alias",
   "%bookmark% add NAME": "save the current directory as NAME",
   "%bookmark% list": "list saved directory bookmarks",
   "%bookmark% remove NAME": "remove a saved directory bookmark",
