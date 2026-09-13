@@ -380,7 +380,7 @@ describe("terminal-ext", () => {
     expect(term.preloadCommandAssets).toHaveBeenCalledWith({
       args: ["alias group", "caller group", "tail"],
       cmd: "target",
-      line: `"target" "alias group" "caller group" "tail"`,
+      line: `target "alias group" "caller group" "tail"`,
       name: "target",
     });
     expect(target).toHaveBeenCalledWith([
@@ -416,7 +416,7 @@ describe("terminal-ext", () => {
     expect(term.preloadCommandAssets).toHaveBeenCalledWith({
       args,
       cmd: "target",
-      line: `"target" "alias group" "" "before" "" "after" "" ""`,
+      line: `target "alias group" "" "before" "" "after" "" ""`,
       name: "target",
     });
     expect(target).toHaveBeenCalledWith(args);
@@ -445,7 +445,7 @@ describe("terminal-ext", () => {
     expect(reloaded.preloadCommandAssets).toHaveBeenCalledWith({
       args: ["root"],
       cmd: "whois",
-      line: `"whois" "root"`,
+      line: `whois "root"`,
       name: "whois",
     });
     expect(reloaded.printArt).toHaveBeenCalledWith("rootvc-square");
@@ -518,6 +518,69 @@ describe("terminal-ext", () => {
     expect(reloaded.writeln).toHaveBeenLastCalledWith('run=target "two words"');
     await reloaded.executeCommandLine("run tail");
     expect(reloadedTarget).toHaveBeenLastCalledWith(["two words", "tail"]);
+  });
+
+  it("preserves lexical metadata when an alias expands to the alias command", async () => {
+    const target = vi.fn();
+    const { commands, extend, term } = loadAliasTerminal();
+    commands.target = target;
+    term.defineAlias("meta", 'alias run=target "two words"');
+    term.defineAlias("alias", "target recursive");
+    const getAlias = vi.spyOn(term, "getAlias");
+    const command = vi.spyOn(term, "command");
+
+    await term.executeCommandLine(`meta 'from meta'`);
+
+    expect(getAlias).toHaveBeenCalledTimes(1);
+    expect(getAlias).toHaveBeenCalledWith("meta");
+    expect(command.mock.calls[0][0].line).toBe(
+      'alias run=target "two words" "from meta"'
+    );
+    expect(command.mock.calls[0][0].rawArgs).toBe(
+      'run=target "two words" "from meta"'
+    );
+    expect(command.mock.calls[0][0].args).toEqual([
+      "run=target",
+      "two words",
+      "from meta",
+    ]);
+    expect(target).not.toHaveBeenCalled();
+    expect(term.getAlias("run")).toBe('target "two words" "from meta"');
+    term.command("alias run");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      'run=target "two words" "from meta"'
+    );
+    const snapshot = env.window.localStorage.getItem("rootvc.aliases");
+    expect(JSON.parse(snapshot)).toEqual([
+      ["alias", "target recursive"],
+      ["meta", 'alias run=target "two words"'],
+      ["run", 'target "two words" "from meta"'],
+    ]);
+
+    await term.executeCommandLine(`run 'from caller'`);
+    expect(target).toHaveBeenLastCalledWith([
+      "two words",
+      "from meta",
+      "from caller",
+    ]);
+
+    const reloadedTarget = vi.fn();
+    const reloaded = createTerm();
+    env.window.term = reloaded;
+    extend(reloaded);
+    commands.target = reloadedTarget;
+    expect(env.window.localStorage.getItem("rootvc.aliases")).toBe(snapshot);
+    expect(reloaded.getAlias("run")).toBe('target "two words" "from meta"');
+    reloaded.command("alias run");
+    expect(reloaded.writeln).toHaveBeenLastCalledWith(
+      'run=target "two words" "from meta"'
+    );
+    await reloaded.executeCommandLine(`run 'after reload'`);
+    expect(reloadedTarget).toHaveBeenLastCalledWith([
+      "two words",
+      "from meta",
+      "after reload",
+    ]);
   });
 
   it("treats an empty alias value as an empty replacement token stream", async () => {

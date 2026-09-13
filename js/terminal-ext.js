@@ -367,17 +367,15 @@ const extend = (term) => {
       return parsed;
     }
 
-    const replacementTokens = [
-      ..._parseCommandLine(value),
-      ...parsed.args,
-    ];
-    const [name = "", ...args] = replacementTokens;
-    return {
-      line: replacementTokens.map(_serializeCommandToken).join(" "),
-      name,
-      cmd: name.toLowerCase(),
-      args,
-    };
+    // Parse one complete lexical command so line, cooked arguments, and the
+    // non-enumerable rawArgs consumed by the alias handler stay coherent. The
+    // stored value retains its original quotes while serialized caller tokens
+    // append without losing their already-parsed grouping.
+    const expandedLine = [
+      value,
+      ...parsed.args.map(_serializeCommandToken),
+    ].join(" ");
+    return parseCommandLine(expandedLine);
   };
 
   term.normalizeCommandForPreload = (cmd, args) => {
