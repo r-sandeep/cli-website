@@ -298,7 +298,110 @@ describe("terminal-ext", () => {
       { args: "", command: "help", event: "commandSent" },
     ]);
     expect(term.busy).toBe(false);
-    expect(term.command).toHaveBeenCalledWith("help");
+    expect(term.command).toHaveBeenCalledWith({
+      args: [],
+      cmd: "help",
+      line: "help",
+      name: "help",
+    });
+  });
+
+  it("uses one quote-aware parse for preload and dispatch", async () => {
+    const help = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help } });
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`help "double space" 'single space' plain`);
+
+    const parsed = {
+      args: ["double space", "single space", "plain"],
+      cmd: "help",
+      line: `help "double space" 'single space' plain`,
+      name: "help",
+    };
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith(parsed);
+    expect(help).toHaveBeenCalledWith(parsed.args);
+  });
+
+  it("expands an exact-case user alias once and appends grouped caller arguments", async () => {
+    const target = vi.fn();
+    const second = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { target, second } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("Run", `target "alias group"`);
+    term.defineAlias("target", "second");
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine(`Run 'caller group' tail`);
+
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith({
+      args: ["alias group", "caller group", "tail"],
+      cmd: "target",
+      line: `target "alias group"`,
+      name: "target",
+    });
+    expect(target).toHaveBeenCalledWith([
+      "alias group",
+      "caller group",
+      "tail",
+    ]);
+    expect(second).not.toHaveBeenCalled();
+    expect(term.history).toEqual([`Run 'caller group' tail`]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "caller group tail", command: "run", event: "commandSent" },
+    ]);
+
+    target.mockClear();
+    await term.executeCommandLine("run untouched");
+    expect(target).not.toHaveBeenCalled();
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "Command not found: run. Try 'help' to get started."
+    );
+  });
+
+  it("preloads expanded asset commands and preserves unknown-command errors", async () => {
+    const cat = vi.fn();
+    const getPreloadFileForCommand = vi.fn(() => "README.md");
+    const ensureFileLoaded = vi.fn(() => Promise.resolve());
+    const { extend } = loadTerminalExt({
+      commands: { cat },
+      ensureFileLoaded,
+      getPreloadFileForCommand,
+    });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("read", `cat "README.md"`);
+    term.defineAlias("lost", `missing "grouped arg"`);
+
+    await term.executeCommandLine("read");
+    expect(getPreloadFileForCommand).toHaveBeenCalledWith("cat", ["README.md"]);
+    expect(ensureFileLoaded).toHaveBeenCalledWith("README.md");
+    expect(cat).toHaveBeenCalledWith(["README.md"]);
+
+    await term.executeCommandLine("lost tail");
+    expect(term.writeln).toHaveBeenLastCalledWith(
+      "Command not found: missing. Try 'help' to get started."
+    );
+  });
+
+  it("allows an alias to shadow a command until it is removed", async () => {
+    const help = vi.fn();
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help, target } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("help", "target shadowed");
+
+    await term.executeCommandLine("help caller");
+    expect(target).toHaveBeenCalledWith(["shadowed", "caller"]);
+    expect(help).not.toHaveBeenCalled();
+
+    term.removeAlias("help");
+    await term.executeCommandLine("help caller");
+    expect(help).toHaveBeenCalledWith(["caller"]);
   });
 
   it("routes deep links through executeCommandLine without double prompts", () => {

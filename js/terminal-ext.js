@@ -312,27 +312,50 @@ const extend = (term) => {
 
   // ── Command Dispatch ───────────────────────────────────────────────────────
 
-  // Parses and executes a command line string. Called both by the Enter handler
-  // in terminal.js and internally by commands that redirect to other commands.
+  const parseCommandLine = (line) => {
+    const trimmedLine = String(line).trim();
+    const [name = "", ...args] = _parseCommandLine(trimmedLine);
+    return {
+      line: trimmedLine,
+      name,
+      cmd: name.toLowerCase(),
+      args,
+    };
+  };
+
+  // Executes a parsed command, or parses an internal redirect without applying
+  // user aliases. Expansion belongs only to executeCommandLine below so a
+  // redirect cannot accidentally trigger a second alias lookup.
   term.command = (line) => {
-    const parts = line.split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1, parts.length);
+    const parsed = typeof line === "string" ? parseCommandLine(line) : line;
+    const cmd = parsed.cmd.toLowerCase();
     const fn = commands[cmd];
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
     } else {
-      return fn(args);
+      return fn(parsed.args);
     }
   };
 
   term.parseCommandLine = (line) => {
-    const trimmedLine = line.trim();
-    const parts = trimmedLine ? trimmedLine.split(/\s+/) : [""];
+    const parsed = parseCommandLine(line);
     return {
-      line: trimmedLine,
-      cmd: (parts[0] || "").toLowerCase(),
-      args: parts.slice(1),
+      line: parsed.line,
+      cmd: parsed.cmd,
+      args: parsed.args,
+    };
+  };
+
+  const expandUserAlias = (parsed) => {
+    const value = term.getAlias(parsed.name);
+    if (typeof value === "undefined") {
+      return parsed;
+    }
+
+    const replacement = parseCommandLine(value);
+    return {
+      ...replacement,
+      args: [...replacement.args, ...parsed.args],
     };
   };
 
@@ -366,7 +389,8 @@ const extend = (term) => {
   };
 
   term.preloadCommandAssets = async (line) => {
-    const parsed = term.parseCommandLine(line);
+    const parsed =
+      typeof line === "string" ? parseCommandLine(line) : line;
     const normalized = term.normalizeCommandForPreload(parsed.cmd, parsed.args);
     const tasks = [];
     const artId = getASCIIArtIdForCommand(normalized.cmd, normalized.args);
@@ -394,7 +418,8 @@ const extend = (term) => {
       trackAnalytics: true,
       ...options,
     };
-    const parsed = term.parseCommandLine(line);
+    const parsed = parseCommandLine(line);
+    const expanded = expandUserAlias(parsed);
     let exitStatus;
 
     try {
@@ -402,7 +427,7 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      await term.preloadCommandAssets(parsed.line);
+      await term.preloadCommandAssets(expanded);
 
       if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
         term.writeln("");
@@ -413,7 +438,7 @@ const extend = (term) => {
           term.history.push(parsed.line);
         }
 
-        exitStatus = term.command(parsed.line);
+        exitStatus = term.command(expanded);
 
         if (settings.trackAnalytics) {
           window.dataLayer = window.dataLayer || [];

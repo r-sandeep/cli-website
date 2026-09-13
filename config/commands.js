@@ -659,7 +659,12 @@ const commands = {
       return;
     }
 
-    const value = [args[0].slice(equalsAt + 1), ...args.slice(1)].join(" ");
+    // The terminal parser removes quote delimiters while retaining grouped
+    // tokens. Re-quote grouped value tokens so later expansion preserves that
+    // grouping rather than flattening it back into whitespace-separated words.
+    const value = [args[0].slice(equalsAt + 1), ...args.slice(1)]
+      .map((part) => (/\s/.test(part) ? `"${part}"` : part))
+      .join(" ");
     try {
       term.defineAlias(name, value);
     } catch (error) {
@@ -1039,5 +1044,5 @@ const _aliases = {
   privacy: "privacy_dynamics",
 };
 for (const [alias, target] of Object.entries(_aliases)) {
-  commands[alias] = (args) => term.command([target, ...args].join(" ").trim());
+  commands[alias] = (args) => term.command({ cmd: target, args });
 }
