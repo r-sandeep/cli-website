@@ -390,6 +390,74 @@ describe("terminal-ext", () => {
     ]);
   });
 
+  it("completes one interactive environment command lifecycle without disturbing the prompt", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("NAME", "expanded value");
+    term.preloadCommandAssets = vi.fn(async () => {});
+    term.dispatchCommand = vi.fn();
+    term.prompt.mockClear();
+    term.clearCurrentLine.mockClear();
+
+    await term.executeCommandLine("echo $NAME");
+
+    expect(term.history).toEqual(["echo $NAME"]);
+    expect(term.preloadCommandAssets).toHaveBeenCalledTimes(1);
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", [
+      "expanded value",
+    ]);
+    expect(term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", [
+      "expanded value",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
+    expect(term.busy).toBe(false);
+  });
+
+  it("persists both sides of a full-store reject, unset, and refill transition", () => {
+    const { extend } = loadTerminalExt();
+    const fullEntries = Array.from({ length: 50 }, (_, index) => [
+      `V${index}`,
+      String(index),
+    ]);
+    env.window.localStorage.setItem(
+      environmentStorageKey,
+      JSON.stringify({ version: 1, variables: fullEntries })
+    );
+
+    const fullReload = createTerm();
+    extend(fullReload);
+    const persistedAtCapacity = env.window.localStorage.getItem(
+      environmentStorageKey
+    );
+    expect(fullReload.environment.set("OVER", "rejected")).toMatchObject({
+      ok: false,
+      code: "capacity",
+    });
+    expect(fullReload.environment.snapshot().size).toBe(50);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedAtCapacity
+    );
+
+    expect(fullReload.environment.unset("V0")).toMatchObject({ ok: true });
+    const afterUnsetReload = createTerm();
+    extend(afterUnsetReload);
+    expect(afterUnsetReload.environment.snapshot().size).toBe(49);
+    expect(afterUnsetReload.environment.get("V0")).toBeUndefined();
+
+    expect(afterUnsetReload.environment.set("REFILLED", "ready")).toMatchObject({
+      ok: true,
+    });
+    const afterRefillReload = createTerm();
+    extend(afterRefillReload);
+    expect(afterRefillReload.environment.snapshot().size).toBe(50);
+    expect(afterRefillReload.environment.get("REFILLED")).toBe("ready");
+    expect(afterRefillReload.environment.get("OVER")).toBeUndefined();
+  });
+
   it("replays environment history for output without changing active or persisted state", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();

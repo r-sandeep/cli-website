@@ -95,6 +95,32 @@ describe("runRootTerminal", () => {
     expect(term.scrollToBottom).toHaveBeenCalled();
   });
 
+  it("retains bounded input-history navigation after environment commands", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({
+      history: ["export NAME=value", "echo $NAME"],
+    });
+
+    runRootTerminal(term);
+    term._onData("\033[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+
+    term._onData("\033[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith(
+      "export NAME=value",
+      false
+    );
+
+    term._onData("\033[B");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+
+    term._onData("\033[B");
+    expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
+
+    term._onData("\033[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+  });
+
   it("debounces resize handling with requestAnimationFrame", () => {
     const rafCallbacks = [];
     const requestAnimationFrame = vi.fn((callback) => {
