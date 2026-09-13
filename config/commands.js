@@ -1221,6 +1221,18 @@ for (const [alias, target] of Object.entries(_aliases)) {
 // standalone commands. Give them focused manual pages while retaining tldr as
 // man's fallback for portfolio companies and every other topic.
 const _pipelineManuals = {
+  sort: [
+    "%SORT(1)% — sort pipeline output",
+    "Usage: COMMAND | %sort% [-rnu]",
+    "Sort lines by visible text. -r reverses the order, -n compares leading numeric values, and -u removes exact duplicates after sorting. Flags may be combined, for example -rn.",
+    "ANSI color and escape sequences are ignored for comparisons while original styling is preserved.",
+  ],
+  uniq: [
+    "%UNIQ(1)% — collapse adjacent duplicate pipeline output",
+    "Usage: COMMAND | %uniq% [-cd]",
+    "Collapse adjacent lines with identical visible text. -c prefixes each survivor with its run count and one space; -d keeps only repeated runs. Flags may be combined as -cd.",
+    "ANSI color and escape sequences are ignored for duplicate detection while original styling is preserved.",
+  ],
   pipe: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
