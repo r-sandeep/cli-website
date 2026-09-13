@@ -279,10 +279,15 @@ function runRootTerminal(term) {
   };
 
   term.attachCustomKeyEventHandler((event) => {
-    if (event.type === "keydown" && event.key === "Tab") {
+    if (event.key === "Tab") {
       event.preventDefault();
-      completeInput();
-      term.scrollToBottom();
+      // xterm asks about both phases in some browsers. Complete exactly once,
+      // but consume every Tab phase so focus cannot move and no tab reaches
+      // onData as input.
+      if (event.type === "keydown") {
+        completeInput();
+        term.scrollToBottom();
+      }
       return false;
     }
 
