@@ -424,6 +424,7 @@ describe("terminal-ext", () => {
 
   it("runs a persisted maker alias through the production whois handler after reload", async () => {
     const { extend, term } = loadAliasTerminal();
+    term.printArt = vi.fn(term.printArt.bind(term));
 
     term.command("alias maker=whois");
     expect(JSON.parse(env.window.localStorage.getItem("rootvc.aliases"))).toEqual([
@@ -436,6 +437,7 @@ describe("terminal-ext", () => {
     const reloaded = createTerm();
     env.window.term = reloaded;
     extend(reloaded);
+    reloaded.printArt = vi.fn(reloaded.printArt.bind(reloaded));
     reloaded.preloadCommandAssets = vi.fn(() => Promise.resolve());
 
     await reloaded.executeCommandLine("maker root");
