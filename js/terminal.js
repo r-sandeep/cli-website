@@ -10,19 +10,45 @@ function runRootTerminal(term) {
   term.prompt();
   term.runDeepLink();
 
-  let resizeQueued = false;
+  let resizeState = "idle";
+  let resizePending = false;
+  const scheduleResize = () => {
+    resizeState = "scheduled";
+    window.requestAnimationFrame(() => {
+      resizeState = "running";
+
+      let replay;
+      try {
+        replay = Promise.resolve(term.resizeListener());
+      } catch (error) {
+        replay = Promise.reject(error);
+      }
+
+      replay
+        .catch((error) => {
+          console.error("Resize replay failed", error);
+        })
+        .finally(() => {
+          if (resizePending) {
+            resizePending = false;
+            scheduleResize();
+          } else {
+            resizeState = "idle";
+          }
+        });
+    });
+  };
   window.addEventListener(
     "resize",
     () => {
-      if (resizeQueued) {
+      if (resizeState === "running") {
+        resizePending = true;
         return;
       }
 
-      resizeQueued = true;
-      window.requestAnimationFrame(() => {
-        resizeQueued = false;
-        term.resizeListener();
-      });
+      if (resizeState === "idle") {
+        scheduleResize();
+      }
     },
     { passive: true }
   );
