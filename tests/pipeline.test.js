@@ -156,6 +156,125 @@ describe("wc, empty input, and composition", () => {
   });
 });
 
+describe("sort", () => {
+  it.each([
+    ["ascending", "cmd | sort", ["beta", "alpha", "gamma"], ["alpha", "beta", "gamma"]],
+    ["reverse", "cmd | sort -r", ["beta", "alpha", "gamma"], ["gamma", "beta", "alpha"]],
+    ["separate flags", "cmd | sort -r -n", ["2 two", "10 ten", "1 one"], ["10 ten", "2 two", "1 one"]],
+    ["clustered flags", "cmd | sort -rn", ["2 two", "10 ten", "1 one"], ["10 ten", "2 two", "1 one"]],
+    ["unique", "cmd | sort -u", ["beta", "alpha", "beta", "alpha"], ["alpha", "beta"]],
+    ["all clustered flags", "cmd | sort -rnu", ["2 first", "10 ten", "2 first", "2 second", "none", "none"], ["10 ten", "2 first", "2 second", "none"]],
+  ])("supports %s sorting", (_name, commandLine, input, expected) => {
+    expect(run(commandLine, input)).toEqual({ lines: expected, error: null });
+  });
+
+  it.each(["-x", "-rx", "--reverse", "value", "-"])(
+    "rejects unsupported or positional argument %s during compilation",
+    (argument) => {
+      const result = compile(`cmd | sort ${argument}`);
+      expect(result.ok).toBe(false);
+      expect(result.error).toEqual({
+        type: "pre-dispatch",
+        stageName: "sort",
+        message: "sort: supported flags are -r, -n, -u",
+      });
+    }
+  );
+
+  it("sorts leading signed and decimal numbers while keeping nonnumeric and equal keys stable", () => {
+    const input = ["zebra", "2 first", "apple", "-1 below", "2 second", ".5 half", "10ten"];
+    expect(run("cmd | sort -n", input).lines).toEqual([
+      "zebra",
+      "apple",
+      "-1 below",
+      ".5 half",
+      "2 first",
+      "2 second",
+      "10ten",
+    ]);
+  });
+
+  it("reverses numeric key ordering without reversing equal-key groups", () => {
+    expect(run("cmd | sort -rn", ["2 first", "none first", "2 second", "none second", "10 ten"]).lines)
+      .toEqual(["10 ten", "2 first", "2 second", "none first", "none second"]);
+  });
+
+  it("compares projected visible text and preserves the first styled representative", () => {
+    const redAlpha = { rendered: "\u001b[31malpha\u001b[0m", text: "alpha" };
+    const blueAlpha = { rendered: "\u001b[34malpha\u001b[0m", text: "alpha" };
+    const beta = { rendered: "\u001b[32mbeta\u001b[0m", text: "beta" };
+    expect(run("cmd | sort -u", [beta, redAlpha, blueAlpha], { getText: (line) => line.text }).lines)
+      .toEqual([redAlpha, beta]);
+  });
+
+  it("emits no lines for empty input", () => {
+    expect(run("cmd | sort -rnu", [])).toEqual({ lines: [], error: null });
+  });
+});
+
+describe("uniq", () => {
+  it.each([
+    ["adjacent runs", "cmd | uniq", ["a", "a", "b", "a"], ["a", "b", "a"]],
+    ["counts", "cmd | uniq -c", ["a", "a", "b", "a"], ["2 a", "1 b", "1 a"]],
+    ["duplicates only", "cmd | uniq -d", ["a", "a", "b", "c", "c"], ["a", "c"]],
+    ["clustered count and duplicates", "cmd | uniq -cd", ["a", "a", "b", "c", "c", "c"], ["2 a", "3 c"]],
+    ["separate count and duplicates", "cmd | uniq -c -d", ["a", "a", "b"], ["2 a"]],
+  ])("supports %s", (_name, commandLine, input, expected) => {
+    expect(run(commandLine, input)).toEqual({ lines: expected, error: null });
+  });
+
+  it.each(["-x", "-cx", "--count", "value", "-"])(
+    "rejects unsupported or positional argument %s during compilation",
+    (argument) => {
+      const result = compile(`cmd | uniq ${argument}`);
+      expect(result.ok).toBe(false);
+      expect(result.error).toEqual({
+        type: "pre-dispatch",
+        stageName: "uniq",
+        message: "uniq: supported flags are -c, -d",
+      });
+    }
+  );
+
+  it("groups by projected visible text and preserves the first styled line", () => {
+    const red = { rendered: "\u001b[31msame\u001b[0m", text: "same" };
+    const blue = { rendered: "\u001b[34msame\u001b[0m", text: "same" };
+    const other = { rendered: "other", text: "other" };
+    const result = run("cmd | uniq -c", [red, blue, other], {
+      getText: (line) => line.text,
+      prefixCount: (line, count) => ({ ...line, rendered: `${count} ${line.rendered}` }),
+    });
+    expect(result.lines).toEqual([
+      { rendered: "2 \u001b[31msame\u001b[0m", text: "same" },
+      { rendered: "1 other", text: "other" },
+    ]);
+  });
+
+  it("emits no lines for empty input", () => {
+    expect(run("cmd | uniq -cd", [])).toEqual({ lines: [], error: null });
+  });
+});
+
+describe("sort and uniq composition", () => {
+  it("applies new and existing filters strictly left to right", () => {
+    expect(run("cmd | grep a | sort -r | uniq | head 2", ["alpha", "beta", "alpha", "gamma"]))
+      .toEqual({ lines: ["gamma", "beta"], error: null });
+    expect(run("cmd | uniq -c | sort -rn | tail 2", ["apple", "apple", "berry", "citrus"]))
+      .toEqual({ lines: ["1 berry", "1 citrus"], error: null });
+  });
+
+  it("retains deferred unknown-filter behavior after a new filter", () => {
+    expect(run("cmd | sort | mystery", ["beta", "alpha"])).toEqual({
+      lines: [],
+      error: {
+        type: "unknown-filter",
+        stageName: "mystery",
+        message: "Unknown pipeline filter: mystery",
+      },
+    });
+  });
+});
+
 describe("deferred unknown filters", () => {
   it("retains the exact unknown stage name during validation", () => {
     const validated = compile("cmd | mystery --option");

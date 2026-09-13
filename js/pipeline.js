@@ -114,6 +114,34 @@ var Pipeline = (function () {
     };
   }
 
+  function compileFlagFilter(stage, supportedFlags) {
+    var flags = {};
+    for (var index = 0; index < stage.args.length; index += 1) {
+      var arg = stage.args[index];
+      var matcher = new RegExp("^-([" + supportedFlags + "]+)$");
+      if (!matcher.test(arg)) {
+        return preDispatchError(
+          stage.name,
+          stage.name + ": supported flags are " + supportedFlags.split("").map(function (flag) {
+            return "-" + flag;
+          }).join(", ")
+        );
+      }
+      for (var flagIndex = 1; flagIndex < arg.length; flagIndex += 1) {
+        flags[arg.charAt(flagIndex)] = true;
+      }
+    }
+
+    return {
+      ok: true,
+      filter: {
+        type: stage.name,
+        name: stage.name,
+        flags: flags,
+      },
+    };
+  }
+
   function compileStage(stage) {
     if (!stage.name) {
       return preDispatchError("", "Pipeline stages cannot be empty");
@@ -122,6 +150,8 @@ var Pipeline = (function () {
     if (stage.name === "head" || stage.name === "tail") {
       return compileCountFilter(stage);
     }
+    if (stage.name === "sort") return compileFlagFilter(stage, "rnu");
+    if (stage.name === "uniq") return compileFlagFilter(stage, "cd");
     if (stage.name === "wc") {
       if (stage.args.length !== 1 || stage.args[0] !== "-l") {
         return preDispatchError(stage.name, "wc: only wc -l is supported");
@@ -171,6 +201,9 @@ var Pipeline = (function () {
     var prefixLine = options && options.prefixLine
       ? options.prefixLine
       : function (line, lineNumber) { return lineNumber + ":" + line; };
+    var prefixCount = options && options.prefixCount
+      ? options.prefixCount
+      : function (line, count) { return count + " " + line; };
 
     if (filter.type === "unknown") {
       return {
@@ -191,6 +224,66 @@ var Pipeline = (function () {
     }
     if (filter.type === "wc") {
       return { lines: [String(lines.length)], error: null };
+    }
+    if (filter.type === "sort") {
+      var decorated = lines.map(function (line, index) {
+        var text = String(getText(line));
+        var numericMatch = text.match(/^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/);
+        return {
+          line: line,
+          text: text,
+          index: index,
+          number: numericMatch ? Number(numericMatch[1]) : null,
+        };
+      });
+
+      decorated.sort(function (left, right) {
+        var comparison = 0;
+        if (filter.flags.n) {
+          if (left.number === null && right.number !== null) comparison = -1;
+          else if (left.number !== null && right.number === null) comparison = 1;
+          else if (left.number !== null && right.number !== null) {
+            comparison = left.number < right.number ? -1 : left.number > right.number ? 1 : 0;
+          }
+        } else {
+          comparison = left.text < right.text ? -1 : left.text > right.text ? 1 : 0;
+        }
+        if (comparison !== 0 && filter.flags.r) comparison *= -1;
+        return comparison || left.index - right.index;
+      });
+
+      if (filter.flags.u) {
+        var seen = Object.create(null);
+        decorated = decorated.filter(function (entry) {
+          if (Object.prototype.hasOwnProperty.call(seen, entry.text)) return false;
+          seen[entry.text] = true;
+          return true;
+        });
+      }
+      return {
+        lines: decorated.map(function (entry) { return entry.line; }),
+        error: null,
+      };
+    }
+    if (filter.type === "uniq") {
+      var groups = [];
+      lines.forEach(function (line) {
+        var text = String(getText(line));
+        var group = groups[groups.length - 1];
+        if (group && group.text === text) {
+          group.count += 1;
+        } else {
+          groups.push({ line: line, text: text, count: 1 });
+        }
+      });
+      return {
+        lines: groups.filter(function (group) {
+          return !filter.flags.d || group.count > 1;
+        }).map(function (group) {
+          return filter.flags.c ? prefixCount(group.line, group.count) : group.line;
+        }),
+        error: null,
+      };
     }
 
     var pattern = filter.ignoreCase ? filter.pattern.toLowerCase() : filter.pattern;
