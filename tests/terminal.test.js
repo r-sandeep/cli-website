@@ -102,6 +102,16 @@ function createEditingTerm({ line = "", cursor = line.length, history = [] } = {
   return { term, cursor: () => visualCursor };
 }
 
+function pressTab(term, chord = {}) {
+  const preventDefault = vi.fn();
+  const handled = term._customKeyHandler(
+    keyEvent({ key: "Tab", ...chord }, preventDefault)
+  );
+
+  expect(handled).toBe(false);
+  expect(preventDefault).toHaveBeenCalledTimes(1);
+}
+
 afterEach(() => {
   if (env) {
     env.cleanup();
@@ -122,6 +132,309 @@ describe("runRootTerminal", () => {
     expect(term.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1);
     expect(term.onData).toHaveBeenCalledTimes(1);
     expect(term._initialized).toBe(true);
+  });
+
+  it("completes a unique command case-insensitively with canonical spelling", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { HelpDesk: () => {}, history: () => {} },
+    });
+    const editing = createEditingTerm({ line: "hELpD" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+
+    expect(term.currentLine).toBe("HelpDesk ");
+    expect(editing.cursor()).toBe(9);
+    expect(term.setCurrentLine).toHaveBeenCalledWith("HelpDesk ");
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.currentLine).not.toContain("\t");
+  });
+
+  it("extends an ambiguous command to its longest prefix, then lists columns and restores the prompt", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { cat: () => {}, catch: () => {}, category: () => {} },
+    });
+    const editing = createEditingTerm({ line: "C" });
+    const { term } = editing;
+    term.cols = 24;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe("cat");
+    expect(editing.cursor()).toBe(3);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    pressTab(term);
+    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
+      "\r\ncat       catch\r\ncategory",
+      "cat",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(2);
+    expect(term.currentLine).toBe("cat");
+    expect(editing.cursor()).toBe(3);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.write.mock.calls.flat().join("")).not.toContain("\t");
+  });
+
+  it("arms an unchanged ambiguous command prefix before listing it", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { cat: () => {}, catch: () => {} },
+    });
+    const editing = createEditingTerm({ line: "cat" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe("cat");
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    pressTab(term);
+    expect(term.write.mock.calls[0][0]).toContain("cat");
+    expect(term.write.mock.calls[0][0]).toContain("catch");
+    expect(term.write.mock.calls[1][0]).toBe("cat");
+    expect(term.prompt).toHaveBeenCalledTimes(2);
+    expect(term.currentLine).toBe("cat");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["whois partners", "whois AV", { team: { Avidan: {} } }, "whois Avidan"],
+    ["tldr companies", "TLDR pa", { portfolio: { Particle: {} } }, "TLDR Particle"],
+  ])("completes unique mixed-case %s from its authoritative source", (_name, line, globals, expected) => {
+    const { runRootTerminal } = loadTerminalScript(globals);
+    const editing = createEditingTerm({ line });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+
+    expect(term.currentLine).toBe(expected);
+    expect(editing.cursor()).toBe(expected.length);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["whois", { team: { Avidan: {}, Avery: {} } }, "whois a", "whois Av"],
+    ["tldr", { portfolio: { Particle: {}, Parity: {} } }, "tldr p", "tldr Par"],
+  ])("uses the two-Tab ambiguous listing protocol for %s arguments", (_command, globals, line, prefix) => {
+    const { runRootTerminal } = loadTerminalScript(globals);
+    const editing = createEditingTerm({ line });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe(prefix);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    pressTab(term);
+    expect(term.write.mock.calls[0][0]).toMatch(/^\r\n/);
+    for (const candidate of Object.keys(globals.team || globals.portfolio)) {
+      expect(term.write.mock.calls[0][0]).toContain(candidate);
+    }
+    expect(term.write.mock.calls[1][0]).toBe(prefix);
+    expect(term.currentLine).toBe(prefix);
+    expect(term.prompt).toHaveBeenCalledTimes(2);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["whois", { team: { Avidan: {}, Zack: {} } }, "whois "],
+    ["tldr", { portfolio: { Alpha: {}, Zeta: {} } }, "tldr "],
+    ["filesystem", { _filesHere: () => ["alpha", "zeta"] }, "ls "],
+  ])("arms and lists %s candidates from an empty argument prefix", (_name, globals, line) => {
+    const { runRootTerminal } = loadTerminalScript(globals);
+    const editing = createEditingTerm({ line });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe(line);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    pressTab(term);
+    expect(term.write.mock.calls[0][0]).toMatch(/^\r\n/);
+    for (const candidate of Object.keys(globals.team || globals.portfolio || {})) {
+      expect(term.write.mock.calls[0][0]).toContain(candidate);
+    }
+    if (globals._filesHere) {
+      expect(term.write.mock.calls[0][0]).toContain("alpha");
+      expect(term.write.mock.calls[0][0]).toContain("zeta");
+    }
+    expect(term.write.mock.calls[1][0]).toBe(line);
+    expect(term.currentLine).toBe(line);
+    expect(term.prompt).toHaveBeenCalledTimes(2);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each(["cd", "ls", "cat", "head", "tail", "less", "more"])(
+    "completes mixed-case current-directory entries for %s",
+    (command) => {
+      const filesHere = vi.fn(() => ["README.md", "welcome.htm"]);
+      const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+      const editing = createEditingTerm({ line: `${command.toUpperCase()} re` });
+      const { term } = editing;
+      runRootTerminal(term);
+      term.write.mockClear();
+
+      pressTab(term);
+
+      expect(filesHere).toHaveBeenCalledTimes(1);
+      expect(term.currentLine).toBe(`${command.toUpperCase()} README.md`);
+      expect(editing.cursor()).toBe(term.currentLine.length);
+      expect(term.write).not.toHaveBeenCalled();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refreshes filesystem candidates after a cwd change before arming and listing", () => {
+    let entries = ["alpha", "alpine"];
+    const filesHere = vi.fn(() => entries);
+    const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+    const editing = createEditingTerm({ line: "ls alp" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe("ls alp");
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    entries = ["alpine", "alps"];
+    pressTab(term);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe("ls alp");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    pressTab(term);
+    expect(filesHere).toHaveBeenCalledTimes(3);
+    expect(term.write.mock.calls[0][0]).toContain("alpine");
+    expect(term.write.mock.calls[0][0]).toContain("alps");
+    expect(term.write.mock.calls[0][0]).not.toContain("alpha  ");
+    expect(term.write.mock.calls[1][0]).toBe("ls alp");
+    expect(term.currentLine).toBe("ls alp");
+    expect(term.prompt).toHaveBeenCalledTimes(2);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty input", "", 0, {}, {}],
+    ["cursor away from the end", "help", 2, {}, {}],
+    ["busy command", "hel", 3, { busy: true }, {}],
+    ["locked terminal", "hel", 3, { locked: true }, {}],
+    ["no matching command", "zzz", 3, {}, {}],
+    ["unsupported argument", "help topic", 10, {}, {}],
+  ])("consumes Tab with no output, mutation, or submission for %s", (_name, line, cursor, state, globals) => {
+    const { runRootTerminal } = loadTerminalScript(globals);
+    const editing = createEditingTerm({ line, cursor });
+    const { term } = editing;
+    runRootTerminal(term);
+    Object.assign(term, state);
+    term.write.mockClear();
+    const promptCalls = term.prompt.mock.calls.length;
+
+    pressTab(term);
+
+    expect(term.currentLine).toBe(line);
+    expect(editing.cursor()).toBe(cursor);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.setCurrentLine).not.toHaveBeenCalled();
+    expect(term.prompt).toHaveBeenCalledTimes(promptCalls);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.currentLine).not.toContain("\t");
+  });
+
+  it("consumes non-keydown and onData Tab phases without inserting or submitting", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { help: () => {} },
+    });
+    const editing = createEditingTerm({ line: "he" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term, { type: "keyup" });
+    expect(term.currentLine).toBe("he");
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term._onData("\t");
+    expect(term.currentLine).toBe("he");
+    expect(editing.cursor()).toBe(2);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.currentLine).not.toContain("\t");
+  });
+
+  it.each([
+    ["an edit", (term) => { term._onData("x"); term._onData("\u007F"); }],
+    ["cursor movement", (term) => { term._onData("\033[D"); term._onData("\033[C"); }],
+    ["history movement", (term) => { term._onData("\033[A"); }],
+    ["a word-wise operation", (term) => {
+      term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowLeft" }));
+      term._customKeyHandler(keyEvent({ ctrlKey: true, key: "e" }));
+    }],
+    ["Ctrl+C", (term) => {
+      term._onData("\u0003");
+      term._onData("c");
+      term._onData("a");
+      term._onData("t");
+    }],
+    ["a busy transition", (term) => {
+      term.busy = true;
+      pressTab(term);
+      expect(term.write).not.toHaveBeenCalled();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      term.busy = false;
+    }],
+  ])("invalidates an armed completion after %s and requires re-arming", (_name, invalidate) => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { cat: () => {}, catch: () => {} },
+    });
+    const editing = createEditingTerm({ line: "cat", history: ["cat"] });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe("cat");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    invalidate(term);
+    expect(term.currentLine).toBe("cat");
+    expect(editing.cursor()).toBe(3);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    term.write.mockClear();
+    const promptCalls = term.prompt.mock.calls.length;
+
+    pressTab(term);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.prompt).toHaveBeenCalledTimes(promptCalls);
+    expect(term.currentLine).toBe("cat");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    pressTab(term);
+    expect(term.write.mock.calls[0][0]).toContain("cat");
+    expect(term.write.mock.calls[0][0]).toContain("catch");
+    expect(term.write.mock.calls[1][0]).toBe("cat");
+    expect(term.currentLine).toBe("cat");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
   it("sends the current line through executeCommandLine on Enter", () => {
