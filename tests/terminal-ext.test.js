@@ -571,6 +571,62 @@ describe("terminal-ext", () => {
     );
   });
 
+  it("replays alias-backed history through execution without submission side effects", async () => {
+    const target = vi.fn((args) => term.writeln(`target:${args.join("|")}`));
+    const { extend } = loadTerminalExt({ commands: { target } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("run", 'target "alias group"');
+
+    await term.executeCommandLine("run tail");
+    expect(target).toHaveBeenLastCalledWith(["alias group", "tail"]);
+    const historyBeforeResize = [...term.history];
+    const analyticsBeforeResize = [...env.window.dataLayer];
+
+    target.mockClear();
+    term.write.mockClear();
+    term.writeln.mockClear();
+    term.scrollToBottom.mockClear();
+    await expect(term.resizeListener()).resolves.toBeUndefined();
+
+    expect(target).toHaveBeenCalledTimes(1);
+    expect(target).toHaveBeenCalledWith(["alias group", "tail"]);
+    expect(term.writeln).toHaveBeenCalledWith("target:alias group|tail");
+    expect(term.history).toEqual(historyBeforeResize);
+    expect(env.window.dataLayer).toEqual(analyticsBeforeResize);
+    expect(term.write).toHaveBeenCalledWith("\r\nguest:rootpc ~ $ run tail\r\n");
+    expect(term.write).toHaveBeenLastCalledWith("\r\nguest:rootpc ~ $ ");
+    expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["help caller", "help", ["caller"]],
+    ["missing caller", null, null],
+  ])("retains non-alias resize replay for %s", async (line, command, args) => {
+    const help = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help } });
+    const term = createTerm();
+    extend(term);
+
+    await term.executeCommandLine(line);
+    help.mockClear();
+    term.writeln.mockClear();
+    const historyBeforeResize = [...term.history];
+    const analyticsBeforeResize = [...env.window.dataLayer];
+
+    await expect(term.resizeListener()).resolves.toBeUndefined();
+
+    if (command === "help") {
+      expect(help).toHaveBeenCalledWith(args);
+    } else {
+      expect(term.writeln).toHaveBeenCalledWith(
+        "Command not found: missing. Try 'help' to get started."
+      );
+    }
+    expect(term.history).toEqual(historyBeforeResize);
+    expect(env.window.dataLayer).toEqual(analyticsBeforeResize);
+  });
+
   it.each([
     ["#jobs", "jobs"],
     ["#whois-root", "whois root"],
