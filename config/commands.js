@@ -124,6 +124,22 @@ const commands = {
     });
   },
 
+  // Prints the metadata fixed into the application bundle by build-assets.js.
+  version: function (args) {
+    if (args.length !== 0 && !(args.length === 1 && args[0] === "--json")) {
+      term.stylePrint("Usage: version [--json]", false);
+      return;
+    }
+
+    const output = args.length === 1
+      ? JSON.stringify({
+          version: buildInfo.version,
+          buildDate: buildInfo.buildDate,
+        })
+      : `Root Ventures terminal v${buildInfo.version} (build ${buildInfo.buildDate})`;
+    term.stylePrint(output, false);
+  },
+
   // `man` is defined once, below the pipeline manuals: it serves the alias and
   // unalias manuals, the bookmark and go manuals, the environment topics, the
   // pipeline filters, and `shortcuts`, and every other topic retains the
@@ -1288,6 +1304,13 @@ commands.man = function (args) {
   if (args.length === 1 && topic === "unalias") {
     term.stylePrint("unalias: remove a command alias - usage:");
     term.stylePrint("%unalias% name");
+    return;
+  }
+  if (args.length === 1 && topic === "version") {
+    term.stylePrint("version — show the terminal version and build date");
+    term.stylePrint("Usage: version [--json]");
+    term.stylePrint("With no option, print the human-readable version line.");
+    term.stylePrint("With --json, print a compact object with version and buildDate.");
     return;
   }
   if (args.length === 1 && topic === "bookmark") {

@@ -178,6 +178,7 @@ function loadCommands({
     help: Object.keys(help).length > 0 ? help : helpContext.helpEntries,
     shortcuts: helpContext.shortcutEntries,
     portfolio,
+    buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
     colorText: (text) => text,
     localStorage: storage,
     window: { location },
@@ -195,6 +196,62 @@ function loadCommands({
   });
   return { commands, location, storage, term };
 }
+
+describe("version", () => {
+  it("prints the injected metadata as exactly one unwrapped plain line", () => {
+    const { commands, term } = loadCommands();
+
+    commands.version([]);
+
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "Root Ventures terminal v1.2.3-test (build 2030-04-05)",
+      false
+    );
+  });
+
+  it("serializes only the injected version and build date as compact JSON", () => {
+    const { commands, term } = loadCommands();
+
+    commands.version(["--json"]);
+
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    const [line, wrap] = term.stylePrint.mock.calls[0];
+    expect(line).toBe('{"version":"1.2.3-test","buildDate":"2030-04-05"}');
+    expect(JSON.parse(line)).toEqual({
+      version: "1.2.3-test",
+      buildDate: "2030-04-05",
+    });
+    expect(Object.keys(JSON.parse(line))).toEqual(["version", "buildDate"]);
+    expect(wrap).toBe(false);
+  });
+
+  it.each([
+    [["--text"]],
+    [["--json", "extra"]],
+    [["--JSON"]],
+    [[""]],
+  ])("rejects invalid arguments with usage and no mutation or dispatch: %j", (args) => {
+    const { commands, storage, term } = loadCommands({ cwd: "bin" });
+    const storageBefore = storage.getItem("rootvc.bookmarks.v1");
+    term.dispatchCommand = vi.fn();
+
+    commands.version(args);
+
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "Usage: version [--json]",
+      false
+    );
+    expect(term.dispatchCommand).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("bin");
+    expect(term.user).toBe("guest");
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(storageBefore);
+    expect(term.openURL).not.toHaveBeenCalled();
+    expect(term.displayURL).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+  });
+});
 
 describe("alias management", () => {
   it("defines, replaces, lists, and queries exact-case aliases", () => {
@@ -785,6 +842,18 @@ describe("bookmark and go", () => {
 });
 
 describe("man", () => {
+  it("documents both version output forms without delegating", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["version"]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output).toContain("Usage: version [--json]");
+    expect(output).toContain("With no option, print the human-readable version line.");
+    expect(output).toContain("With --json, print a compact object with version and buildDate.");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
   it("documents bookmark and go without delegating", () => {
     const { commands, term } = loadCommands();
     commands.man(["bookmark"]);
@@ -856,6 +925,18 @@ describe("help stays in sync with commands", () => {
       "%alias% [name[=value]]": "define, list, or query command aliases",
       "%unalias% name": "remove a command alias",
     });
+  });
+
+  it("advertises version with its optional JSON form", () => {
+    expect(helpContext.helpEntries).toMatchObject({
+      "%version% [--json]": "show the terminal version and build date",
+    });
+
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help([]);
+    expect(term.stylePrint.mock.calls.flat().join("\n")).toContain(
+      "%version% [--json]"
+    );
   });
 
   it("advertises every bookmark and navigation form", () => {

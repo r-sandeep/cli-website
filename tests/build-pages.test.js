@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
-import { createBrowserEnv, REPO_ROOT } from "./helpers/browser-env";
+import {
+  createBrowserEnv,
+  inlineScript,
+  REPO_ROOT,
+} from "./helpers/browser-env";
 import buildPagesModule from "../scripts/build-pages.js";
 import buildAssetsModule from "../scripts/build-assets.js";
 
@@ -107,6 +111,24 @@ describe("config/*.js stay classic browser scripts", () => {
 });
 
 describe("script load order", () => {
+  it("injects fixed package metadata before the command registry", () => {
+    const { createAppBundleSource } = buildAssetsModule;
+    const buildTime = new Date("2026-02-03T23:59:58.000Z");
+    const source = createAppBundleSource(buildTime);
+    const packageVersion = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")
+    ).version;
+    const expectedPrelude = `const buildInfo = Object.freeze(${JSON.stringify({
+      version: packageVersion,
+      buildDate: "2026-02-03",
+    })});`;
+
+    expect(source).toContain(expectedPrelude);
+    expect(source.indexOf(expectedPrelude)).toBeLessThan(
+      source.indexOf("// config/commands.js")
+    );
+  });
+
   it("welcome.htm loads config/firm.js before config/commands.js", () => {
     // commands.js reads `firm` at the top level, so the reverse order is a
     // temporal-dead-zone crash that takes out buildGeoPage(). Read the real
@@ -119,6 +141,113 @@ describe("script load order", () => {
     expect(srcs.indexOf("config/firm.js")).toBeLessThan(
       srcs.indexOf("config/commands.js")
     );
+  });
+
+  it("uses one fixed metadata snapshot in the emitted raw page and bundle topologies", async () => {
+    const {
+      createAppBundleSource,
+      createBuildInfo,
+      main,
+    } = buildAssetsModule;
+    const buildTime = new Date("2026-02-03T23:59:58.000Z");
+    const buildInfo = createBuildInfo(buildTime);
+
+    await main(buildTime);
+
+    const metadataSource = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/js/build-info.js"),
+      "utf8"
+    );
+    const welcomeSource = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/welcome.htm"),
+      "utf8"
+    );
+    const welcomeScripts = [
+      ...welcomeSource.matchAll(/<script\s+src="([^"]+)"/g),
+    ].map((match) => match[1]);
+
+    expect(welcomeScripts).toEqual([
+      "js/geo.js",
+      "js/comcastify.js",
+      "config/firm.js",
+      "config/portfolio.js",
+      "config/team.js",
+      "js/build-info.js",
+      "config/commands.js",
+    ]);
+
+    const emittedBundle = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/js/app.bundle.js"),
+      "utf8"
+    );
+    expect(emittedBundle).toContain(buildInfo.version);
+    expect(emittedBundle).toContain(buildInfo.buildDate);
+
+    const bundleSource = createAppBundleSource(buildInfo);
+    const commandPrefix = bundleSource.slice(
+      0,
+      bundleSource.indexOf("// config/fs.js")
+    );
+    expect(commandPrefix).toContain(metadataSource);
+
+    const topologies = [
+      [
+        "config/firm.js",
+        "config/portfolio.js",
+        "config/team.js",
+        inlineScript(metadataSource, "js/build-info.js"),
+        "config/commands.js",
+      ],
+      [inlineScript(commandPrefix, "js/app.bundle.js")],
+    ];
+    const packageVersion = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")
+    ).version;
+    const expected = {
+      version: packageVersion,
+      buildDate: "2026-02-03",
+    };
+
+    for (const scripts of topologies) {
+      const printed = [];
+      const browser = createBrowserEnv();
+      browser.window.term = {
+        stylePrint: (line) => printed.push(line),
+        displayURL: () => {},
+        openURL: () => {},
+        cols: 100,
+      };
+      browser.window.colorText = (text) => text;
+
+      expect(() => browser.loadScripts(scripts)).not.toThrow();
+      const { commands } = browser.exportValues(["commands"]);
+      commands.version([]);
+      commands.version(["--json"]);
+
+      expect(printed).toEqual([
+        `Root Ventures terminal v${expected.version} (build ${expected.buildDate})`,
+        JSON.stringify(expected),
+      ]);
+      browser.cleanup();
+    }
+  });
+
+  it("serializes metadata safely for a classic script", () => {
+    const { createBuildInfoSource } = buildAssetsModule;
+    const source = createBuildInfoSource({
+      version: "1<2\u2028next\u2029line",
+      buildDate: "2026-02-03",
+    });
+
+    expect(source).not.toContain("<");
+    expect(source).not.toContain("\u2028");
+    expect(source).not.toContain("\u2029");
+    env = createBrowserEnv();
+    env.loadScript(inlineScript(source, "js/build-info.js"));
+    expect(env.exportValues(["buildInfo"]).buildInfo).toEqual({
+      version: "1<2\u2028next\u2029line",
+      buildDate: "2026-02-03",
+    });
   });
 
   it("welcome.htm declares a document language", () => {

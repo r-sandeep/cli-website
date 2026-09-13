@@ -71,6 +71,7 @@ function loadAliasTerminal() {
       LOGO_TYPE: "ROOT",
       _DIRS: { "~": [] },
       colorText: (text) => text,
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
       ensureASCIIArt: vi.fn(() => Promise.resolve()),
       ensureFileLoaded: vi.fn(() => Promise.resolve()),
       firm: { blurb: "", email: "hello@example.com" },
@@ -764,6 +765,33 @@ describe("terminal-ext", () => {
         event: "commandSent",
       },
     ]);
+  });
+
+  it("runs the registered version producer through a pipeline and restores output ownership", async () => {
+    const { commands, term } = loadAliasTerminal();
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    term.command = vi.fn((line) => {
+      const [name, ...args] = line.split(" ");
+      return commands[name](args);
+    });
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("version | grep terminal", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.command).toHaveBeenCalledOnce();
+    expect(term.command).toHaveBeenCalledWith("version");
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "Root Ventures terminal v1.2.3-test (build 2030-04-05)",
+    ]);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+    expect(term.history).toEqual(["version | grep terminal"]);
+    expect(term.busy).toBe(false);
   });
 
   it("runs whois through reverse sort and head once in source order", async () => {

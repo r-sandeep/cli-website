@@ -86,6 +86,35 @@ function readText(relativePath) {
   return fs.readFileSync(path.join(rootDir, relativePath), "utf8");
 }
 
+function createBuildInfo(buildTime = new Date()) {
+  return Object.freeze({
+    version: JSON.parse(readText("package.json")).version,
+    buildDate: buildTime.toISOString().slice(0, 10),
+  });
+}
+
+function createBuildInfoSource(buildInfo) {
+  const serialized = JSON.stringify(buildInfo)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  return `// build metadata\nconst buildInfo = Object.freeze(${serialized});`;
+}
+
+function createAppBundleSource(buildTimeOrInfo = new Date()) {
+  const buildInfo =
+    buildTimeOrInfo instanceof Date
+      ? createBuildInfo(buildTimeOrInfo)
+      : buildTimeOrInfo;
+  const buildInfoPrelude = createBuildInfoSource(buildInfo);
+
+  return [buildInfoPrelude]
+    .concat(
+      appBundleSources.map((file) => `// ${file}\n${readText(file)}`)
+    )
+    .join("\n;\n");
+}
+
 function writeText(relativePath, content) {
   const absolutePath = path.join(outDir, relativePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
@@ -126,10 +155,8 @@ async function copyVendorScript(asset) {
   console.log(`${asset.dest}: ${source.length} -> ${output.length} bytes`);
 }
 
-async function buildAppBundle() {
-  const source = appBundleSources
-    .map((file) => `// ${file}\n${readText(file)}`)
-    .join("\n;\n");
+async function buildAppBundle(buildInfo = createBuildInfo()) {
+  const source = createAppBundleSource(buildInfo);
   const output = await minifyJavaScript(source, {
     compress: {
       passes: 2,
@@ -160,7 +187,9 @@ function copyXtermCss() {
   console.log("css/xterm.css copied");
 }
 
-async function main() {
+async function main(buildTime = new Date()) {
+  const buildInfo = createBuildInfo(buildTime);
+
   resetOutDir();
   copyStaticAssets();
   copyXtermCss();
@@ -169,7 +198,8 @@ async function main() {
     await copyVendorScript(asset);
   }
 
-  await buildAppBundle();
+  writeText("js/build-info.js", createBuildInfoSource(buildInfo));
+  await buildAppBundle(buildInfo);
   await buildRickRollBundle();
 
   // The crawlable static mirror, plus dist/index.html. Part of `npm run build`
@@ -177,7 +207,15 @@ async function main() {
   writePages();
 }
 
-module.exports = { appBundleSources, main, staticAssets, vendorScripts };
+module.exports = {
+  appBundleSources,
+  createBuildInfo,
+  createBuildInfoSource,
+  createAppBundleSource,
+  main,
+  staticAssets,
+  vendorScripts,
+};
 
 // Guarded so tests can import the bundle order without triggering a build.
 if (require.main === module) {

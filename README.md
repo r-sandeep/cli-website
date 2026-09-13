@@ -1,6 +1,25 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Terminal version
+
+Run `version` to print the human-readable build identity:
+
+```
+Root Ventures terminal v<version> (build <date>)
+```
+
+Run `version --json` to print the same values as one compact JSON object:
+
+```
+{"version":"<version>","buildDate":"<date>"}
+```
+
+The production asset build in `scripts/build-assets.js` injects both values into
+the application bundle: `version` comes from `package.json`, and `buildDate` is
+the build date in `YYYY-MM-DD` form. They are fixed for the deployed bundle and
+are not read or recalculated by the command at runtime.
+
 ## Directory bookmarks
 
 The terminal supports persistent named bookmarks for quick directory navigation:
@@ -58,6 +77,7 @@ Run `man shortcuts` in the terminal to view the same reference.
 
 ## Basic Commands
   - help: list all commands
+  - version [--json]: show the terminal version and build date
   - alias [name[=value]]: define, list, or query command aliases
   - unalias name: remove a command alias
   - man alias: show alias usage
