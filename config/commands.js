@@ -61,6 +61,39 @@ function SpawnRickRollPointers() {
   }
 }
 
+// `export` and `env` intentionally share one renderer so their output cannot
+// drift. Sort a copied entry list even though the terminal state API currently
+// returns sorted entries, keeping the command contract explicit at this seam.
+function _printEnvironment() {
+  term.environment
+    .entries()
+    .slice()
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([name, value]) => term.stylePrint(`${name}=${value}`));
+}
+
+const _environmentManuals = {
+  export: [
+    "export — store or list environment variables",
+    "Usage: export NAME=value",
+    "Use export with no arguments to list variables as NAME=value sorted by name.",
+    "NAME must match [A-Za-z_][A-Za-z0-9_]*; export NAME= stores an empty value.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+  env: [
+    "env — list environment variables",
+    "Usage: env",
+    "Prints the same name-sorted NAME=value listing as export with no arguments.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+  unset: [
+    "unset — remove an environment variable",
+    "Usage: unset NAME",
+    "Removes NAME and produces no output when NAME does not exist.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+};
+
 const commands = {
 
   // ── Info & Discovery ────────────────────────────────────────────────────────
@@ -84,27 +117,17 @@ const commands = {
         term.stylePrint(desc);
       }
     });
+    term.stylePrint("");
+    term.stylePrint("Terminal editing shortcuts (see %man shortcuts%):");
+    Object.entries(shortcuts).forEach(function (kv) {
+      term.stylePrint(`${kv[0]}: ${kv[1]}`);
+    });
   },
 
-  // Documents alias management locally; all other operands retain the
-  // portfolio-company lookup historically provided by `man` -> `tldr`.
-  man: function (args) {
-    if (args.length === 1 && args[0] === "alias") {
-      term.stylePrint("alias: define, list, or query command aliases - usage:");
-      term.stylePrint("%alias% name=value  define or replace an alias");
-      term.stylePrint("%alias%             list all aliases sorted by name");
-      term.stylePrint("%alias% name        print one alias");
-      return;
-    }
-
-    if (args.length === 1 && args[0] === "unalias") {
-      term.stylePrint("unalias: remove a command alias - usage:");
-      term.stylePrint("%unalias% name");
-      return;
-    }
-
-    return term.command({ cmd: "tldr", args });
-  },
+  // `man` is defined once, below the pipeline manuals: it serves the alias and
+  // unalias manuals, the bookmark and go manuals, the environment topics, the
+  // pipeline filters, and `shortcuts`, and every other topic retains the
+  // established portfolio lookup behavior via tldr.
 
   // Displays bio and ASCII art portrait for a team member, or the firm blurb.
   whois: function (args) {
@@ -177,6 +200,11 @@ const commands = {
     }
   },
 
+  // `man` is defined once, below the pipeline manuals: it serves the bookmark
+  // and go manuals, the environment topics (export/env/unset), the pipeline
+  // filters, and `shortcuts`, and every other topic retains the established
+  // portfolio lookup behavior via tldr.
+
   // ── Social & Contact ────────────────────────────────────────────────────────
 
   git: function () {
@@ -226,6 +254,45 @@ const commands = {
   echo: function (args) {
     const message = args.join(" ");
     term.stylePrint(message);
+  },
+
+  // Stores one exact NAME=value assignment through the terminal's validated,
+  // persistent environment API. Splitting on the first equals sign preserves
+  // empty values and any subsequent equals signs.
+  export: function (args) {
+    if (args.length === 0) {
+      _printEnvironment();
+      return;
+    }
+
+    if (args.length !== 1 || !args[0].includes("=")) {
+      term.stylePrint("export: expected one NAME=value assignment.");
+      return;
+    }
+
+    const assignment = args[0];
+    const separator = assignment.indexOf("=");
+    const result = term.environment.set(
+      assignment.slice(0, separator),
+      assignment.slice(separator + 1)
+    );
+    if (!result.ok) {
+      term.stylePrint(`export: ${result.message}`);
+    }
+  },
+
+  // Displays the same sorted representation as argument-free `export`.
+  env: function () {
+    _printEnvironment();
+  },
+
+  // The state API makes absent (including invalid) names a silent no-op and
+  // commits present removals atomically before reporting success.
+  unset: function (args) {
+    const result = term.environment.unset(args[0]);
+    if (!result.ok) {
+      term.stylePrint(`unset: ${result.message}`);
+    }
   },
 
   say: function (args) {
@@ -285,7 +352,7 @@ const commands = {
     const relativeHomeMatch = dir.match(/^\.\.\/home\/(.+)$/);
     if (relativeHomeMatch) {
       if (term.cwd === "~" || term.cwd === "bin") {
-        term.command(`cd ${relativeHomeMatch[1]}`);
+        term.dispatchCommand("cd", [relativeHomeMatch[1]]);
       } else {
         term.stylePrint(`No such directory: ${dir}`);
       }
@@ -316,9 +383,9 @@ const commands = {
         break;
       case "..":
         if (term.cwd === "~") {
-          term.command("cd /home");
+          term.dispatchCommand("cd", ["/home"]);
         } else if (term.cwd === "home" || term.cwd === "bin") {
-          term.command("cd /");
+          term.dispatchCommand("cd", ["/"]);
         }
         break;
       // Any deeply nested upward traversal just lands at root.
@@ -331,7 +398,7 @@ const commands = {
       case "home":
         // `home` alone is only reachable from /
         if (term.cwd === "/") {
-          term.command("cd /home");
+          term.dispatchCommand("cd", ["/home"]);
         } else {
           term.stylePrint(`You do not have permission to access this directory`);
         }
@@ -344,7 +411,7 @@ const commands = {
       case "root":
         if (term.cwd === "home") {
           if (term.user === dir) {
-            term.command("cd ~");
+            term.dispatchCommand("cd", ["~"]);
           } else {
             term.stylePrint(`You do not have permission to access this directory`);
           }
@@ -367,6 +434,81 @@ const commands = {
       default:
         term.stylePrint(`No such directory: ${dir}`);
         break;
+    }
+  },
+
+  // Saves, lists, and removes named locations without taking ownership of the
+  // terminal's input or prompt lifecycle.
+  bookmark: function (args) {
+    const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME";
+    const subcommand = args[0];
+
+    if (subcommand === "add" && args.length === 2) {
+      const name = args[1];
+      const result = bookmarkStore.add(name, term.cwd);
+      if (result.ok) {
+        term.stylePrint(`Bookmark ${name} saved: ${term.cwd}`);
+      } else if (result.error === "invalid-name") {
+        term.stylePrint(`Invalid bookmark name "${name}". NAME must match [A-Za-z0-9_-]+.`);
+      } else if (result.error === "duplicate") {
+        term.stylePrint(`Bookmark "${name}" already exists.`);
+      } else if (result.error === "limit") {
+        term.stylePrint(`Cannot add bookmark "${name}": limit of 25 reached.`);
+      } else {
+        term.stylePrint(`Could not save bookmark "${name}": browser storage is unavailable.`);
+      }
+      return;
+    }
+
+    if (subcommand === "list" && args.length === 1) {
+      const result = bookmarkStore.list();
+      if (!result.ok) {
+        term.stylePrint("Could not list bookmarks: browser storage is unavailable or corrupt.");
+      } else if (result.entries.length === 0) {
+        term.stylePrint("No bookmarks saved.");
+      } else {
+        result.entries.forEach(({ name, path }) => {
+          term.stylePrint(`${name} -> ${path}`);
+        });
+      }
+      return;
+    }
+
+    if (subcommand === "remove" && args.length === 2) {
+      const name = args[1];
+      const result = bookmarkStore.remove(name);
+      if (result.ok) {
+        term.stylePrint(`Bookmark "${name}" removed.`);
+      } else if (result.error === "invalid-name") {
+        term.stylePrint(`Invalid bookmark name "${name}". NAME must match [A-Za-z0-9_-]+.`);
+      } else if (result.error === "not-found") {
+        term.stylePrint(`Bookmark "${name}" not found.`);
+      } else {
+        term.stylePrint(`Could not remove bookmark "${name}": browser storage is unavailable.`);
+      }
+      return;
+    }
+
+    term.stylePrint(usage);
+  },
+
+  // Navigates by assigning the terminal's established cwd representation only.
+  go: function (args) {
+    if (args.length !== 1) {
+      term.stylePrint("Usage: go NAME");
+      return;
+    }
+
+    const name = args[0];
+    const result = bookmarkStore.lookup(name);
+    if (result.ok) {
+      term.cwd = result.path;
+    } else if (result.error === "invalid-name") {
+      term.stylePrint(`Invalid bookmark name "${name}". NAME must match [A-Za-z0-9_-]+.`);
+    } else if (result.error === "not-found") {
+      term.stylePrint(`Bookmark "${name}" not found.`);
+    } else {
+      term.stylePrint(`Could not open bookmark "${name}": browser storage is unavailable.`);
     }
   },
 
@@ -430,7 +572,7 @@ const commands = {
     } else if (args.join(" ") == "the pod bay doors") {
       term.stylePrint("I'm sorry Dave, I'm afraid I can't do that.");
     } else {
-      term.command(`cat ${args.join(" ")}`);
+      term.dispatchCommand("cat", args);
     }
   },
 
@@ -498,7 +640,7 @@ const commands = {
   // Only root can sudo; otherwise logs an incident (just like real life).
   sudo: function (args) {
     if (term.user == "root") {
-      term.command(args.join(" "));
+      term.dispatchCommand((args[0] || "").toLowerCase(), args.slice(1));
     } else {
       term.stylePrint(
         `${colorText(
@@ -515,7 +657,7 @@ const commands = {
 
     if (user == "root" || user == "guest") {
       term.user = user;
-      term.command("cd ~");
+      term.dispatchCommand("cd", ["~"]);
     } else {
       term.stylePrint("su: Sorry");
     }
@@ -612,7 +754,7 @@ const commands = {
 
   // Opens the GeoCities-style welcome page (welcome.htm).
   exit: function () {
-    term.command("open welcome.htm");
+    term.dispatchCommand("open", ["welcome.htm"]);
   },
 
   // Reinitializes the terminal, clearing history and resetting the prompt.
@@ -919,8 +1061,9 @@ const commands = {
   },
 
   // Multi-step async application form. The terminal is locked during collection
-  // so normal keypress handling is suspended. Returns 1 to tell the main input
-  // loop not to re-render the prompt — the async IIFE does that itself when done.
+  // so normal keypress handling is suspended. Resolves to 1 after the form has
+  // settled to tell the main input loop not to re-render the prompt — the form
+  // does that itself when done.
   //
   // collectInput() resolves to: a string on submit, "" if skipped (optional
   // fields), or null on Ctrl+C. Null means the user cancelled.
@@ -932,7 +1075,7 @@ const commands = {
     if (hasJob) {
       term.locked = true;
 
-      (async () => {
+      return (async () => {
         // Shared cancellation handler — restores the terminal to a usable state.
         const cancel = () => {
           term.stylePrint("\r\nApplication cancelled.");
@@ -946,22 +1089,22 @@ const commands = {
         );
 
         const name = await term.collectInput("What's your name?");
-        if (!name) { cancel(); return; }
+        if (!name) { cancel(); return 1; }
 
         const email = await term.collectInput("Email address");
-        if (!email) { cancel(); return; }
+        if (!email) { cancel(); return 1; }
 
         const linkedin = await term.collectInput("LinkedIn profile URL", true);
-        if (linkedin === null) { cancel(); return; }
+        if (linkedin === null) { cancel(); return 1; }
 
         const github = await term.collectInput("GitHub username", true);
-        if (github === null) { cancel(); return; }
+        if (github === null) { cancel(); return 1; }
 
         const notes = await term.collectInput(
           "Why Root? What makes you a great fit?",
           true
         );
-        if (notes === null) { cancel(); return; }
+        if (notes === null) { cancel(); return 1; }
 
         term.stylePrint("\r\nSubmitting application...");
 
@@ -1012,10 +1155,8 @@ const commands = {
         term.prompt();
         term.clearCurrentLine(true);
         term.locked = false;
+        return 1;
       })();
-
-      // Return 1 synchronously so terminal.js skips its automatic prompt render.
-      return 1;
     } else if (!args || args == "" || args.length === 0) {
       term.stylePrint(
         "Please provide a job id. Use %jobs% to list all current jobs."
@@ -1051,8 +1192,9 @@ const _aliases = {
   tail: "cat", less: "cat", head: "cat", more: "cat",
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
-  // woman continues to show the tldr for a portfolio company. `man` has an
-  // explicit handler above so it can document alias management first.
+  // woman retains the original portfolio-manual alias; man handles its local
+  // manuals (alias, unalias, bookmark, go, the environment topics, the pipeline
+  // filters, shortcuts) directly and delegates every other topic to tldr.
   woman: "tldr",
   // Session control
   quit: "exit", stop: "exit",
@@ -1072,5 +1214,94 @@ const _aliases = {
   privacy: "privacy_dynamics",
 };
 for (const [alias, target] of Object.entries(_aliases)) {
-  commands[alias] = (args) => term.command({ cmd: target, args });
+  commands[alias] = (args) => term.dispatchCommand(target, args);
 }
+
+// Pipeline filters are stages rather than replacements for the similarly named
+// standalone commands. Give them focused manual pages while retaining tldr as
+// man's fallback for portfolio companies and every other topic.
+const _pipelineManuals = {
+  pipe: [
+    "%PIPE(1)% — filter terminal command output",
+    "Usage: COMMAND | FILTER [| FILTER ...]",
+    "Stages run from left to right. A filter with no input prints nothing.",
+    "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  piping: [
+    "%PIPE(1)% — filter terminal command output",
+    "Usage: COMMAND | FILTER [| FILTER ...]",
+    "Stages run from left to right. A filter with no input prints nothing.",
+    "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  grep: [
+    "%GREP(1)% — retain lines containing a literal substring",
+    "Usage: COMMAND | %grep% [-ivn] PATTERN",
+    "-i ignores case; -v inverts the match; -n prefixes the incoming 1-based line number.",
+  ],
+  head: [
+    "%HEAD(1)% — retain the first output lines",
+    "Usage: COMMAND | %head% [N]",
+    "N defaults to 10 and must be a positive base-10 integer.",
+  ],
+  tail: [
+    "%TAIL(1)% — retain the last output lines",
+    "Usage: COMMAND | %tail% [N]",
+    "N defaults to 10 and must be a positive base-10 integer.",
+  ],
+  wc: [
+    "%WC(1)% — count output lines",
+    "Usage: COMMAND | %wc% -l",
+  ],
+};
+
+// Keep `man` compatible with its long-standing `tldr` alias while providing focused
+// manual pages for the bookmark commands, the environment commands, the pipeline
+// filters, and terminal editing shortcuts.
+commands.man = function (args) {
+  const topic = (args[0] || "").toLowerCase();
+  if (args.length === 1 && topic === "shortcuts") {
+    term.stylePrint("Terminal editing shortcuts:");
+    Object.entries(shortcuts).forEach(function (kv) {
+      term.stylePrint(`${kv[0]}: ${kv[1]}`);
+    });
+    return;
+  }
+  if (args.length === 1 && topic === "alias") {
+    term.stylePrint("alias: define, list, or query command aliases - usage:");
+    term.stylePrint("%alias% name=value  define or replace an alias");
+    term.stylePrint("%alias%             list all aliases sorted by name");
+    term.stylePrint("%alias% name        print one alias");
+    return;
+  }
+  if (args.length === 1 && topic === "unalias") {
+    term.stylePrint("unalias: remove a command alias - usage:");
+    term.stylePrint("%unalias% name");
+    return;
+  }
+  if (args.length === 1 && topic === "bookmark") {
+    term.stylePrint(
+      "bookmark - save and manage directory bookmarks\r\n" +
+      "Usage:\r\n" +
+      "  bookmark add NAME      Save the current directory\r\n" +
+      "  bookmark list          List saved bookmarks\r\n" +
+      "  bookmark remove NAME   Remove a bookmark\r\n" +
+      "NAME must match [A-Za-z0-9_-]+. Up to 25 bookmarks persist across reloads."
+    );
+    return;
+  }
+  if (args.length === 1 && topic === "go") {
+    term.stylePrint(
+      "go - navigate to a saved directory bookmark\r\n" +
+      "Usage: go NAME\r\n" +
+      "Changes the terminal's current directory to the path saved under NAME."
+    );
+    return;
+  }
+  const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
+    ? _environmentManuals[topic]
+    : _pipelineManuals[topic];
+  if (!manual) {
+    return term.command(["tldr", ...args].join(" ").trim());
+  }
+  manual.forEach((line) => term.stylePrint(line));
+};

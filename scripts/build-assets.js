@@ -34,12 +34,14 @@ const vendorScripts = [
 // one. config/commands.js reads `firm`, `team`, and `portfolio` at top level.
 const appBundleSources = [
   "js/terminal.js",
+  "js/pipeline.js",
   "js/terminal-ext.js",
   "js/ascii-art.js",
   "config/help.js",
   "config/firm.js",
   "config/portfolio.js",
   "config/team.js",
+  "js/bookmarks.js",
   "config/commands.js",
   "config/fs.js",
   "config/jobs.js",

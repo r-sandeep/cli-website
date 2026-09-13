@@ -37,12 +37,6 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
-// Produces a raw representation that the parser above will decode to exactly
-// one token. Double quotes inside a token are emitted as adjacent single-quoted
-// segments so arbitrary cooked arguments remain representable.
-const _serializeCommandToken = (token) =>
-  `"${String(token).split('"').join(`"'"'"`)}"`;
-
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -128,6 +122,151 @@ const extend = (term) => {
     persistAliases(nextAliases);
     userAliases = nextAliases;
     return true;
+  };
+
+  // Environment variables are private to this extended terminal. Persist only
+  // complete, validated snapshots so failed browser storage writes cannot leave
+  // memory and localStorage describing different states.
+  const ENV_STORAGE_KEY = "rootvc.cli.environment.v1";
+  const ENV_STORAGE_VERSION = 1;
+  const ENV_LIMIT = 50;
+  const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+  const parseEnvironmentPayload = (serialized) => {
+    if (serialized === null) return new Map();
+
+    const payload = JSON.parse(serialized);
+    if (
+      payload === null ||
+      typeof payload !== "object" ||
+      Object.getPrototypeOf(payload) !== Object.prototype ||
+      Object.keys(payload).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(payload, "version") ||
+      payload.version !== ENV_STORAGE_VERSION ||
+      !Object.prototype.hasOwnProperty.call(payload, "variables") ||
+      !Array.isArray(payload.variables) ||
+      payload.variables.length > ENV_LIMIT
+    ) {
+      throw new Error("Invalid environment payload");
+    }
+
+    const hydrated = new Map();
+    for (const entry of payload.variables) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        !ENV_NAME_PATTERN.test(entry[0]) ||
+        typeof entry[1] !== "string" ||
+        hydrated.has(entry[0])
+      ) {
+        throw new Error("Invalid environment entry");
+      }
+      hydrated.set(entry[0], entry[1]);
+    }
+    return hydrated;
+  };
+
+  const serializeEnvironment = (variables) =>
+    JSON.stringify({
+      version: ENV_STORAGE_VERSION,
+      variables: [...variables.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    });
+
+  let environmentVariables;
+  try {
+    environmentVariables = parseEnvironmentPayload(
+      window.localStorage.getItem(ENV_STORAGE_KEY)
+    );
+  } catch (_error) {
+    environmentVariables = new Map();
+  }
+
+  const environmentResult = (ok, code, message = "") => ({ ok, code, message });
+  let environmentPersistenceEnabled = true;
+  const persistEnvironmentCandidate = (candidate) => {
+    if (!environmentPersistenceEnabled) {
+      environmentVariables = candidate;
+      return environmentResult(true, "updated");
+    }
+
+    try {
+      const serialized = serializeEnvironment(candidate);
+      window.localStorage.setItem(ENV_STORAGE_KEY, serialized);
+    } catch (_error) {
+      return environmentResult(
+        false,
+        "storage",
+        "Environment variables could not be saved. Storage is unavailable."
+      );
+    }
+    environmentVariables = candidate;
+    return environmentResult(true, "updated");
+  };
+
+  term.environment = Object.freeze({
+    isValidName(name) {
+      return typeof name === "string" && ENV_NAME_PATTERN.test(name);
+    },
+    snapshot() {
+      return new Map(environmentVariables);
+    },
+    entries() {
+      return [...environmentVariables.entries()].sort(([a], [b]) =>
+        a.localeCompare(b)
+      );
+    },
+    get(name) {
+      return environmentVariables.get(name);
+    },
+    set(name, value) {
+      if (
+        typeof name !== "string" ||
+        !ENV_NAME_PATTERN.test(name) ||
+        typeof value !== "string"
+      ) {
+        return environmentResult(
+          false,
+          "invalid",
+          "Invalid environment variable name. Use letters, digits, and underscores, starting with a letter or underscore."
+        );
+      }
+      if (!environmentVariables.has(name) && environmentVariables.size >= ENV_LIMIT) {
+        return environmentResult(
+          false,
+          "capacity",
+          `Environment variable limit of ${ENV_LIMIT} reached.`
+        );
+      }
+
+      const candidate = new Map(environmentVariables);
+      candidate.set(name, value);
+      return persistEnvironmentCandidate(candidate);
+    },
+    unset(name) {
+      if (!environmentVariables.has(name)) {
+        return environmentResult(true, "absent");
+      }
+
+      const candidate = new Map(environmentVariables);
+      candidate.delete(name);
+      return persistEnvironmentCandidate(candidate);
+    },
+  });
+
+  // The replay may be asynchronous (resize replays each history line through
+  // executeCommandLine so aliases and pipelines apply); the guard is held for
+  // its whole duration and restored afterwards.
+  const replayWithoutEnvironmentSideEffects = async (replay) => {
+    const activeVariables = environmentVariables;
+    const previousPersistenceSetting = environmentPersistenceEnabled;
+    environmentVariables = new Map(activeVariables);
+    environmentPersistenceEnabled = false;
+    try {
+      await replay();
+    } finally {
+      environmentVariables = activeVariables;
+      environmentPersistenceEnabled = previousPersistenceSetting;
+    }
   };
 
   // Tab completion state — reset on any non-tab keypress.
@@ -336,30 +475,63 @@ const extend = (term) => {
     return parsed;
   };
 
-  // Executes a parsed command, or parses an internal redirect without applying
-  // user aliases. Expansion belongs only to executeCommandLine below so a
-  // redirect cannot accidentally trigger a second alias lookup.
-  term.command = (line) => {
-    const parsed = typeof line === "string" ? parseCommandLine(line) : line;
-    const cmd = parsed.cmd.toLowerCase();
+  // Dispatches an already prepared command. Redirecting commands use this seam
+  // so expanded values remain opaque data rather than being parsed or expanded
+  // for a second time. The alias handler additionally receives the parsed
+  // record so the lexical rawArgs span reaches it.
+  term.dispatchCommand = (cmd, args, parsed) => {
     const fn = commands[cmd];
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
     } else if (cmd === "alias") {
-      return fn(parsed.args, parsed);
+      return fn(args, parsed);
     } else {
-      return fn(parsed.args);
+      return fn(args);
     }
   };
 
-  term.parseCommandLine = (line) => {
-    const parsed = parseCommandLine(line);
-    return {
-      line: parsed.line,
-      cmd: parsed.cmd,
-      args: parsed.args,
+  const expandArgument = (argument, variables) => {
+    let expanded = "";
+    let index = 0;
+
+    const referenceAt = (start) => {
+      if (argument[start] !== "$") return null;
+      if (argument[start + 1] === "{") {
+        const close = argument.indexOf("}", start + 2);
+        if (close === -1) return null;
+        const name = argument.slice(start + 2, close);
+        return ENV_NAME_PATTERN.test(name) ? { end: close + 1, name } : null;
+      }
+
+      const match = argument.slice(start + 1).match(/^[A-Za-z_][A-Za-z0-9_]*/);
+      return match ? { end: start + 1 + match[0].length, name: match[0] } : null;
     };
+
+    while (index < argument.length) {
+      const escapedReference =
+        argument[index] === "\\" ? referenceAt(index + 1) : null;
+      if (escapedReference) {
+        expanded += argument.slice(index + 1, escapedReference.end);
+        index = escapedReference.end;
+        continue;
+      }
+
+      const reference = referenceAt(index);
+      if (reference) {
+        expanded += variables.get(reference.name) ?? "";
+        index = reference.end;
+        continue;
+      }
+
+      expanded += argument[index];
+      index += 1;
+    }
+
+    return expanded;
   };
+
+  // Public quote-aware parse of a raw line (no alias or variable expansion).
+  term.parseCommandLine = parseCommandLine;
 
   const expandUserAlias = (parsed) => {
     const value = term.getAlias(parsed.name);
@@ -367,15 +539,45 @@ const extend = (term) => {
       return parsed;
     }
 
-    // Parse one complete lexical command so line, cooked arguments, and the
-    // non-enumerable rawArgs consumed by the alias handler stay coherent. The
-    // stored value retains its original quotes while serialized caller tokens
-    // append without losing their already-parsed grouping.
-    const expandedLine = [
-      value,
-      ...parsed.args.map(_serializeCommandToken),
-    ].join(" ");
+    // Shell-style first-word replacement: the stored value substitutes for the
+    // command word and the caller's raw argument text follows verbatim. One
+    // lexical parse of the result keeps line, cooked arguments, and the
+    // non-enumerable rawArgs consumed by the alias handler coherent, while the
+    // caller's own quoting, empty quoted words, and pipeline separators keep
+    // exactly the meaning they had before expansion.
+    const expandedLine =
+      parsed.rawArgs.length > 0 ? `${value} ${parsed.rawArgs}` : value;
     return parseCommandLine(expandedLine);
+  };
+
+  // Expands environment variables in a parsed record's arguments exactly once.
+  // The lexical rawArgs span is carried verbatim: an alias value keeps `$NAME`
+  // for expansion at use time rather than at definition time.
+  const prepareParsed = (parsed) => {
+    const variables = term.environment.snapshot();
+    const name = typeof parsed.name === "string" ? parsed.name : parsed.cmd;
+    const prepared = {
+      line: parsed.line,
+      name,
+      cmd: String(parsed.cmd).toLowerCase(),
+      args: parsed.args.map((argument) => expandArgument(argument, variables)),
+    };
+    Object.defineProperty(prepared, "rawArgs", {
+      value: typeof parsed.rawArgs === "string" ? parsed.rawArgs : "",
+    });
+    return prepared;
+  };
+
+  term.prepareCommandLine = (line) => prepareParsed(parseCommandLine(line));
+
+  // Parses a raw line (or accepts a parsed record for an internal redirect),
+  // expands environment variables once, and dispatches. User aliases are never
+  // applied here: expansion belongs only to executeCommandLine below so a
+  // redirect or replay cannot trigger a second alias lookup.
+  term.command = (line) => {
+    const parsed = typeof line === "string" ? parseCommandLine(line) : line;
+    const prepared = prepareParsed(parsed);
+    return term.dispatchCommand(prepared.cmd, prepared.args, prepared);
   };
 
   term.normalizeCommandForPreload = (cmd, args) => {
@@ -407,10 +609,14 @@ const extend = (term) => {
     }
   };
 
-  term.preloadCommandAssets = async (line) => {
-    const parsed =
-      typeof line === "string" ? parseCommandLine(line) : line;
-    const normalized = term.normalizeCommandForPreload(parsed.cmd, parsed.args);
+  // Accepts a prepared (cmd, args) pair, a raw line, or a parsed record.
+  term.preloadCommandAssets = async (cmdOrLine, preparedArgs) => {
+    const prepared = Array.isArray(preparedArgs)
+      ? { cmd: cmdOrLine, args: preparedArgs }
+      : typeof cmdOrLine === "string"
+        ? term.prepareCommandLine(cmdOrLine)
+        : prepareParsed(cmdOrLine);
+    const normalized = term.normalizeCommandForPreload(prepared.cmd, prepared.args);
     const tasks = [];
     const artId = getASCIIArtIdForCommand(normalized.cmd, normalized.args);
     const preloadFile = getPreloadFileForCommand(normalized.cmd, normalized.args);
@@ -439,7 +645,10 @@ const extend = (term) => {
       ...options,
     };
     const parsed = parseCommandLine(line);
+    // User aliases expand exactly once, on the interactive line and before
+    // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
+    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
     let exitStatus;
 
     try {
@@ -447,29 +656,102 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      await term.preloadCommandAssets(expanded);
+      if (parsedPipeline) {
+        const validation = Pipeline.validatePipeline(parsedPipeline);
 
-      if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-        term.writeln("");
-      }
+        if (!validation.ok) {
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
+          }
 
-      if (parsed.line.length > 0) {
-        if (settings.addToHistory) {
-          term.history.push(parsed.line);
+          if (parsed.line.length > 0 && settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
+
+          term.stylePrint(validation.error.message);
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
+        } else {
+          await term.preloadCommandAssets(validation.producer);
+
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
+          }
+
+          if (settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
+
+          const capture = _captureTerminalOutput(term);
+          try {
+            exitStatus = await term.command(validation.producer);
+          } finally {
+            capture.restore();
+          }
+
+          const result = Pipeline.applyPipeline(capture.lines(), validation.filters, {
+            getText: _visibleTerminalText,
+            prefixLine: (outputLine, lineNumber) => `${lineNumber}:${outputLine}`,
+          });
+
+          if (result.error) {
+            term.stylePrint(result.error.message);
+          } else {
+            for (const outputLine of result.lines) {
+              term.writeln(outputLine);
+            }
+          }
+
+          // Interactive producers own their normal prompt cleanup. Defer that
+          // cleanup until their captured continuation and all filters settle.
+          capture.flushPromptCleanup();
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
+        }
+      } else {
+        // Interactive execution prepares (expands) the alias-expanded line
+        // exactly once, before preload, and dispatches the prepared record so
+        // expanded values stay opaque data instead of being parsed or expanded
+        // a second time, and so the lexical rawArgs reach the alias handler.
+        const prepared = prepareParsed(expanded);
+        await term.preloadCommandAssets(prepared.cmd, prepared.args);
+
+        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          term.writeln("");
         }
 
-        // Preserve the historical string dispatch shape for commands that were
-        // not expanded. Alias expansions carry their already-coherent parsed
-        // representation so lexical rawArgs reach handlers without reparsing.
-        exitStatus = term.command(expanded === parsed ? parsed.line : expanded);
+        if (parsed.line.length > 0) {
+          if (settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
 
-        if (settings.trackAnalytics) {
-          window.dataLayer = window.dataLayer || [];
-          window.dataLayer.push({
-            event: "commandSent",
-            command: parsed.cmd,
-            args: parsed.args.join(" "),
-          });
+          // Commands may own an interactive continuation. Await its final
+          // status so standalone prompt cleanup observes the same lifecycle as
+          // a piped producer.
+          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
         }
       }
     } catch (error) {
@@ -505,17 +787,22 @@ const extend = (term) => {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
     await term.runDeepLink({ replay: true });
-    for (const c of term.history) {
-      term.prompt("\r\n", ` ${c}\r\n`);
-      await term.executeCommandLine(c, {
-        addToHistory: false,
-        manageBusy: false,
-        promptAfter: false,
-        showLeadingNewline: false,
-        trackAnalytics: false,
-        scrollAfter: false,
-      });
-    }
+    // Replay serially through the full execution boundary so aliases and
+    // pipelines apply exactly as they did interactively, while environment
+    // mutations replayed from history never persist a second time.
+    await replayWithoutEnvironmentSideEffects(async () => {
+      for (const c of term.history) {
+        term.prompt("\r\n", ` ${c}\r\n`);
+        await term.executeCommandLine(c, {
+          addToHistory: false,
+          manageBusy: false,
+          promptAfter: false,
+          showLeadingNewline: false,
+          trackAnalytics: false,
+          scrollAfter: false,
+        });
+      }
+    });
     term.prompt();
     term.scrollToBottom();
     term._initialized = true;
@@ -649,6 +936,91 @@ const extend = (term) => {
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// Captures the rendered stream emitted by one producer command. Writers are
+// restored by the caller in a finally block before filtering or prompting.
+function _captureTerminalOutput(term) {
+  const originalWrite = term.write;
+  const originalWriteln = term.writeln;
+  const originalCollectInput = term.collectInput;
+  const originalPrompt = term.prompt;
+  const originalClearCurrentLine = term.clearCurrentLine;
+  let active = true;
+  let output = "";
+  let promptRequested = false;
+  let clearCurrentLineArgs = null;
+
+  const captureWrite = (text, callback) => {
+    output += text == null ? "" : String(text);
+    if (typeof callback === "function") callback();
+  };
+  const captureWriteln = (text, callback) => {
+    output += (text == null ? "" : String(text)) + "\r\n";
+    if (typeof callback === "function") callback();
+  };
+
+  term.write = captureWrite;
+  term.writeln = captureWriteln;
+  term.prompt = () => {
+    promptRequested = true;
+  };
+  term.clearCurrentLine = (...args) => {
+    clearCurrentLineArgs = args;
+  };
+
+  // Interactive input control text and user echo are terminal UI, not producer
+  // records. Display them normally, then resume capture when input completes.
+  if (typeof originalCollectInput === "function") {
+    term.collectInput = async (...args) => {
+      term.write = originalWrite;
+      term.writeln = originalWriteln;
+      try {
+        return await originalCollectInput.apply(term, args);
+      } finally {
+        // The producer may start an interactive flow without returning its
+        // promise. Do not let that displaced work reinstate capture after the
+        // pipeline has already restored terminal ownership.
+        if (active) {
+          term.write = captureWrite;
+          term.writeln = captureWriteln;
+        }
+      }
+    };
+  }
+
+  return {
+    lines: () => {
+      if (output.length === 0) return [];
+      const lines = output.split(/\r\n|\n|\r/);
+      if (lines[lines.length - 1] === "") lines.pop();
+      return lines;
+    },
+    restore: () => {
+      active = false;
+      term.write = originalWrite;
+      term.writeln = originalWriteln;
+      term.prompt = originalPrompt;
+      term.clearCurrentLine = originalClearCurrentLine;
+      if (typeof originalCollectInput === "function") {
+        term.collectInput = originalCollectInput;
+      }
+    },
+    flushPromptCleanup: () => {
+      if (clearCurrentLineArgs) {
+        originalClearCurrentLine.apply(term, clearCurrentLineArgs);
+      } else if (promptRequested) {
+        originalPrompt.call(term);
+      }
+    },
+  };
+}
+
+// ANSI styling is retained in output records but ignored by matching/counting.
+function _visibleTerminalText(text) {
+  return String(text)
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b(?:\[[0-?]*[ -\/]*[@-~]|[@-_])/g, "");
+}
 
 // Wraps str at word boundaries to fit within maxWidth characters per line.
 // Falls back to a hard break at maxWidth if no whitespace is found.

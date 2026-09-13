@@ -134,6 +134,22 @@ describe("script load order", () => {
       appBundleSources.indexOf("config/commands.js")
     );
   });
+
+  it("the app bundle lists js/bookmarks.js before config/commands.js", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/bookmarks.js");
+    expect(appBundleSources.indexOf("js/bookmarks.js")).toBeLessThan(
+      appBundleSources.indexOf("config/commands.js")
+    );
+  });
+
+  it("the app bundle loads pipeline helpers before terminal integration", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/pipeline.js");
+    expect(appBundleSources.indexOf("js/pipeline.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-ext.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {
