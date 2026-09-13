@@ -1010,6 +1010,7 @@ describe("pipeline manual pages preserve standalone commands", () => {
 
 describe("terminal editing documentation", () => {
   const expectedShortcuts = [
+    "Tab",
     "Alt+Left",
     "Alt+Right",
     "Ctrl+W",

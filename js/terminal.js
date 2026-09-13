@@ -1,3 +1,67 @@
+function _longestCommonCompletionPrefix(candidates) {
+  if (candidates.length === 0) return "";
+
+  const first = candidates[0];
+  const folded = candidates.map((candidate) => candidate.toLowerCase());
+  let length = first.length;
+  for (const candidate of folded) {
+    let index = 0;
+    while (
+      index < length &&
+      index < candidate.length &&
+      first[index].toLowerCase() === candidate[index]
+    ) {
+      index++;
+    }
+    length = index;
+  }
+  return first.slice(0, length);
+}
+
+function _completionForLine(line) {
+  const firstWord = line.match(/^(\S*)$/);
+  if (firstWord) {
+    return { prefix: "", token: firstWord[1], candidates: Object.keys(commands) };
+  }
+
+  const argument = line.match(/^(\S+)(\s+)(\S*)$/);
+  if (!argument) return null;
+
+  const command = argument[1].toLowerCase();
+  let candidates;
+  if (command === "whois") candidates = Object.keys(team);
+  else if (command === "tldr") candidates = Object.keys(portfolio);
+  else if (["cd", "ls", "cat", "head", "tail", "less", "more"].includes(command)) {
+    candidates = _filesHere();
+  } else {
+    return null;
+  }
+
+  return {
+    prefix: `${argument[1]}${argument[2]}`,
+    token: argument[3],
+    candidates,
+  };
+}
+
+function _completionRows(candidates, width) {
+  const gap = 2;
+  const columnWidth = Math.max(...candidates.map((candidate) => candidate.length)) + gap;
+  const columns = Math.max(1, Math.floor(width / columnWidth));
+  const rows = [];
+  for (let index = 0; index < candidates.length; index += columns) {
+    rows.push(
+      candidates
+        .slice(index, index + columns)
+        .map((candidate, column, row) =>
+          column === row.length - 1 ? candidate : candidate.padEnd(columnWidth, " ")
+        )
+        .join("")
+    );
+  }
+  return rows;
+}
+
 function runRootTerminal(term) {
   if (term._initialized) {
     return;
@@ -144,7 +208,89 @@ function runRootTerminal(term) {
     return null;
   };
 
+  let completionState = null;
+  const resetCompletion = () => {
+    completionState = null;
+    // Keep the legacy fields inert for callers that still initialize them.
+    term.tabIndex = 0;
+    term.tabOptions = [];
+    term.tabBase = "";
+  };
+
+  const completeInput = () => {
+    if (
+      !term._initialized ||
+      term.locked ||
+      term.busy ||
+      term.currentLine.length === 0 ||
+      term.pos() !== term.currentLine.length
+    ) {
+      resetCompletion();
+      return false;
+    }
+
+    const completion = _completionForLine(term.currentLine);
+    if (!completion) {
+      resetCompletion();
+      return false;
+    }
+
+    const foldedToken = completion.token.toLowerCase();
+    const matches = completion.candidates.filter((candidate) =>
+      candidate.toLowerCase().startsWith(foldedToken)
+    );
+    if (matches.length === 0) {
+      resetCompletion();
+      return false;
+    }
+
+    if (matches.length === 1) {
+      term.setCurrentLine(`${completion.prefix}${matches[0]} `);
+      resetCompletion();
+      return true;
+    }
+
+    const commonPrefix = _longestCommonCompletionPrefix(matches);
+    const completedLine = `${completion.prefix}${commonPrefix}`;
+    if (completedLine !== term.currentLine) {
+      term.setCurrentLine(completedLine);
+      completionState = {
+        line: completedLine,
+        candidates: matches,
+      };
+      return true;
+    }
+
+    const sameCandidates =
+      completionState &&
+      completionState.line === term.currentLine &&
+      completionState.candidates.length === matches.length &&
+      completionState.candidates.every((candidate, index) => candidate === matches[index]);
+    if (!sameCandidates) {
+      completionState = { line: term.currentLine, candidates: matches };
+      return false;
+    }
+
+    const width = Number.isFinite(term.cols) ? term.cols : 80;
+    term.write(`\r\n${_completionRows(matches, width).join("\r\n")}`);
+    term.prompt();
+    term.write(term.currentLine);
+    return true;
+  };
+
   term.attachCustomKeyEventHandler((event) => {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      // xterm asks about both phases in some browsers. Complete exactly once,
+      // but consume every Tab phase so focus cannot move and no tab reaches
+      // onData as input.
+      if (event.type === "keydown" && completeInput()) {
+        term.scrollToBottom();
+      }
+      return false;
+    }
+
+    if (event.type === "keydown") resetCompletion();
     const action = shortcutForEvent(event);
     if (!action) return true;
 
@@ -158,6 +304,7 @@ function runRootTerminal(term) {
 
   term.onData((e) => {
     if (term._initialized && !term.locked && !term.busy) {
+      if (e !== "\t") resetCompletion();
       switch (e) {
         case "\r": // Enter
           // Reset tab state
@@ -235,99 +382,9 @@ function runRootTerminal(term) {
           }
           break;
         case "\t": // tab
-          const tabParts = term.currentLine.split(" ");
-          const tabCmd = tabParts[0];
-          const tabRest = tabParts.slice(1).join(" ");
-
-          // Check if we need to reset tab state (input changed)
-          if (term.tabBase !== term.currentLine) {
-            term.tabIndex = 0;
-            term.tabOptions = [];
-            term.tabBase = term.currentLine;
-
-            // Get completions based on context
-            if (tabParts.length === 1) {
-              // Completing command
-              term.tabOptions = Object.keys(commands)
-                .filter((c) => c.startsWith(tabCmd))
-                .sort();
-            } else if (
-              [
-                "cat",
-                "tail",
-                "less",
-                "head",
-                "open",
-                "mv",
-                "cp",
-                "chown",
-                "chmod",
-                "ls",
-              ].includes(tabCmd)
-            ) {
-              term.tabOptions = _filesHere()
-                .filter((f) => f.startsWith(tabRest))
-                .sort();
-            } else if (["whois", "finger", "groups"].includes(tabCmd)) {
-              term.tabOptions = Object.keys(team)
-                .filter((f) => f.startsWith(tabRest))
-                .sort();
-            } else if (["man", "woman", "tldr"].includes(tabCmd)) {
-              term.tabOptions = Object.keys(portfolio)
-                .filter((f) => f.startsWith(tabRest))
-                .sort();
-            } else if (["cd"].includes(tabCmd)) {
-              term.tabOptions = _filesHere()
-                .filter(
-                  (dir) =>
-                    dir.startsWith(tabRest) && !_DIRS[term.cwd].includes(dir)
-                )
-                .sort();
-            }
-          }
-
-          // Handle tab completion
-          if (term.tabOptions.length === 0) {
-            // No completions
-          } else if (term.tabOptions.length === 1) {
-            // Single match - complete it
-            if (tabParts.length === 1) {
-              // Check if it's already an exact match (like typing "ls" completely)
-              if (tabCmd === term.tabOptions[0]) {
-                // Exact match - just add a space
-                term.setCurrentLine(`${term.tabOptions[0]} `);
-              } else {
-                // Partial match - complete it
-                term.setCurrentLine(`${term.tabOptions[0]} `);
-              }
-            } else {
-              term.setCurrentLine(`${tabCmd} ${term.tabOptions[0]}`);
-            }
-            term.tabBase = "";
-            term.tabIndex = 0;
-            term.tabOptions = [];
-          } else {
-            // Multiple matches
-            if (term.tabIndex === 0) {
-              // First tab - show options
-              term.writeln(`\r\n${term.tabOptions.join("   ")}`);
-              term.prompt();
-              term.setCurrentLine(term.currentLine);
-              term.tabIndex = 1;
-            } else {
-              // Cycling through options
-              const option =
-                term.tabOptions[(term.tabIndex - 1) % term.tabOptions.length];
-              if (tabParts.length === 1) {
-                term.setCurrentLine(option);
-              } else {
-                term.setCurrentLine(`${tabCmd} ${option}`);
-              }
-              term.tabIndex++;
-              term.tabBase = term.currentLine; // Update base to current selection
-            }
-          }
-          break;
+          // Browser Tab keydowns are consumed by the custom key handler above.
+          // If xterm still forwards one, keep it fully inert.
+          return;
         default: // Print all other characters
           // Reset tab state on any other key
           term.tabIndex = 0;
