@@ -339,6 +339,41 @@ describe("runRootTerminal", () => {
     expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
+  it.each(["cd", "cat", "head", "tail", "less", "more"])(
+    "refreshes and lists ambiguous current-directory entries for %s after a cwd change",
+    (command) => {
+      let entries = ["alpha", "alpine"];
+      const filesHere = vi.fn(() => entries);
+      const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+      const editing = createEditingTerm({ line: `${command} alp` });
+      const { term } = editing;
+      runRootTerminal(term);
+      term.write.mockClear();
+
+      pressTab(term);
+      expect(term.currentLine).toBe(`${command} alp`);
+      expect(term.write).not.toHaveBeenCalled();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+      entries = ["alpine", "alps"];
+      pressTab(term);
+      expect(term.currentLine).toBe(`${command} alp`);
+      expect(term.write).not.toHaveBeenCalled();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+      pressTab(term);
+      expect(filesHere).toHaveBeenCalledTimes(3);
+      expect(term.write.mock.calls[0][0]).toContain("alpine");
+      expect(term.write.mock.calls[0][0]).toContain("alps");
+      expect(term.write.mock.calls[0][0]).not.toContain("alpha  ");
+      expect(term.write.mock.calls[0][0]).not.toContain("\t");
+      expect(term.write.mock.calls[1][0]).toBe(`${command} alp`);
+      expect(term.currentLine).toBe(`${command} alp`);
+      expect(term.prompt).toHaveBeenCalledTimes(2);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+    }
+  );
+
   it.each([
     ["empty input", "", 0, {}, {}],
     ["cursor away from the end", "help", 2, {}, {}],
