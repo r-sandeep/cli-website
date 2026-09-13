@@ -338,7 +338,7 @@ describe("terminal-ext", () => {
     term.environment.set("DOLLAR", "$NAME");
 
     const prepared = term.prepareCommandLine(
-      String.raw`EcHo $NAME ${NAME} $MISSING pre$NAME${EMPTY}post $DOLLAR \$NAME path\keep $9 ${BAD-NAME} cash$`
+      "EcHo $NAME ${NAME} $MISSING pre$NAME${EMPTY}post $DOLLAR \\$NAME path\\keep $9 ${BAD-NAME} cash$"
     );
 
     expect(prepared.cmd).toBe("echo");
@@ -403,12 +403,23 @@ describe("terminal-ext", () => {
       "env",
     ];
     term.runDeepLink = vi.fn();
+    env.window.commands.export = (args) => {
+      const assignment = args[0];
+      const split = assignment.indexOf("=");
+      term.environment.set(assignment.slice(0, split), assignment.slice(split + 1));
+    };
+    env.window.commands.env = () => {
+      for (const [name, value] of term.environment.entries()) {
+        term.stylePrint(`${name}=${value}`);
+      }
+    };
+    env.window.commands.unset = (args) => term.environment.unset(args[0]);
     const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
 
     term.resizeListener();
 
-    expect(term.stylePrint).toHaveBeenCalledWith("ACTIVE=later value");
-    expect(term.stylePrint).toHaveBeenCalledWith("TEMP=two");
+    expect(term.writeln).toHaveBeenCalledWith("ACTIVE=later value");
+    expect(term.writeln).toHaveBeenCalledWith("TEMP=two");
     expect(term.environment.entries()).toEqual([["ACTIVE", "later value"]]);
     expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
       persistedBefore

@@ -380,29 +380,6 @@ describe("cd", () => {
     ["anywhere", "/bin", "bin"],
   ])("from %s, cd %s -> %s", (cwd, arg, expected) => {
     const { commands, term } = loadCommands({ cwd });
-
-describe("prepared command forwarding", () => {
-  it("forwards aliases without reparsing or expanding prepared arguments", () => {
-    const { commands, term } = loadCommands();
-    const args = ["value with spaces", "$LITERAL", ""];
-    term.dispatchCommand = vi.fn();
-
-    commands.tail(args);
-
-    expect(term.dispatchCommand).toHaveBeenCalledWith("cat", args);
-    expect(term.dispatchCommand.mock.calls[0][1]).toBe(args);
-  });
-
-  it("forwards sudo arguments once as a command token and unchanged arguments", () => {
-    const { commands, term } = loadCommands({ user: "root" });
-    const forwarded = ["value with spaces", "$LITERAL", ""];
-    term.dispatchCommand = vi.fn();
-
-    commands.sudo(["EcHo", ...forwarded]);
-
-    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", forwarded);
-  });
-});
     commands.cd(arg === "" ? [] : [arg]);
     expect(term.cwd).toBe(expected);
   });
@@ -434,6 +411,29 @@ describe("prepared command forwarding", () => {
     commands.cd(["nope"]);
     expect(term.cwd).toBe("~");
     expect(term.stylePrint).toHaveBeenCalledWith("No such directory: nope");
+  });
+});
+
+describe("prepared command forwarding", () => {
+  it("forwards aliases without reparsing or expanding prepared arguments", () => {
+    const { commands, term } = loadCommands();
+    const args = ["value with spaces", "$LITERAL", ""];
+    term.dispatchCommand = vi.fn();
+
+    commands.tail(args);
+
+    expect(term.dispatchCommand).toHaveBeenCalledWith("cat", args);
+    expect(term.dispatchCommand.mock.calls[0][1]).toBe(args);
+  });
+
+  it("forwards sudo arguments once as a command token and unchanged arguments", () => {
+    const { commands, term } = loadCommands({ user: "root" });
+    const forwarded = ["value with spaces", "$LITERAL", ""];
+    term.dispatchCommand = vi.fn();
+
+    commands.sudo(["EcHo", ...forwarded]);
+
+    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", forwarded);
   });
 });
 
