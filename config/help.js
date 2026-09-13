@@ -1,5 +1,7 @@
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%alias% [name[=value]]": "define, list, or query command aliases",
+  "%unalias% name": "remove a command alias",
   "%whois%": "list all partners",
   "%whois% [partner]": "learn about a partner",
   "%whois% root": "learn about us",

@@ -86,6 +86,26 @@ const commands = {
     });
   },
 
+  // Documents alias management locally; all other operands retain the
+  // portfolio-company lookup historically provided by `man` -> `tldr`.
+  man: function (args) {
+    if (args.length === 1 && args[0] === "alias") {
+      term.stylePrint("alias: define, list, or query command aliases - usage:");
+      term.stylePrint("%alias% name=value  define or replace an alias");
+      term.stylePrint("%alias%             list all aliases sorted by name");
+      term.stylePrint("%alias% name        print one alias");
+      return;
+    }
+
+    if (args.length === 1 && args[0] === "unalias") {
+      term.stylePrint("unalias: remove a command alias - usage:");
+      term.stylePrint("%unalias% name");
+      return;
+    }
+
+    return term.command({ cmd: "tldr", args });
+  },
+
   // Displays bio and ASCII art portrait for a team member, or the firm blurb.
   whois: function (args) {
     const name = args[0];
@@ -1025,8 +1045,9 @@ const _aliases = {
   tail: "cat", less: "cat", head: "cat", more: "cat",
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
-  // man/woman both show the tldr for a portfolio company
-  man: "tldr", woman: "tldr",
+  // woman continues to show the tldr for a portfolio company. `man` has an
+  // explicit handler above so it can document alias management first.
+  woman: "tldr",
   // Session control
   quit: "exit", stop: "exit",
   // Process management
