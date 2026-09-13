@@ -61,6 +61,17 @@ function SpawnRickRollPointers() {
   }
 }
 
+// `export` and `env` intentionally share one renderer so their output cannot
+// drift. Sort a copied entry list even though the terminal state API currently
+// returns sorted entries, keeping the command contract explicit at this seam.
+function _printEnvironment() {
+  term.environment
+    .entries()
+    .slice()
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([name, value]) => term.stylePrint(`${name}=${value}`));
+}
+
 const commands = {
 
   // ── Info & Discovery ────────────────────────────────────────────────────────
@@ -206,6 +217,45 @@ const commands = {
   echo: function (args) {
     const message = args.join(" ");
     term.stylePrint(message);
+  },
+
+  // Stores one exact NAME=value assignment through the terminal's validated,
+  // persistent environment API. Splitting on the first equals sign preserves
+  // empty values and any subsequent equals signs.
+  export: function (args) {
+    if (args.length === 0) {
+      _printEnvironment();
+      return;
+    }
+
+    if (args.length !== 1 || !args[0].includes("=")) {
+      term.stylePrint("export: expected one NAME=value assignment.");
+      return;
+    }
+
+    const assignment = args[0];
+    const separator = assignment.indexOf("=");
+    const result = term.environment.set(
+      assignment.slice(0, separator),
+      assignment.slice(separator + 1)
+    );
+    if (!result.ok) {
+      term.stylePrint(`export: ${result.message}`);
+    }
+  },
+
+  // Displays the same sorted representation as argument-free `export`.
+  env: function () {
+    _printEnvironment();
+  },
+
+  // The state API makes absent (including invalid) names a silent no-op and
+  // commits present removals atomically before reporting success.
+  unset: function (args) {
+    const result = term.environment.unset(args[0]);
+    if (!result.ok) {
+      term.stylePrint(`unset: ${result.message}`);
+    }
   },
 
   say: function (args) {
