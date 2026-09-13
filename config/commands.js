@@ -72,6 +72,28 @@ function _printEnvironment() {
     .forEach(([name, value]) => term.stylePrint(`${name}=${value}`));
 }
 
+const _environmentManuals = {
+  export: [
+    "export — store or list environment variables",
+    "Usage: export NAME=value",
+    "Use export with no arguments to list variables as NAME=value sorted by name.",
+    "NAME must match [A-Za-z_][A-Za-z0-9_]*; export NAME= stores an empty value.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+  env: [
+    "env — list environment variables",
+    "Usage: env",
+    "Prints the same name-sorted NAME=value listing as export with no arguments.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+  unset: [
+    "unset — remove an environment variable",
+    "Usage: unset NAME",
+    "Removes NAME and produces no output when NAME does not exist.",
+    "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
+  ],
+};
+
 const commands = {
 
   // ── Info & Discovery ────────────────────────────────────────────────────────
@@ -166,6 +188,22 @@ const commands = {
         term.stylePrint(`Try it with command: %${name}%`);
       }
     }
+  },
+
+  // Environment topics have local manuals. Every other topic retains the
+  // established portfolio lookup behavior of `man` by delegating to tldr.
+  man: function (args) {
+    const topic = args[0];
+    const manual = Object.prototype.hasOwnProperty.call(
+      _environmentManuals,
+      topic
+    )
+      ? _environmentManuals[topic]
+      : null;
+    if (!manual) {
+      return term.dispatchCommand("tldr", args);
+    }
+    manual.forEach((line) => term.stylePrint(line));
   },
 
   // ── Social & Contact ────────────────────────────────────────────────────────
@@ -1001,8 +1039,9 @@ const _aliases = {
   tail: "cat", less: "cat", head: "cat", more: "cat",
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
-  // man/woman both show the tldr for a portfolio company
-  man: "tldr", woman: "tldr",
+  // woman retains the original portfolio-manual alias; man handles its three
+  // environment topics directly and delegates every other topic to tldr.
+  woman: "tldr",
   // Session control
   quit: "exit", stop: "exit",
   // Process management

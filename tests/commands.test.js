@@ -114,7 +114,13 @@ describe("apply", () => {
 // Loads the full command set with a fake terminal. `cd` is the one command with
 // real branching logic — a switch over ~, .., /home, /bin and team member names
 // — and it drives term.cwd, which the prompt renders on every keystroke.
-function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {}) {
+function loadCommands({
+  cwd = "~",
+  user = "guest",
+  team = { avidan: {} },
+  help = {},
+  portfolio = {},
+} = {}) {
   const term = {
     cwd,
     user,
@@ -130,8 +136,8 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
     jobs: productionJobs,
     firm: { blurb: "", email: "hello@example.com" },
     team,
-    help: {},
-    portfolio: {},
+    help,
+    portfolio,
     colorText: (text) => text,
     window: {},
   });
@@ -460,5 +466,58 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("renders the environment commands and complete expansion grammar", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain("%export% NAME=value");
+    expect(output).toContain("%env%");
+    expect(output).toContain("%unset% NAME");
+    expect(output).toContain("$NAME");
+    expect(output).toContain("${NAME}");
+    expect(output).toContain("undefined names become empty");
+    expect(output).toContain("\\$NAME escapes expansion");
+  });
+});
+
+describe("environment manuals", () => {
+  it.each([
+    ["export", "Usage: export NAME=value"],
+    ["env", "Usage: env"],
+    ["unset", "Usage: unset NAME"],
+  ])("documents man %s and the expansion syntax", (topic, usage) => {
+    const { commands, term } = loadCommands();
+
+    commands.man([topic]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain(usage);
+    expect(output).toContain("$NAME");
+    expect(output).toContain("${NAME}");
+    expect(output).toContain("undefined names become empty");
+    expect(output).toContain("\\$NAME keeps the reference literal");
+  });
+
+  it("keeps non-environment man topics on the executable tldr portfolio path", () => {
+    const portfolio = {
+      example: {
+        name: "Example Company",
+        url: "https://example.com",
+        description: "Representative portfolio description.",
+      },
+    };
+    const { commands, term } = loadCommands({ portfolio });
+
+    commands.man(["example"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith("Example Company");
+    expect(term.stylePrint).toHaveBeenCalledWith("https://example.com");
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "Representative portfolio description."
+    );
   });
 });
