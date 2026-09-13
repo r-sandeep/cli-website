@@ -404,6 +404,18 @@ describe("terminal-ext", () => {
     expect(help).toHaveBeenCalledWith(["caller"]);
   });
 
+  it("treats an empty alias value as an empty replacement token stream", async () => {
+    const help = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { help } });
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("empty", "");
+
+    await term.executeCommandLine("empty help grouped");
+
+    expect(help).toHaveBeenCalledWith(["grouped"]);
+  });
+
   it("routes deep links through executeCommandLine without double prompts", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();

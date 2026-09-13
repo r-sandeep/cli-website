@@ -662,9 +662,10 @@ const commands = {
     // The terminal parser removes quote delimiters while retaining grouped
     // tokens. Re-quote grouped value tokens so later expansion preserves that
     // grouping rather than flattening it back into whitespace-separated words.
-    const value = [args[0].slice(equalsAt + 1), ...args.slice(1)]
-      .map((part) => (/\s/.test(part) ? `"${part}"` : part))
-      .join(" ");
+    const value = [
+      args[0].slice(equalsAt + 1),
+      ...args.slice(1).map((part) => (/\s/.test(part) ? `"${part}"` : part)),
+    ].join(" ");
     try {
       term.defineAlias(name, value);
     } catch (error) {

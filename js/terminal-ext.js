@@ -352,10 +352,16 @@ const extend = (term) => {
       return parsed;
     }
 
-    const replacement = parseCommandLine(value);
+    const replacementTokens = [
+      ..._parseCommandLine(value),
+      ...parsed.args,
+    ];
+    const [name = "", ...args] = replacementTokens;
     return {
-      ...replacement,
-      args: [...replacement.args, ...parsed.args],
+      line: value.trim(),
+      name,
+      cmd: name.toLowerCase(),
+      args,
     };
   };
 
