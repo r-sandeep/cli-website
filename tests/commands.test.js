@@ -7,6 +7,11 @@ const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
 const testJobs = { ...productionJobs, 2: ["Platform Engineer"] };
+const helpContext = vm.createContext({ module: { exports: {} } });
+vm.runInContext(
+  `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts;`,
+  helpContext
+);
 
 function loadApply({ inputs = [], jobs = testJobs, response } = {}) {
   const term = {
@@ -46,8 +51,7 @@ describe("apply", () => {
   it("submits each selected registry title for jobs 1 and 2 without a live request", async () => {
     for (const [id, jobs] of [["1", productionJobs], ["2", testJobs]]) {
       const { apply, fetch } = loadApply({ jobs, inputs: ["Ada", "ada@example.com", "", "", ""] });
-      expect(apply([id])).toBe(1);
-      await waitFor(() => fetch.mock.calls.length === 1);
+      await expect(apply([id])).resolves.toBe(1);
       expect(fetch).toHaveBeenCalledWith(
         "/.netlify/functions/submit-application",
         expect.objectContaining({ body: expect.stringContaining(`"position":"${jobs[id][0]}"`) })
@@ -79,8 +83,7 @@ describe("apply", () => {
 
   it("cancels without fetching and restores the terminal", async () => {
     const { apply, term, fetch } = loadApply({ inputs: [null] });
-    expect(apply(["1"])).toBe(1);
-    await waitFor(() => term.prompt.mock.calls.length === 1);
+    await expect(apply(["1"])).resolves.toBe(1);
     expect(term.stylePrint).toHaveBeenCalledWith("\r\nApplication cancelled.");
     expect(term.prompt).toHaveBeenCalled();
     expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
@@ -100,8 +103,7 @@ describe("apply", () => {
       ],
     ]) {
       const { apply, term, fetch } = loadApply({ inputs: ["Ada", "ada@example.com", "", "", ""], response });
-      expect(apply(["1"])).toBe(1);
-      await waitFor(() => fetch.mock.calls.length === 1);
+      await expect(apply(["1"])).resolves.toBe(1);
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(term.stylePrint).toHaveBeenCalledWith(output);
       expect(term.prompt).toHaveBeenCalled();
@@ -136,7 +138,11 @@ function loadCommands({
     jobs: productionJobs,
     firm: { blurb: "", email: "hello@example.com" },
     team,
-    help,
+    // Callers that pass `help` (the pipeline help tests) keep it; bare callers get the real
+    // entries so the help/man/shortcut tests see the full registry. `shortcuts` is always the
+    // real table from config/help.js.
+    help: Object.keys(help).length > 0 ? help : helpContext.helpEntries,
+    shortcuts: helpContext.shortcutEntries,
     portfolio,
     colorText: (text) => text,
     window: {},
@@ -144,12 +150,13 @@ function loadCommands({
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
   // Redirecting commands preserve their prepared argument arrays when they
-  // recurse; the raw-line seam remains available for compatibility.
+  // recurse; the raw-line seam remains available for compatibility (cd recurses
+  // through term.command for the paths that resolve via another cd).
   term.dispatchCommand = (name, args) => commands[name](args);
-  term.command = (line) => {
+  term.command = vi.fn((line) => {
     const [name, ...args] = line.split(" ");
     return term.dispatchCommand(name, args);
-  };
+  });
   return { commands, term };
 }
 
@@ -448,12 +455,6 @@ describe("help stays in sync with commands", () => {
   // command can be listed without existing — which is exactly what happened
   // when a bad merge dropped `swag` from commands.js while help.js kept
   // advertising it, leaving `help` pointing at a command that did nothing.
-  const helpContext = vm.createContext({ module: { exports: {} } });
-  vm.runInContext(
-    `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help;`,
-    helpContext
-  );
-
   it("advertises no command that does not exist", () => {
     const { commands } = loadCommands();
     const advertised = Object.keys(helpContext.helpEntries)
@@ -519,5 +520,120 @@ describe("environment manuals", () => {
     expect(term.stylePrint).toHaveBeenCalledWith(
       "Representative portfolio description."
     );
+  });
+});
+
+describe("help output (pipelines)", () => {
+  it("documents pipeline syntax, every filter, flags, defaults, and chaining", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help();
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("PIPELINES");
+    expect(output).toContain("COMMAND | %grep% [-ivn] PATTERN");
+    expect(output).toContain("-i case-insensitive, -v invert, -n number");
+    expect(output).toContain("COMMAND | %head% [N]");
+    expect(output).toContain("COMMAND | %tail% [N]");
+    expect(output).toContain("default: 10");
+    expect(output).toContain("COMMAND | %wc% -l");
+    expect(output).toContain("%whois% | %grep% -i root | %head% 3");
+  });
+});
+
+describe("pipeline manual pages preserve standalone commands", () => {
+  it.each([
+    ["pipe", "COMMAND | FILTER [| FILTER ...]"],
+    ["grep", "COMMAND | %grep% [-ivn] PATTERN"],
+    ["head", "COMMAND | %head% [N]"],
+    ["tail", "COMMAND | %tail% [N]"],
+    ["wc", "COMMAND | %wc% -l"],
+  ])("documents man %s", (topic, expected) => {
+    const { commands, term } = loadCommands();
+    commands.man([topic]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {
+    const { commands } = loadCommands();
+    commands.tldr = vi.fn();
+
+    commands.man(["portfolio_company"]);
+    expect(commands.tldr).toHaveBeenLastCalledWith(["portfolio_company"]);
+    commands.man(["unknown_topic"]);
+    expect(commands.tldr).toHaveBeenLastCalledWith(["unknown_topic"]);
+  });
+
+  it("keeps standalone head and tail as cat aliases and woman as a tldr alias", () => {
+    const { commands } = loadCommands();
+    commands.cat = vi.fn();
+    commands.tldr = vi.fn();
+
+    commands.head(["README.md"]);
+    expect(commands.cat).toHaveBeenCalledWith(["README.md"]);
+    commands.tail(["welcome.htm"]);
+    expect(commands.cat).toHaveBeenCalledWith(["welcome.htm"]);
+    commands.woman(["root"]);
+    expect(commands.tldr).toHaveBeenCalledWith(["root"]);
+    expect(typeof commands.grep).toBe("function");
+    expect(commands.grep).not.toBe(commands.man);
+  });
+});
+
+describe("terminal editing documentation", () => {
+  const expectedShortcuts = [
+    "Alt+Left",
+    "Alt+Right",
+    "Ctrl+W",
+    "Alt+D",
+    "Ctrl+A",
+    "Ctrl+E",
+    "Ctrl+U",
+  ];
+
+  it("prints every shortcut in help and man shortcuts", () => {
+    const helpRun = loadCommands();
+    helpRun.commands.help([]);
+    const helpOutput = helpRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    const manRun = loadCommands();
+    manRun.commands.man(["shortcuts"]);
+    const manOutput = manRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    for (const chord of expectedShortcuts) {
+      expect(helpOutput).toContain(
+        `${chord}: ${helpContext.shortcutEntries[chord]}`
+      );
+      expect(manOutput).toContain(
+        `${chord}: ${helpContext.shortcutEntries[chord]}`
+      );
+    }
+    expect(manRun.term.command).not.toHaveBeenCalled();
+  });
+
+  it("keeps bare man, company man, woman, and tldr on the existing tldr path", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man([]);
+    expect(term.command).toHaveBeenLastCalledWith("tldr");
+
+    commands.man(["fictiv"]);
+    expect(term.command).toHaveBeenLastCalledWith("tldr fictiv");
+
+    commands.woman(["fictiv"]);
+    expect(term.command).toHaveBeenLastCalledWith("tldr fictiv");
+
+    commands.tldr([]);
+    expect(term.stylePrint).toHaveBeenCalled();
+  });
+
+  it("keeps the README shortcut list consistent with terminal output", () => {
+    const readme = readFileSync("README.md", "utf8");
+
+    for (const chord of expectedShortcuts) {
+      expect(readme).toContain(
+        `**${chord}** — ${helpContext.shortcutEntries[chord]}`
+      );
+    }
+    expect(readme).toContain("`man shortcuts`");
   });
 });
