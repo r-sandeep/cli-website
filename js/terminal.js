@@ -226,13 +226,13 @@ function runRootTerminal(term) {
       term.pos() !== term.currentLine.length
     ) {
       resetCompletion();
-      return;
+      return false;
     }
 
     const completion = _completionForLine(term.currentLine);
     if (!completion) {
       resetCompletion();
-      return;
+      return false;
     }
 
     const foldedToken = completion.token.toLowerCase();
@@ -241,14 +241,13 @@ function runRootTerminal(term) {
     );
     if (matches.length === 0) {
       resetCompletion();
-      return;
+      return false;
     }
 
     if (matches.length === 1) {
-      const suffix = completion.prefix.length === 0 ? " " : "";
-      term.setCurrentLine(`${completion.prefix}${matches[0]}${suffix}`);
+      term.setCurrentLine(`${completion.prefix}${matches[0]} `);
       resetCompletion();
-      return;
+      return true;
     }
 
     const commonPrefix = _longestCommonCompletionPrefix(matches);
@@ -259,7 +258,7 @@ function runRootTerminal(term) {
         line: completedLine,
         candidates: matches,
       };
-      return;
+      return true;
     }
 
     const sameCandidates =
@@ -269,13 +268,14 @@ function runRootTerminal(term) {
       completionState.candidates.every((candidate, index) => candidate === matches[index]);
     if (!sameCandidates) {
       completionState = { line: term.currentLine, candidates: matches };
-      return;
+      return false;
     }
 
     const width = Number.isFinite(term.cols) ? term.cols : 80;
     term.write(`\r\n${_completionRows(matches, width).join("\r\n")}`);
     term.prompt();
     term.write(term.currentLine);
+    return true;
   };
 
   term.attachCustomKeyEventHandler((event) => {
@@ -284,8 +284,7 @@ function runRootTerminal(term) {
       // xterm asks about both phases in some browsers. Complete exactly once,
       // but consume every Tab phase so focus cannot move and no tab reaches
       // onData as input.
-      if (event.type === "keydown") {
-        completeInput();
+      if (event.type === "keydown" && completeInput()) {
         term.scrollToBottom();
       }
       return false;
@@ -384,7 +383,8 @@ function runRootTerminal(term) {
           break;
         case "\t": // tab
           // Browser Tab keydowns are consumed by the custom key handler above.
-          break;
+          // If xterm still forwards one, keep it fully inert.
+          return;
         default: // Print all other characters
           // Reset tab state on any other key
           term.tabIndex = 0;

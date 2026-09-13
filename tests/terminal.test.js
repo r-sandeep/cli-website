@@ -214,8 +214,8 @@ describe("runRootTerminal", () => {
   });
 
   it.each([
-    ["whois partners", "whois AV", { team: { Avidan: {} } }, "whois Avidan"],
-    ["tldr companies", "TLDR pa", { portfolio: { Particle: {} } }, "TLDR Particle"],
+    ["whois partners", "whois AV", { team: { Avidan: {} } }, "whois Avidan "],
+    ["tldr companies", "TLDR pa", { portfolio: { Particle: {} } }, "TLDR Particle "],
   ])("completes unique mixed-case %s from its authoritative source", (_name, line, globals, expected) => {
     const { runRootTerminal } = loadTerminalScript(globals);
     const editing = createEditingTerm({ line });
@@ -301,7 +301,7 @@ describe("runRootTerminal", () => {
       pressTab(term);
 
       expect(filesHere).toHaveBeenCalledTimes(1);
-      expect(term.currentLine).toBe(`${command.toUpperCase()} README.md`);
+      expect(term.currentLine).toBe(`${command.toUpperCase()} README.md `);
       expect(editing.cursor()).toBe(term.currentLine.length);
       expect(term.write).not.toHaveBeenCalled();
       expect(term.executeCommandLine).not.toHaveBeenCalled();
@@ -380,6 +380,7 @@ describe("runRootTerminal", () => {
     ["busy command", "hel", 3, { busy: true }, {}],
     ["locked terminal", "hel", 3, { locked: true }, {}],
     ["no matching command", "zzz", 3, {}, {}],
+    ["no matching argument", "whois zzz", 9, {}, { team: { Avidan: {} } }],
     ["unsupported argument", "help topic", 10, {}, {}],
   ])("consumes Tab with no output, mutation, or submission for %s", (_name, line, cursor, state, globals) => {
     const { runRootTerminal } = loadTerminalScript(globals);
@@ -397,7 +398,9 @@ describe("runRootTerminal", () => {
     expect(term.write).not.toHaveBeenCalled();
     expect(term.setCurrentLine).not.toHaveBeenCalled();
     expect(term.prompt).toHaveBeenCalledTimes(promptCalls);
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.scrollToBottom).not.toHaveBeenCalled();
     expect(term.currentLine).not.toContain("\t");
   });
 
@@ -414,12 +417,14 @@ describe("runRootTerminal", () => {
     expect(term.currentLine).toBe("he");
     expect(term.write).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.scrollToBottom).not.toHaveBeenCalled();
 
     term._onData("\t");
     expect(term.currentLine).toBe("he");
     expect(editing.cursor()).toBe(2);
     expect(term.write).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.scrollToBottom).not.toHaveBeenCalled();
     expect(term.currentLine).not.toContain("\t");
   });
 
