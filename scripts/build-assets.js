@@ -86,6 +86,22 @@ function readText(relativePath) {
   return fs.readFileSync(path.join(rootDir, relativePath), "utf8");
 }
 
+function createAppBundleSource(buildTime = new Date()) {
+  const buildInfo = Object.freeze({
+    version: JSON.parse(readText("package.json")).version,
+    buildDate: buildTime.toISOString().slice(0, 10),
+  });
+  const buildInfoPrelude = `// build metadata\nconst buildInfo = Object.freeze(${JSON.stringify(
+    buildInfo
+  )});`;
+
+  return [buildInfoPrelude]
+    .concat(
+      appBundleSources.map((file) => `// ${file}\n${readText(file)}`)
+    )
+    .join("\n;\n");
+}
+
 function writeText(relativePath, content) {
   const absolutePath = path.join(outDir, relativePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
@@ -126,10 +142,8 @@ async function copyVendorScript(asset) {
   console.log(`${asset.dest}: ${source.length} -> ${output.length} bytes`);
 }
 
-async function buildAppBundle() {
-  const source = appBundleSources
-    .map((file) => `// ${file}\n${readText(file)}`)
-    .join("\n;\n");
+async function buildAppBundle(buildTime = new Date()) {
+  const source = createAppBundleSource(buildTime);
   const output = await minifyJavaScript(source, {
     compress: {
       passes: 2,
@@ -177,7 +191,13 @@ async function main() {
   writePages();
 }
 
-module.exports = { appBundleSources, main, staticAssets, vendorScripts };
+module.exports = {
+  appBundleSources,
+  createAppBundleSource,
+  main,
+  staticAssets,
+  vendorScripts,
+};
 
 // Guarded so tests can import the bundle order without triggering a build.
 if (require.main === module) {

@@ -107,6 +107,24 @@ describe("config/*.js stay classic browser scripts", () => {
 });
 
 describe("script load order", () => {
+  it("injects fixed package metadata before the command registry", () => {
+    const { createAppBundleSource } = buildAssetsModule;
+    const buildTime = new Date("2026-02-03T23:59:58.000Z");
+    const source = createAppBundleSource(buildTime);
+    const packageVersion = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")
+    ).version;
+    const expectedPrelude = `const buildInfo = Object.freeze(${JSON.stringify({
+      version: packageVersion,
+      buildDate: "2026-02-03",
+    })});`;
+
+    expect(source).toContain(expectedPrelude);
+    expect(source.indexOf(expectedPrelude)).toBeLessThan(
+      source.indexOf("// config/commands.js")
+    );
+  });
+
   it("welcome.htm loads config/firm.js before config/commands.js", () => {
     // commands.js reads `firm` at the top level, so the reverse order is a
     // temporal-dead-zone crash that takes out buildGeoPage(). Read the real
