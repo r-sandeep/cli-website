@@ -322,16 +322,18 @@ const extend = (term) => {
     const trimmedLine = String(line).trim();
     const [name = "", ...args] = _parseCommandLine(trimmedLine);
     const argumentStart = trimmedLine.search(/\s/);
-    return {
+    const parsed = {
       line: trimmedLine,
       name,
       cmd: name.toLowerCase(),
       args,
-      // Keep the original lexical argument text beside the cooked tokens.
-      // Command handlers that need syntax (notably alias definitions) can use
-      // this source span without reconstructing it from lossy cooked values.
-      rawArgs: argumentStart === -1 ? "" : trimmedLine.slice(argumentStart).trimStart(),
     };
+    // Keep lexical syntax available to handlers without changing the parsed
+    // command's longstanding enumerable shape used by preload and dispatch.
+    Object.defineProperty(parsed, "rawArgs", {
+      value: argumentStart === -1 ? "" : trimmedLine.slice(argumentStart).trimStart(),
+    });
+    return parsed;
   };
 
   // Executes a parsed command, or parses an internal redirect without applying
@@ -343,8 +345,10 @@ const extend = (term) => {
     const fn = commands[cmd];
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
-    } else {
+    } else if (cmd === "alias") {
       return fn(parsed.args, parsed);
+    } else {
+      return fn(parsed.args);
     }
   };
 
