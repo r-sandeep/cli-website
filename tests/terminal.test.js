@@ -102,23 +102,26 @@ describe("runRootTerminal", () => {
     });
 
     runRootTerminal(term);
-    term._onData("\033[A");
+    term._onData("\x1b[A");
     expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
 
-    term._onData("\033[A");
+    term._onData("\x1b[A");
     expect(term.setCurrentLine).toHaveBeenLastCalledWith(
       "export NAME=value",
       false
     );
 
-    term._onData("\033[B");
+    term._onData("\x1b[B");
     expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
 
-    term._onData("\033[B");
+    term._onData("\x1b[B");
     expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
 
-    term._onData("\033[A");
-    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+    term._onData("\x1b[A");
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith(
+      "export NAME=value",
+      false
+    );
   });
 
   it("debounces resize handling with requestAnimationFrame", () => {

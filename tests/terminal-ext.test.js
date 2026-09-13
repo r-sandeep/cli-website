@@ -397,8 +397,8 @@ describe("terminal-ext", () => {
     term.environment.set("NAME", "expanded value");
     term.preloadCommandAssets = vi.fn(async () => {});
     term.dispatchCommand = vi.fn();
-    term.prompt.mockClear();
-    term.clearCurrentLine.mockClear();
+    term.prompt = vi.fn();
+    term.clearCurrentLine = vi.fn();
 
     await term.executeCommandLine("echo $NAME");
 
