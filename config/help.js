@@ -1,4 +1,5 @@
 const shortcuts = {
+  "Tab": "complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches",
   "Alt+Left": "move to the start of the previous word",
   "Alt+Right": "move to the start of the next word",
   "Ctrl+W": "delete back to the start of the previous word",
