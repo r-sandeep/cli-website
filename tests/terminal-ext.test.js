@@ -495,6 +495,34 @@ describe("terminal-ext", () => {
     expect(help).toHaveBeenCalledWith(["caller"]);
   });
 
+  it("preserves quoted alias values through public definition and reload", async () => {
+    const target = vi.fn();
+    const { extend } = loadTerminalExt({ commands: {} });
+    const term = createTerm();
+    extend(term);
+    env.window.commands.alias = (args, parsed) => {
+      const equalsAt = parsed.rawArgs.indexOf("=");
+      term.defineAlias(args[0].slice(0, args[0].indexOf("=")), parsed.rawArgs.slice(equalsAt + 1));
+    };
+    env.window.commands.target = target;
+
+    await term.executeCommandLine('alias run=target "two words"');
+    expect(term.getAlias("run")).toBe('target "two words"');
+    await term.executeCommandLine("run tail");
+    expect(target).toHaveBeenLastCalledWith(["two words", "tail"]);
+
+    const snapshot = env.window.localStorage.getItem("rootvc.commandAliases");
+    const reloadedTarget = vi.fn();
+    const { extend: extendReloaded } = loadTerminalExt({ commands: {} });
+    env.window.localStorage.setItem("rootvc.commandAliases", snapshot);
+    const reloaded = createTerm();
+    extendReloaded(reloaded);
+    env.window.commands.target = reloadedTarget;
+    expect(reloaded.getAlias("run")).toBe('target "two words"');
+    await reloaded.executeCommandLine("run tail");
+    expect(reloadedTarget).toHaveBeenLastCalledWith(["two words", "tail"]);
+  });
+
   it("treats an empty alias value as an empty replacement token stream", async () => {
     const help = vi.fn();
     const { extend } = loadTerminalExt({ commands: { help } });

@@ -640,7 +640,7 @@ const commands = {
     term.stylePrint("Come on, don't mess with our immaculate file system.");
   },
 
-  alias: function (args) {
+  alias: function (args, parsed) {
     const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
     if (args.length === 0) {
@@ -679,13 +679,19 @@ const commands = {
       return;
     }
 
-    // The terminal parser removes quote delimiters while retaining grouped
-    // tokens. Re-quote grouped value tokens so later expansion preserves that
-    // grouping rather than flattening it back into whitespace-separated words.
-    const value = [
-      args[0].slice(equalsAt + 1),
-      ...args.slice(1).map((part) => (/\s/.test(part) ? `"${part}"` : part)),
-    ].join(" ");
+    // Public command dispatch includes the original lexical argument span.
+    // Preserve it so quotes and empty quoted words retain their meaning when
+    // the stored alias value is parsed during expansion. Direct handler calls
+    // keep the legacy cooked-token reconstruction used by command unit tests.
+    const rawEqualsAt = parsed && typeof parsed.rawArgs === "string"
+      ? parsed.rawArgs.indexOf("=")
+      : -1;
+    const value = rawEqualsAt !== -1
+      ? parsed.rawArgs.slice(rawEqualsAt + 1)
+      : [
+          args[0].slice(equalsAt + 1),
+          ...args.slice(1).map((part) => (/\s/.test(part) ? `"${part}"` : part)),
+        ].join(" ");
     try {
       term.defineAlias(name, value);
     } catch (error) {

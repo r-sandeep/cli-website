@@ -321,11 +321,16 @@ const extend = (term) => {
   const parseCommandLine = (line) => {
     const trimmedLine = String(line).trim();
     const [name = "", ...args] = _parseCommandLine(trimmedLine);
+    const argumentStart = trimmedLine.search(/\s/);
     return {
       line: trimmedLine,
       name,
       cmd: name.toLowerCase(),
       args,
+      // Keep the original lexical argument text beside the cooked tokens.
+      // Command handlers that need syntax (notably alias definitions) can use
+      // this source span without reconstructing it from lossy cooked values.
+      rawArgs: argumentStart === -1 ? "" : trimmedLine.slice(argumentStart).trimStart(),
     };
   };
 
@@ -339,7 +344,7 @@ const extend = (term) => {
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
     } else {
-      return fn(parsed.args);
+      return fn(parsed.args, parsed);
     }
   };
 
