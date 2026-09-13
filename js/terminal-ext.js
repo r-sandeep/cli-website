@@ -352,18 +352,56 @@ const extend = (term) => {
 
   // ── Command Dispatch ───────────────────────────────────────────────────────
 
-  // Parses and executes a command line string. Called both by the Enter handler
-  // in terminal.js and internally by commands that redirect to other commands.
-  term.command = (line) => {
-    const parts = line.split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1, parts.length);
+  // Dispatches an already prepared command. Redirecting commands use this seam
+  // so expanded values remain opaque data rather than being parsed or expanded
+  // for a second time.
+  term.dispatchCommand = (cmd, args) => {
     const fn = commands[cmd];
     if (typeof fn === "undefined") {
       term.stylePrint(`Command not found: ${cmd}. Try 'help' to get started.`);
     } else {
       return fn(args);
     }
+  };
+
+  const expandArgument = (argument, variables) => {
+    let expanded = "";
+    let index = 0;
+
+    const referenceAt = (start) => {
+      if (argument[start] !== "$") return null;
+      if (argument[start + 1] === "{") {
+        const close = argument.indexOf("}", start + 2);
+        if (close === -1) return null;
+        const name = argument.slice(start + 2, close);
+        return ENV_NAME_PATTERN.test(name) ? { end: close + 1, name } : null;
+      }
+
+      const match = argument.slice(start + 1).match(/^[A-Za-z_][A-Za-z0-9_]*/);
+      return match ? { end: start + 1 + match[0].length, name: match[0] } : null;
+    };
+
+    while (index < argument.length) {
+      const escapedReference =
+        argument[index] === "\\" ? referenceAt(index + 1) : null;
+      if (escapedReference) {
+        expanded += argument.slice(index + 1, escapedReference.end);
+        index = escapedReference.end;
+        continue;
+      }
+
+      const reference = referenceAt(index);
+      if (reference) {
+        expanded += variables.get(reference.name) ?? "";
+        index = reference.end;
+        continue;
+      }
+
+      expanded += argument[index];
+      index += 1;
+    }
+
+    return expanded;
   };
 
   term.parseCommandLine = (line) => {
@@ -374,6 +412,22 @@ const extend = (term) => {
       cmd: (parts[0] || "").toLowerCase(),
       args: parts.slice(1),
     };
+  };
+
+  term.prepareCommandLine = (line) => {
+    const parsed = term.parseCommandLine(line);
+    const variables = term.environment.snapshot();
+    return {
+      ...parsed,
+      args: parsed.args.map((argument) => expandArgument(argument, variables)),
+    };
+  };
+
+  // Parses and executes a raw command line. Interactive execution prepares once
+  // before preload; this remains the compatible raw-line seam used by replay.
+  term.command = (line) => {
+    const prepared = term.prepareCommandLine(line);
+    return term.dispatchCommand(prepared.cmd, prepared.args);
   };
 
   term.normalizeCommandForPreload = (cmd, args) => {
@@ -405,9 +459,11 @@ const extend = (term) => {
     }
   };
 
-  term.preloadCommandAssets = async (line) => {
-    const parsed = term.parseCommandLine(line);
-    const normalized = term.normalizeCommandForPreload(parsed.cmd, parsed.args);
+  term.preloadCommandAssets = async (cmdOrLine, preparedArgs) => {
+    const prepared = Array.isArray(preparedArgs)
+      ? { cmd: cmdOrLine, args: preparedArgs }
+      : term.prepareCommandLine(cmdOrLine);
+    const normalized = term.normalizeCommandForPreload(prepared.cmd, prepared.args);
     const tasks = [];
     const artId = getASCIIArtIdForCommand(normalized.cmd, normalized.args);
     const preloadFile = getPreloadFileForCommand(normalized.cmd, normalized.args);
@@ -435,6 +491,7 @@ const extend = (term) => {
       ...options,
     };
     const parsed = term.parseCommandLine(line);
+    const prepared = term.prepareCommandLine(parsed.line);
     let exitStatus;
 
     try {
@@ -442,7 +499,7 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      await term.preloadCommandAssets(parsed.line);
+      await term.preloadCommandAssets(prepared.cmd, prepared.args);
 
       if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
         term.writeln("");
@@ -453,7 +510,7 @@ const extend = (term) => {
           term.history.push(parsed.line);
         }
 
-        exitStatus = term.command(parsed.line);
+        exitStatus = term.dispatchCommand(prepared.cmd, prepared.args);
 
         if (settings.trackAnalytics) {
           window.dataLayer = window.dataLayer || [];

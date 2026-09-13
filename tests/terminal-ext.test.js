@@ -313,7 +313,7 @@ describe("terminal-ext", () => {
     term.preloadCommandAssets = vi.fn(async () => {
       order.push("preload");
     });
-    term.command = vi.fn(() => {
+    term.dispatchCommand = vi.fn(() => {
       order.push("command");
       return 0;
     });
@@ -326,7 +326,93 @@ describe("terminal-ext", () => {
       { args: "", command: "help", event: "commandSent" },
     ]);
     expect(term.busy).toBe(false);
-    expect(term.command).toHaveBeenCalledWith("help");
+    expect(term.dispatchCommand).toHaveBeenCalledWith("help", []);
+  });
+
+  it("expands every recognized argument reference once without changing token boundaries", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("NAME", "hello world");
+    term.environment.set("EMPTY", "");
+    term.environment.set("DOLLAR", "$NAME");
+
+    const prepared = term.prepareCommandLine(
+      String.raw`EcHo $NAME ${NAME} $MISSING pre$NAME${EMPTY}post $DOLLAR \$NAME path\keep $9 ${BAD-NAME} cash$`
+    );
+
+    expect(prepared.cmd).toBe("echo");
+    expect(prepared.args).toEqual([
+      "hello world",
+      "hello world",
+      "",
+      "prehello worldpost",
+      "$NAME",
+      "$NAME",
+      String.raw`path\keep`,
+      "$9",
+      "${BAD-NAME}",
+      "cash$",
+    ]);
+    expect(term.prepareCommandLine("$NAME $NAME")).toMatchObject({
+      cmd: "$name",
+      args: ["hello world"],
+    });
+  });
+
+  it("captures one prepared vector before preload while retaining raw history and analytics", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("NAME", "before");
+    let releasePreload;
+    const preloadPending = new Promise((resolve) => {
+      releasePreload = resolve;
+    });
+    let preloadedArgs;
+    term.preloadCommandAssets = vi.fn((_cmd, args) => {
+      preloadedArgs = args;
+      return preloadPending;
+    });
+    term.dispatchCommand = vi.fn();
+
+    const execution = term.executeCommandLine("EcHo $NAME");
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", ["before"]);
+    term.environment.set("NAME", "after");
+    releasePreload();
+    await execution;
+
+    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", ["before"]);
+    expect(term.dispatchCommand.mock.calls[0][1]).toBe(preloadedArgs);
+    expect(term.history).toEqual(["EcHo $NAME"]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "$NAME", command: "echo", event: "commandSent" },
+    ]);
+  });
+
+  it("replays environment history for output without changing active or persisted state", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.environment.set("ACTIVE", "later value");
+    term.history = [
+      "export TEMP=one",
+      "export TEMP=two",
+      "env",
+      "unset TEMP",
+      "env",
+    ];
+    term.runDeepLink = vi.fn();
+    const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
+
+    term.resizeListener();
+
+    expect(term.stylePrint).toHaveBeenCalledWith("ACTIVE=later value");
+    expect(term.stylePrint).toHaveBeenCalledWith("TEMP=two");
+    expect(term.environment.entries()).toEqual([["ACTIVE", "later value"]]);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      persistedBefore
+    );
   });
 
   it("routes deep links through executeCommandLine without double prompts", () => {

@@ -137,10 +137,12 @@ function loadCommands({ cwd = "~", user = "guest", team = { avidan: {} } } = {})
   });
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
-  // cd recurses through term.command for the paths that resolve via another cd.
+  // Redirecting commands preserve their prepared argument arrays when they
+  // recurse; the raw-line seam remains available for compatibility.
+  term.dispatchCommand = (name, args) => commands[name](args);
   term.command = (line) => {
     const [name, ...args] = line.split(" ");
-    return commands[name](args);
+    return term.dispatchCommand(name, args);
   };
   return { commands, term };
 }
@@ -378,6 +380,29 @@ describe("cd", () => {
     ["anywhere", "/bin", "bin"],
   ])("from %s, cd %s -> %s", (cwd, arg, expected) => {
     const { commands, term } = loadCommands({ cwd });
+
+describe("prepared command forwarding", () => {
+  it("forwards aliases without reparsing or expanding prepared arguments", () => {
+    const { commands, term } = loadCommands();
+    const args = ["value with spaces", "$LITERAL", ""];
+    term.dispatchCommand = vi.fn();
+
+    commands.tail(args);
+
+    expect(term.dispatchCommand).toHaveBeenCalledWith("cat", args);
+    expect(term.dispatchCommand.mock.calls[0][1]).toBe(args);
+  });
+
+  it("forwards sudo arguments once as a command token and unchanged arguments", () => {
+    const { commands, term } = loadCommands({ user: "root" });
+    const forwarded = ["value with spaces", "$LITERAL", ""];
+    term.dispatchCommand = vi.fn();
+
+    commands.sudo(["EcHo", ...forwarded]);
+
+    expect(term.dispatchCommand).toHaveBeenCalledWith("echo", forwarded);
+  });
+});
     commands.cd(arg === "" ? [] : [arg]);
     expect(term.cwd).toBe(expected);
   });

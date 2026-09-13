@@ -315,7 +315,7 @@ const commands = {
     const relativeHomeMatch = dir.match(/^\.\.\/home\/(.+)$/);
     if (relativeHomeMatch) {
       if (term.cwd === "~" || term.cwd === "bin") {
-        term.command(`cd ${relativeHomeMatch[1]}`);
+        term.dispatchCommand("cd", [relativeHomeMatch[1]]);
       } else {
         term.stylePrint(`No such directory: ${dir}`);
       }
@@ -346,9 +346,9 @@ const commands = {
         break;
       case "..":
         if (term.cwd === "~") {
-          term.command("cd /home");
+          term.dispatchCommand("cd", ["/home"]);
         } else if (term.cwd === "home" || term.cwd === "bin") {
-          term.command("cd /");
+          term.dispatchCommand("cd", ["/"]);
         }
         break;
       // Any deeply nested upward traversal just lands at root.
@@ -361,7 +361,7 @@ const commands = {
       case "home":
         // `home` alone is only reachable from /
         if (term.cwd === "/") {
-          term.command("cd /home");
+          term.dispatchCommand("cd", ["/home"]);
         } else {
           term.stylePrint(`You do not have permission to access this directory`);
         }
@@ -374,7 +374,7 @@ const commands = {
       case "root":
         if (term.cwd === "home") {
           if (term.user === dir) {
-            term.command("cd ~");
+            term.dispatchCommand("cd", ["~"]);
           } else {
             term.stylePrint(`You do not have permission to access this directory`);
           }
@@ -460,7 +460,7 @@ const commands = {
     } else if (args.join(" ") == "the pod bay doors") {
       term.stylePrint("I'm sorry Dave, I'm afraid I can't do that.");
     } else {
-      term.command(`cat ${args.join(" ")}`);
+      term.dispatchCommand("cat", args);
     }
   },
 
@@ -528,7 +528,7 @@ const commands = {
   // Only root can sudo; otherwise logs an incident (just like real life).
   sudo: function (args) {
     if (term.user == "root") {
-      term.command(args.join(" "));
+      term.dispatchCommand((args[0] || "").toLowerCase(), args.slice(1));
     } else {
       term.stylePrint(
         `${colorText(
@@ -545,7 +545,7 @@ const commands = {
 
     if (user == "root" || user == "guest") {
       term.user = user;
-      term.command("cd ~");
+      term.dispatchCommand("cd", ["~"]);
     } else {
       term.stylePrint("su: Sorry");
     }
@@ -642,7 +642,7 @@ const commands = {
 
   // Opens the GeoCities-style welcome page (welcome.htm).
   exit: function () {
-    term.command("open welcome.htm");
+    term.dispatchCommand("open", ["welcome.htm"]);
   },
 
   // Reinitializes the terminal, clearing history and resetting the prompt.
@@ -1021,5 +1021,5 @@ const _aliases = {
   privacy: "privacy_dynamics",
 };
 for (const [alias, target] of Object.entries(_aliases)) {
-  commands[alias] = (args) => term.command([target, ...args].join(" ").trim());
+  commands[alias] = (args) => term.dispatchCommand(target, args);
 }
