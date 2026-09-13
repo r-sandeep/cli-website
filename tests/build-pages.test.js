@@ -142,6 +142,14 @@ describe("script load order", () => {
       appBundleSources.indexOf("config/commands.js")
     );
   });
+
+  it("the app bundle loads pipeline helpers before terminal integration", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/pipeline.js");
+    expect(appBundleSources.indexOf("js/pipeline.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-ext.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {

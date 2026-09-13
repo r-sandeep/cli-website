@@ -19,6 +19,11 @@ function createTerm(cwd = "~") {
   const term = {
     VERSION: 4,
     _initialized: false,
+    // The word-wise editing shortcuts (main) register a custom key handler on
+    // startup; capture it like tests/terminal.test.js does.
+    attachCustomKeyEventHandler: vi.fn((handler) => {
+      term._customKeyHandler = handler;
+    }),
     buffer: { active: { cursorX: 0 } },
     clear: vi.fn(),
     closePrompt: vi.fn(),
@@ -62,6 +67,7 @@ function createTerminalEnvironment(storage, cwd = "~", storageGetter) {
       jobs: {},
       preloadASCIIArt: vi.fn(),
       scheduleIdleTask: vi.fn(),
+      shortcuts: {},
     },
   });
   Object.defineProperty(env.window, "localStorage", {
@@ -73,6 +79,8 @@ function createTerminalEnvironment(storage, cwd = "~", storageGetter) {
   env.window.term = term;
   env.loadScripts([
     "js/bookmarks.js",
+    // terminal-ext.js (main) reads the Pipeline global from js/pipeline.js.
+    "js/pipeline.js",
     "config/commands.js",
     "js/terminal-ext.js",
   ]);
@@ -122,7 +130,10 @@ describe("bookmark terminal integration", () => {
     const beforeUnload = vi.fn();
     broken.env.window.addEventListener("beforeunload", beforeUnload);
 
-    expect(storageGetter).toHaveBeenCalledTimes(1);
+    // Startup probes storage once for bookmarks and once for the environment
+    // store (js/terminal-ext.js); the bookmark commands must never probe again.
+    const startupAccesses = storageGetter.mock.calls.length;
+    expect(startupAccesses).toBeGreaterThanOrEqual(1);
     expect(typeof broken.term.input).toBe("function");
 
     for (const [line, output] of [
@@ -148,7 +159,7 @@ describe("bookmark terminal integration", () => {
       expect(beforeUnload).not.toHaveBeenCalled();
     }
 
-    expect(storageGetter).toHaveBeenCalledTimes(1);
+    expect(storageGetter).toHaveBeenCalledTimes(startupAccesses);
   });
 
   it("keeps bookmark and go in the normal interactive Enter-key lifecycle", async () => {

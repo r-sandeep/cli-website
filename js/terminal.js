@@ -27,6 +27,109 @@ function runRootTerminal(term) {
     { passive: true }
   );
 
+  const previousWordStart = (line, cursor) => {
+    let nextCursor = cursor;
+    while (nextCursor > 0 && line[nextCursor - 1] === " ") nextCursor--;
+    while (nextCursor > 0 && line[nextCursor - 1] !== " ") nextCursor--;
+    return nextCursor;
+  };
+
+  const nextWordStart = (line, cursor) => {
+    let nextCursor = cursor;
+    while (nextCursor < line.length && line[nextCursor] !== " ") nextCursor++;
+    while (nextCursor < line.length && line[nextCursor] === " ") nextCursor++;
+    return nextCursor;
+  };
+
+  const updateInput = (line, cursor) => {
+    const oldLine = term.currentLine;
+    const oldCursor = term.pos();
+    if (line === oldLine && cursor === oldCursor) return;
+
+    if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
+    term.currentLine = line;
+    term.write(`${line}\x1b[K`);
+    if (cursor < line.length) {
+      term.write("\x1b[D".repeat(line.length - cursor));
+    }
+  };
+
+  const editInput = (action) => {
+    const line = term.currentLine;
+    const cursor = Math.max(0, Math.min(term.pos(), line.length));
+
+    switch (action) {
+      case "previousWord":
+        updateInput(line, previousWordStart(line, cursor));
+        break;
+      case "nextWord":
+        updateInput(line, nextWordStart(line, cursor));
+        break;
+      case "deletePreviousWord": {
+        const start = previousWordStart(line, cursor);
+        updateInput(line.slice(0, start) + line.slice(cursor), start);
+        break;
+      }
+      case "deleteNextWord": {
+        const end = nextWordStart(line, cursor);
+        updateInput(line.slice(0, cursor) + line.slice(end), cursor);
+        break;
+      }
+      case "lineStart":
+        updateInput(line, 0);
+        break;
+      case "lineEnd":
+        updateInput(line, line.length);
+        break;
+      case "clearLine":
+        updateInput("", 0);
+        break;
+    }
+  };
+
+  const shortcutForEvent = (event) => {
+    if (
+      event.type !== "keydown" ||
+      event.shiftKey ||
+      event.metaKey ||
+      event.altKey === event.ctrlKey
+    ) {
+      return null;
+    }
+
+    if (event.altKey) {
+      if (event.key === "ArrowLeft") return "previousWord";
+      if (event.key === "ArrowRight") return "nextWord";
+      if (
+        event.code === "KeyD" ||
+        (!event.code && event.key.toLowerCase() === "d")
+      ) {
+        return "deleteNextWord";
+      }
+    }
+
+    if (event.ctrlKey) {
+      if (event.key.toLowerCase() === "w") return "deletePreviousWord";
+      if (event.key.toLowerCase() === "a") return "lineStart";
+      if (event.key.toLowerCase() === "e") return "lineEnd";
+      if (event.key.toLowerCase() === "u") return "clearLine";
+    }
+
+    return null;
+  };
+
+  term.attachCustomKeyEventHandler((event) => {
+    const action = shortcutForEvent(event);
+    if (!action) return true;
+
+    event.preventDefault();
+    if (term._initialized && !term.locked && !term.busy) {
+      editInput(action);
+      term.scrollToBottom();
+    }
+    return false;
+  });
+
   term.onData((e) => {
     if (term._initialized && !term.locked && !term.busy) {
       switch (e) {
