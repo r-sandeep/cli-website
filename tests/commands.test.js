@@ -191,6 +191,39 @@ describe("alias management", () => {
     );
   });
 
+describe("alias documentation", () => {
+  it("prints command-specific manuals for alias and unalias", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["alias"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "alias: define, list, or query command aliases - usage:",
+      "%alias% name=value  define or replace an alias",
+      "%alias%             list all aliases sorted by name",
+      "%alias% name        print one alias",
+    ]);
+
+    term.stylePrint.mockClear();
+    commands.man(["unalias"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "unalias: remove a command alias - usage:",
+      "%unalias% name",
+    ]);
+  });
+
+  it("retains portfolio lookup for man and woman", () => {
+    const { commands, term } = loadCommands();
+    term.command = vi.fn();
+
+    commands.man(["esper"]);
+    expect(term.command).toHaveBeenCalledWith({ cmd: "tldr", args: ["esper"] });
+
+    term.command.mockClear();
+    commands.woman(["esper"]);
+    expect(term.command).toHaveBeenCalledWith({ cmd: "tldr", args: ["esper"] });
+  });
+});
+
   it("removes an alias and reports an unknown name without mutation", () => {
     const { commands, term } = loadCommands();
     commands.alias(["kept=echo", "safe"]);
@@ -327,5 +360,12 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("advertises alias and unalias with their supported syntax", () => {
+    expect(helpContext.helpEntries).toMatchObject({
+      "%alias% [name[=value]]": "define, list, or query command aliases",
+      "%unalias% name": "remove a command alias",
+    });
   });
 });
