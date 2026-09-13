@@ -967,15 +967,19 @@ describe("pipeline manual pages preserve standalone commands", () => {
     const sortRun = loadCommands();
     sortRun.commands.man(["sort"]);
     const sortOutput = sortRun.term.stylePrint.mock.calls.flat().join("\n");
-    expect(sortOutput).toContain("-r");
-    expect(sortOutput).toContain("-n");
-    expect(sortOutput).toContain("-u");
+    expect(sortOutput).toContain("-r reverses the order");
+    expect(sortOutput).toContain("-n compares leading numeric values");
+    expect(sortOutput).toContain("-u removes exact duplicates after sorting");
+    expect(sortOutput).toContain("Flags may be combined, for example -rn");
+    expect(sortOutput).toContain("ANSI color and escape sequences are ignored");
 
     const uniqRun = loadCommands();
     uniqRun.commands.man(["uniq"]);
     const uniqOutput = uniqRun.term.stylePrint.mock.calls.flat().join("\n");
-    expect(uniqOutput).toContain("-c");
-    expect(uniqOutput).toContain("-d");
+    expect(uniqOutput).toContain("-c prefixes each survivor with its run count and one space");
+    expect(uniqOutput).toContain("-d keeps only repeated runs");
+    expect(uniqOutput).toContain("Flags may be combined as -cd");
+    expect(uniqOutput).toContain("ANSI color and escape sequences are ignored");
   });
 
   it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {
