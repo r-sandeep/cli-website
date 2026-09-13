@@ -85,6 +85,13 @@ function createEditingTerm({ line = "", cursor = line.length, history = [] } = {
       else if (!token[1]) visualCursor++;
     }
   });
+  let promptCount = 0;
+  term.prompt = vi.fn(() => {
+    // The first call initializes the preloaded test line. Later prompts begin a
+    // fresh input row, as happens after completion candidates are listed.
+    if (promptCount > 0) visualCursor = 0;
+    promptCount++;
+  });
   term.clearCurrentLine = vi.fn((goToEndOfHistory = false) => {
     term.currentLine = "";
     visualCursor = 0;
@@ -383,8 +390,8 @@ describe("runRootTerminal", () => {
 
   it.each([
     ["an edit", (term) => { term._onData("x"); term._onData("\u007F"); }],
-    ["cursor movement", (term) => { term._onData("\033[D"); term._onData("\033[C"); }],
-    ["history movement", (term) => { term._onData("\033[A"); }],
+    ["cursor movement", (term) => { term._onData("\x1b[D"); term._onData("\x1b[C"); }],
+    ["history movement", (term) => { term._onData("\x1b[A"); }],
     ["a word-wise operation", (term) => {
       term._customKeyHandler(keyEvent({ altKey: true, key: "ArrowLeft" }));
       term._customKeyHandler(keyEvent({ ctrlKey: true, key: "e" }));
