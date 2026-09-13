@@ -437,6 +437,7 @@ const extend = (term) => {
       promptAfter: true,
       showLeadingNewline: true,
       trackAnalytics: true,
+      scrollAfter: true,
       ...options,
     };
     const parsed = parseCommandLine(line);
@@ -483,7 +484,9 @@ const extend = (term) => {
         term.busy = false;
       }
 
-      term.scrollToBottom();
+      if (settings.scrollAfter) {
+        term.scrollToBottom();
+      }
     }
 
     return exitStatus;
@@ -494,16 +497,23 @@ const extend = (term) => {
   // Called on window resize. xterm clears its buffer on resize, so we
   // reinitialize the terminal and replay the entire command history to restore
   // the visible output, then re-render the prompt at the bottom.
-  term.resizeListener = () => {
+  term.resizeListener = async () => {
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
-    term.runDeepLink({ replay: true });
+    await term.runDeepLink({ replay: true });
     for (const c of term.history) {
       term.prompt("\r\n", ` ${c}\r\n`);
-      term.command(c);
+      await term.executeCommandLine(c, {
+        addToHistory: false,
+        manageBusy: false,
+        promptAfter: false,
+        showLeadingNewline: false,
+        trackAnalytics: false,
+        scrollAfter: false,
+      });
     }
     term.prompt();
     term.scrollToBottom();
@@ -559,11 +569,11 @@ const extend = (term) => {
   //
   // `replay` is set by the resize listener, which reruns this to redraw a
   // buffer xterm cleared. That is the same visit, not a new arrival, so it must
-  // not be counted again — the history replay right below it calls term.command
-  // directly rather than executeCommandLine for exactly this reason.
+  // not be counted again. History replay uses the same execution boundary with
+  // its user-visible submission side effects disabled for the same reason.
   term.runDeepLink = ({ replay = false } = {}) => {
     if (term.deepLink != "") {
-      term.executeCommandLine(term.deepLink, {
+      return term.executeCommandLine(term.deepLink, {
         addToHistory: false,
         promptAfter: false,
         showLeadingNewline: false,
@@ -575,6 +585,8 @@ const extend = (term) => {
         console.error("Deep link failed", error);
       });
     }
+
+    return Promise.resolve();
   };
 
   // ── Interactive Input ──────────────────────────────────────────────────────
