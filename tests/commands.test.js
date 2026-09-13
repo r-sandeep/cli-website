@@ -7,6 +7,16 @@ const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
 const testJobs = { ...productionJobs, 2: ["Platform Engineer"] };
+const bookmarkSource = readFileSync("js/bookmarks.js", "utf8");
+
+function createMemoryStorage(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem: vi.fn((key) => values.has(key) ? values.get(key) : null),
+    setItem: vi.fn((key, value) => values.set(key, value)),
+    removeItem: vi.fn((key) => values.delete(key)),
+  };
+}
 const helpContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(
   `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts;`,
@@ -120,9 +130,15 @@ function loadCommands({
   cwd = "~",
   user = "guest",
   team = { avidan: {} },
+  storage = createMemoryStorage(),
   help = {},
   portfolio = {},
 } = {}) {
+  const location = {
+    assign: vi.fn(),
+    replace: vi.fn(),
+    reload: vi.fn(),
+  };
   const term = {
     cwd,
     user,
@@ -131,6 +147,10 @@ function loadCommands({
     printArt: vi.fn(),
     openURL: vi.fn(),
     displayURL: vi.fn(),
+    init: vi.fn(),
+    prompt: vi.fn(),
+    clearCurrentLine: vi.fn(),
+    collectInput: vi.fn(),
     cols: 100,
   };
   const context = vm.createContext({
@@ -145,8 +165,10 @@ function loadCommands({
     shortcuts: helpContext.shortcutEntries,
     portfolio,
     colorText: (text) => text,
-    window: {},
+    localStorage: storage,
+    window: { location },
   });
+  vm.runInContext(bookmarkSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
   // Redirecting commands preserve their prepared argument arrays when they
@@ -157,7 +179,7 @@ function loadCommands({
     const [name, ...args] = line.split(" ");
     return term.dispatchCommand(name, args);
   });
-  return { commands, term };
+  return { commands, location, storage, term };
 }
 
 function createEnvironmentDouble(
@@ -427,6 +449,215 @@ describe("cd", () => {
   });
 });
 
+describe("bookmark and go", () => {
+  it("adds every valid NAME form at the current cwd and rejects an invalid name atomically", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "bin" });
+
+    for (const name of ["work", "Work_2", "dash-name", "__proto__"]) {
+      commands.bookmark(["add", name]);
+      expect(term.stylePrint).toHaveBeenLastCalledWith(`Bookmark ${name} saved: bin`);
+    }
+    const beforeInvalid = storage.getItem("rootvc.bookmarks.v1");
+    commands.bookmark(["add", "bad.name"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      'Invalid bookmark name "bad.name". NAME must match [A-Za-z0-9_-]+.'
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(beforeInvalid);
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+  });
+
+  it("rejects a duplicate without changing the persisted bookmark", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "home" });
+    commands.bookmark(["add", "desk"]);
+    const beforeDuplicate = storage.getItem("rootvc.bookmarks.v1");
+    term.cwd = "bin";
+
+    commands.bookmark(["add", "desk"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith('Bookmark "desk" already exists.');
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(beforeDuplicate);
+    term.stylePrint.mockClear();
+    commands.bookmark(["list"]);
+    expect(term.stylePrint).toHaveBeenCalledWith("desk -> home");
+  });
+
+  it("prints an empty state and lists entries in deterministic name order", () => {
+    const { commands, term } = loadCommands();
+    commands.bookmark(["list"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("No bookmarks saved.");
+
+    term.cwd = "bin";
+    commands.bookmark(["add", "zeta"]);
+    term.cwd = "home";
+    commands.bookmark(["add", "Alpha"]);
+    term.stylePrint.mockClear();
+    commands.bookmark(["list"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "Alpha -> home",
+      "zeta -> bin",
+    ]);
+  });
+
+  it("removes a present bookmark and rejects an absent name without changing state", () => {
+    const { commands, storage, term } = loadCommands();
+    commands.bookmark(["add", "kept"]);
+    commands.bookmark(["add", "gone"]);
+
+    commands.bookmark(["remove", "gone"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith('Bookmark "gone" removed.');
+    const afterRemoval = storage.getItem("rootvc.bookmarks.v1");
+    commands.bookmark(["remove", "missing"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith('Bookmark "missing" not found.');
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(afterRemoval);
+  });
+
+  it("navigates to a bookmark by changing only cwd and preserves cwd for unknown names", () => {
+    const { commands, location, term } = loadCommands({ cwd: "home" });
+    commands.bookmark(["add", "origin"]);
+    term.cwd = "bin";
+    term.stylePrint.mockClear();
+    term.command.mockClear();
+
+    commands.go(["origin"]);
+    expect(term.cwd).toBe("home");
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+    expect(location.assign).not.toHaveBeenCalled();
+    expect(location.replace).not.toHaveBeenCalled();
+    expect(location.reload).not.toHaveBeenCalled();
+
+    term.stylePrint.mockClear();
+    commands.go(["unknown"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith('Bookmark "unknown" not found.');
+    expect(term.cwd).toBe("home");
+  });
+
+  it("rejects malformed command shapes with usage and no mutation or dispatch", () => {
+    for (const args of [[], ["add"], ["add", "name", "extra"], ["list", "extra"], ["remove"], ["unknown"]]) {
+      const { commands, storage, term } = loadCommands({ cwd: "bin" });
+      const before = storage.getItem("rootvc.bookmarks.v1");
+      commands.bookmark(args);
+      expect(term.stylePrint).toHaveBeenLastCalledWith(
+        "Usage: bookmark add NAME | bookmark list | bookmark remove NAME"
+      );
+      expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
+      expect(term.cwd).toBe("bin");
+      expect(term.command).not.toHaveBeenCalled();
+    }
+
+    for (const args of [[], ["name", "extra"]]) {
+      const { commands, term } = loadCommands({ cwd: "bin" });
+      commands.go(args);
+      expect(term.stylePrint).toHaveBeenLastCalledWith("Usage: go NAME");
+      expect(term.cwd).toBe("bin");
+      expect(term.command).not.toHaveBeenCalled();
+    }
+  });
+
+  it("surfaces invalid go and remove names without mutation", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "bin" });
+    const before = storage.getItem("rootvc.bookmarks.v1");
+
+    commands.bookmark(["remove", "bad.name"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      'Invalid bookmark name "bad.name". NAME must match [A-Za-z0-9_-]+.'
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
+
+    commands.go(["bad.name"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      'Invalid bookmark name "bad.name". NAME must match [A-Za-z0-9_-]+.'
+    );
+    expect(term.cwd).toBe("bin");
+  });
+
+  it("rejects the twenty-sixth addition while retaining all 25 persisted entries", () => {
+    const storage = createMemoryStorage();
+    const first = loadCommands({ storage });
+    for (let index = 0; index < 25; index++) {
+      first.term.cwd = `path-${index}`;
+      first.commands.bookmark(["add", `name-${String(index).padStart(2, "0")}`]);
+    }
+    const beforeLimit = storage.getItem("rootvc.bookmarks.v1");
+
+    first.commands.bookmark(["add", "overflow"]);
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith(
+      'Cannot add bookmark "overflow": limit of 25 reached.'
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(beforeLimit);
+
+    const reloaded = loadCommands({ storage });
+    reloaded.commands.bookmark(["list"]);
+    const lines = reloaded.term.stylePrint.mock.calls.map(([line]) => line);
+    expect(lines).toHaveLength(25);
+    expect(lines[0]).toBe("name-00 -> path-0");
+    expect(lines[24]).toBe("name-24 -> path-24");
+  });
+
+  it("reports read and write storage failures without changing terminal state", () => {
+    const unreadableStorage = {
+      getItem: vi.fn(() => { throw new Error("blocked"); }),
+      setItem: vi.fn(),
+    };
+    const unreadable = loadCommands({ cwd: "home", storage: unreadableStorage });
+    unreadable.commands.bookmark(["add", "desk"]);
+    expect(unreadable.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not save bookmark "desk": browser storage is unavailable.'
+    );
+    expect(unreadableStorage.setItem).not.toHaveBeenCalled();
+    unreadable.commands.bookmark(["list"]);
+    expect(unreadable.term.stylePrint).toHaveBeenLastCalledWith(
+      "Could not list bookmarks: browser storage is unavailable or corrupt."
+    );
+    unreadable.commands.go(["desk"]);
+    expect(unreadable.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not open bookmark "desk": browser storage is unavailable.'
+    );
+    expect(unreadable.term.cwd).toBe("home");
+
+    const writeFailure = createMemoryStorage();
+    writeFailure.setItem.mockImplementation(() => { throw new Error("full"); });
+    const unwritable = loadCommands({ cwd: "bin", storage: writeFailure });
+    unwritable.commands.bookmark(["add", "desk"]);
+    expect(unwritable.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not save bookmark "desk": browser storage is unavailable.'
+    );
+    expect(writeFailure.getItem("rootvc.bookmarks.v1")).toBeNull();
+  });
+});
+
+describe("man", () => {
+  it("documents bookmark and go without delegating", () => {
+    const { commands, term } = loadCommands();
+    commands.man(["bookmark"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark add NAME"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark list"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark remove NAME"));
+    expect(term.command).not.toHaveBeenCalled();
+
+    term.stylePrint.mockClear();
+    commands.man(["go"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("Usage: go NAME"));
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it("delegates every unrelated target through the pre-feature tldr path", () => {
+    const { commands, term } = loadCommands();
+    commands.man(["example"]);
+    expect(term.command).toHaveBeenCalledWith("tldr example");
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "Portfolio company example not found. Should we talk to them? Email us: hello@example.com"
+    );
+  });
+});
+
 describe("prepared command forwarding", () => {
   it("forwards aliases without reparsing or expanding prepared arguments", () => {
     const { commands, term } = loadCommands();
@@ -467,6 +698,21 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("advertises every bookmark and navigation form", () => {
+    expect(helpContext.helpEntries["%bookmark% add NAME"]).toContain("save");
+    expect(helpContext.helpEntries["%bookmark% list"]).toContain("list");
+    expect(helpContext.helpEntries["%bookmark% remove NAME"]).toContain("remove");
+    expect(helpContext.helpEntries["%go% NAME"]).toContain("NAME");
+
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help([]);
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output.some((line) => line.includes("%bookmark% add NAME"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
+    expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
   });
 
   it("renders the environment commands and complete expansion grammar", () => {

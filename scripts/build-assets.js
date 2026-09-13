@@ -41,6 +41,7 @@ const appBundleSources = [
   "config/firm.js",
   "config/portfolio.js",
   "config/team.js",
+  "js/bookmarks.js",
   "config/commands.js",
   "config/fs.js",
   "config/jobs.js",

@@ -10,6 +10,10 @@ const shortcuts = {
 
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%bookmark% add NAME": "save the current directory as NAME",
+  "%bookmark% list": "list saved directory bookmarks",
+  "%bookmark% remove NAME": "remove a saved directory bookmark",
+  "%go% NAME": "go to the directory saved as NAME",
   "PIPELINES": "pipe command output through filters from left to right",
   "  COMMAND | %grep% [-ivn] PATTERN": "keep literal matching lines (-i case-insensitive, -v invert, -n number)",
   "  COMMAND | %head% [N]": "keep the first N lines (default: 10; N must be positive)",

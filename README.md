@@ -1,6 +1,18 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Directory bookmarks
+
+The terminal supports persistent named bookmarks for quick directory navigation:
+
+- `bookmark add NAME` saves the current directory.
+- `bookmark list` lists saved bookmarks as `NAME -> path`.
+- `bookmark remove NAME` removes a saved bookmark.
+- `go NAME` moves to the directory saved under `NAME`.
+
+`NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
+browser storage, with a maximum of 25 saved bookmarks.
+
 ## Output pipelines
 
 Pipe the output of any terminal command through one or more filters with
