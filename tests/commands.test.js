@@ -970,6 +970,97 @@ describe("help stays in sync with commands", () => {
   });
 });
 
+describe("searchable help", () => {
+  const syntheticHelp = {
+    "%alpha% run.file [FILE]": "Run the First task (fast+safe)",
+    "%beta% inspect": "Inspect [literal]* metadata",
+    "%gamma% multi word": "Third catalogue row",
+    "PIPELINES": "non-executable heading",
+  };
+
+  function helpCalls({ args = [], cols = 100, help = syntheticHelp } = {}) {
+    const loaded = loadCommands({ help });
+    loaded.term.cols = cols;
+    loaded.term.dispatchCommand = vi.fn();
+    loaded.commands.alpha = vi.fn();
+    loaded.commands.beta = vi.fn();
+    loaded.commands.gamma = vi.fn();
+    loaded.commands.help(args);
+    return loaded;
+  }
+
+  it.each([100, 79])("keeps exact bare help output at %i columns for empty and whitespace input", (cols) => {
+    const bare = helpCalls({ cols });
+    const empty = helpCalls({ args: [""], cols });
+    const whitespace = helpCalls({ args: ["  ", "\t"], cols });
+
+    expect(empty.term.stylePrint.mock.calls).toEqual(bare.term.stylePrint.mock.calls);
+    expect(empty.term.writeln.mock.calls).toEqual(bare.term.writeln.mock.calls);
+    expect(whitespace.term.stylePrint.mock.calls).toEqual(bare.term.stylePrint.mock.calls);
+    expect(whitespace.term.writeln.mock.calls).toEqual(bare.term.writeln.mock.calls);
+  });
+
+  it("matches mixed-case name and description substrings in catalogue order", () => {
+    const nameMatch = helpCalls({ args: ["ALPHA"] });
+    expect(nameMatch.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringMatching(/^%alpha% run\.file \[FILE\]\s+Run the First task \(fast\+safe\)$/),
+    ]);
+
+    const descriptionMatch = helpCalls({ args: ["InSpEcT"] });
+    expect(descriptionMatch.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringMatching(/^%beta% inspect\s+Inspect \[literal\]\* metadata$/),
+    ]);
+
+    const ordered = helpCalls({ args: ["task"] });
+    expect(ordered.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringContaining("%alpha% run.file [FILE]"),
+      expect.stringContaining("%gamma% multi word"),
+    ]);
+  });
+
+  it.each([
+    ["multi word", "%gamma% multi word"],
+    ["run.file", "%alpha% run.file [FILE]"],
+    ["[literal]*", "%beta% inspect"],
+    ["(fast+safe)", "%alpha% run.file [FILE]"],
+  ])("treats joined punctuation and metacharacters literally: %s", (query, syntax) => {
+    const { term } = helpCalls({ args: query.split(" ") });
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint.mock.calls[0][0]).toContain(syntax);
+  });
+
+  it("uses the existing narrow row shape with syntax and description", () => {
+    const { term } = helpCalls({ args: ["FIRST"], cols: 79 });
+    expect(term.writeln.mock.calls).toEqual([[""]]);
+    expect(term.stylePrint.mock.calls).toEqual([
+      ["%alpha% run.file [FILE]"],
+      ["Run the First task (fast+safe)"],
+    ]);
+  });
+
+  it("explains no matches, points to full help, and omits non-executable headings", () => {
+    const missing = helpCalls({ args: ["not", "present"] });
+    expect(missing.term.stylePrint).toHaveBeenCalledWith(
+      'No help results for "not present". Use %help% to view the complete command catalogue.'
+    );
+
+    const heading = helpCalls({ args: ["non-executable"] });
+    expect(heading.term.stylePrint).toHaveBeenCalledWith(
+      'No help results for "non-executable". Use %help% to view the complete command catalogue.'
+    );
+  });
+
+  it("does not dispatch, invoke a matching command, or mutate terminal command state", () => {
+    const loaded = helpCalls({ args: ["task"] });
+    expect(loaded.term.dispatchCommand).not.toHaveBeenCalled();
+    expect(loaded.term.command).not.toHaveBeenCalled();
+    expect(loaded.commands.alpha).not.toHaveBeenCalled();
+    expect(loaded.commands.gamma).not.toHaveBeenCalled();
+    expect(loaded.term.cwd).toBe("~");
+    expect(loaded.term.user).toBe("guest");
+  });
+});
+
 describe("environment manuals", () => {
   it.each([
     ["export", "Usage: export NAME=value"],
