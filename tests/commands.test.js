@@ -974,7 +974,7 @@ describe("searchable help", () => {
   const syntheticHelp = {
     "%alpha% run.file [FILE]": "Run the First task (fast+safe)",
     "%beta% inspect": "Inspect [literal]* metadata",
-    "%gamma% multi word": "Third catalogue row",
+    "%gamma% multi word": "Third task catalogue row",
     "PIPELINES": "non-executable heading",
   };
 
@@ -989,15 +989,49 @@ describe("searchable help", () => {
     return loaded;
   }
 
-  it.each([100, 79])("keeps exact bare help output at %i columns for empty and whitespace input", (cols) => {
-    const bare = helpCalls({ cols });
-    const empty = helpCalls({ args: [""], cols });
-    const whitespace = helpCalls({ args: ["  ", "\t"], cols });
+  it("keeps exact wide bare help output for empty and whitespace input", () => {
+    const expectedStyleCalls = [
+      ["%alpha% run.file [FILE]  Run the First task (fast+safe)"],
+      ["%beta% inspect           Inspect [literal]* metadata"],
+      ["%gamma% multi word       Third task catalogue row"],
+      ["PIPELINES                non-executable heading"],
+      [""],
+      ["Terminal editing shortcuts (see %man shortcuts%):"],
+      ...Object.entries(helpContext.shortcutEntries).map(([key, value]) => [`${key}: ${value}`]),
+    ];
+    const bare = helpCalls({ cols: 100 });
+    const empty = helpCalls({ args: [""], cols: 100 });
+    const whitespace = helpCalls({ args: ["  ", "\t"], cols: 100 });
 
-    expect(empty.term.stylePrint.mock.calls).toEqual(bare.term.stylePrint.mock.calls);
-    expect(empty.term.writeln.mock.calls).toEqual(bare.term.writeln.mock.calls);
-    expect(whitespace.term.stylePrint.mock.calls).toEqual(bare.term.stylePrint.mock.calls);
-    expect(whitespace.term.writeln.mock.calls).toEqual(bare.term.writeln.mock.calls);
+    expect(bare.term.stylePrint.mock.calls).toEqual(expectedStyleCalls);
+    expect(bare.term.writeln.mock.calls).toEqual([]);
+    expect(empty.term.stylePrint.mock.calls).toEqual(expectedStyleCalls);
+    expect(empty.term.writeln.mock.calls).toEqual([]);
+    expect(whitespace.term.stylePrint.mock.calls).toEqual(expectedStyleCalls);
+    expect(whitespace.term.writeln.mock.calls).toEqual([]);
+  });
+
+  it("keeps exact narrow bare help output for empty and whitespace input", () => {
+    const expectedStyleCalls = [
+      ["%alpha% run.file [FILE]"], ["Run the First task (fast+safe)"],
+      ["%beta% inspect"], ["Inspect [literal]* metadata"],
+      ["%gamma% multi word"], ["Third task catalogue row"],
+      ["PIPELINES"], ["non-executable heading"],
+      [""],
+      ["Terminal editing shortcuts (see %man shortcuts%):"],
+      ...Object.entries(helpContext.shortcutEntries).map(([key, value]) => [`${key}: ${value}`]),
+    ];
+    const expectedWriteCalls = [[""], [""], [""], [""]];
+    const bare = helpCalls({ cols: 79 });
+    const empty = helpCalls({ args: [""], cols: 79 });
+    const whitespace = helpCalls({ args: ["  ", "\t"], cols: 79 });
+
+    expect(bare.term.stylePrint.mock.calls).toEqual(expectedStyleCalls);
+    expect(bare.term.writeln.mock.calls).toEqual(expectedWriteCalls);
+    expect(empty.term.stylePrint.mock.calls).toEqual(expectedStyleCalls);
+    expect(empty.term.writeln.mock.calls).toEqual(expectedWriteCalls);
+    expect(whitespace.term.stylePrint.mock.calls).toEqual(expectedStyleCalls);
+    expect(whitespace.term.writeln.mock.calls).toEqual(expectedWriteCalls);
   });
 
   it("matches mixed-case name and description substrings in catalogue order", () => {
