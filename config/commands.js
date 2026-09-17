@@ -81,9 +81,10 @@ const _environmentManuals = {
     "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
   ],
   env: [
-    "env — list environment variables",
-    "Usage: env",
-    "Prints the same name-sorted NAME=value listing as export with no arguments.",
+    "env — retrieve or list environment variables",
+    "Usage: env [NAME]",
+    "Use env NAME to print that variable as NAME=value.",
+    "Use env with no arguments to print all variables as NAME=value sorted by name.",
     "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
   ],
   unset: [
