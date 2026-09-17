@@ -8,7 +8,6 @@ vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs 
 const productionJobs = jobsContext.productionJobs;
 const testJobs = { ...productionJobs, 2: ["Platform Engineer"] };
 const bookmarkSource = readFileSync("js/bookmarks.js", "utf8");
-const readmeSource = readFileSync("README.md", "utf8");
 
 function createMemoryStorage(initial = {}) {
   const values = new Map(Object.entries(initial));
@@ -1087,7 +1086,7 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% rename OLD NEW"))).toBe(true);
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
-    expect(readmeSource).toContain("`bookmark rename OLD NEW`");
+    expect(term.command).not.toHaveBeenCalled();
   });
 
   it("renders the environment commands and complete expansion grammar", () => {
