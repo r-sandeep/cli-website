@@ -133,6 +133,7 @@ function loadCommands({
   storage = createMemoryStorage(),
   help = {},
   portfolio = {},
+  DateConstructor,
 } = {}) {
   const aliases = new Map();
   const location = {
@@ -167,7 +168,7 @@ function loadCommands({
     ),
     removeAlias: vi.fn((name) => aliases.delete(name)),
   };
-  const context = vm.createContext({
+  const contextValues = {
     term,
     jobs: productionJobs,
     firm: { blurb: "", email: "hello@example.com" },
@@ -182,7 +183,9 @@ function loadCommands({
     colorText: (text) => text,
     localStorage: storage,
     window: { location },
-  });
+  };
+  if (DateConstructor) contextValues.Date = DateConstructor;
+  const context = vm.createContext(contextValues);
   vm.runInContext(bookmarkSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
@@ -196,6 +199,103 @@ function loadCommands({
   });
   return { commands, location, storage, term };
 }
+
+describe("date", () => {
+  function createCountingDate() {
+    const calls = {
+      constructed: 0,
+      toString: 0,
+      toISOString: 0,
+    };
+    const localText = "Sun Dec 31 2023 16:30:45 GMT-0800 (Pacific Standard Time)";
+    const isoText = "2024-01-01T00:30:45.678Z";
+
+    class CountingDate extends Date {
+      constructor() {
+        super(isoText);
+        calls.constructed += 1;
+      }
+
+      toString() {
+        calls.toString += 1;
+        return localText;
+      }
+
+      toISOString() {
+        calls.toISOString += 1;
+        return super.toISOString();
+      }
+    }
+
+    return { calls, DateConstructor: CountingDate, isoText, localText };
+  }
+
+  it("preserves the local display from one captured instant", () => {
+    const fixedDate = createCountingDate();
+    const { commands, term } = loadCommands(fixedDate);
+
+    commands.date([]);
+
+    expect(fixedDate.calls).toEqual({
+      constructed: 1,
+      toString: 1,
+      toISOString: 0,
+    });
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith(fixedDate.localText);
+  });
+
+  it("prints the next UTC day in ISO format from one captured instant", () => {
+    const fixedDate = createCountingDate();
+    const { commands, term } = loadCommands(fixedDate);
+
+    commands.date(["--iso"]);
+
+    expect(fixedDate.localText).toContain("Dec 31 2023");
+    expect(fixedDate.isoText).toBe("2024-01-01T00:30:45.678Z");
+    expect(fixedDate.calls).toEqual({
+      constructed: 1,
+      toString: 0,
+      toISOString: 1,
+    });
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith(fixedDate.isoText);
+  });
+
+  it.each([
+    [["--utc"]],
+    [["tomorrow"]],
+    [["--ISO"]],
+    [["--iso", "--iso"]],
+    [["--iso", "extra"]],
+    [[""]],
+  ])("rejects invalid arguments without capturing time or causing side effects: %j", (args) => {
+    const fixedDate = createCountingDate();
+    const { commands, storage, term } = loadCommands({
+      ...fixedDate,
+      cwd: "bin",
+    });
+    const storageBefore = storage.getItem("rootvc.bookmarks.v1");
+    term.dispatchCommand = vi.fn();
+
+    commands.date(args);
+
+    expect(fixedDate.calls).toEqual({
+      constructed: 0,
+      toString: 0,
+      toISOString: 0,
+    });
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith("Usage: date [--iso]");
+    expect(term.dispatchCommand).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("bin");
+    expect(term.user).toBe("guest");
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(storageBefore);
+    expect(term.openURL).not.toHaveBeenCalled();
+    expect(term.displayURL).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+  });
+});
 
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {

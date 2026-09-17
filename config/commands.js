@@ -343,8 +343,14 @@ const commands = {
     term.stylePrint(_filesHere().join("   "));
   },
 
-  date: function () {
-    term.stylePrint(new Date().toString());
+  date: function (args) {
+    if (args.length !== 0 && !(args.length === 1 && args[0] === "--iso")) {
+      term.stylePrint("Usage: date [--iso]");
+      return;
+    }
+
+    const now = new Date();
+    term.stylePrint(args.length === 1 ? now.toISOString() : now.toString());
   },
 
   // Simulates a minimal Unix directory tree:
