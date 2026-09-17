@@ -98,8 +98,40 @@ const commands = {
 
   // ── Info & Discovery ────────────────────────────────────────────────────────
 
-  // Lists all public commands from help.js, aligned to terminal width. 
-  help: function () {
+  // Lists all public commands from help.js, aligned to terminal width.
+  help: function (args = []) {
+    const query = args.join(" ").trim().toLowerCase();
+    if (query) {
+      const matches = Object.entries(help).filter(function (kv) {
+        const commandNames = Array.from(kv[0].matchAll(/%([^%]+)%/g), (match) => match[1].toLowerCase());
+        const visibleDescription = kv[1].replaceAll("%", "").toLowerCase();
+        return commandNames.length > 0 && (
+          commandNames.some((commandName) => commandName.includes(query)) ||
+          visibleDescription.includes(query)
+        );
+      });
+
+      if (matches.length === 0) {
+        term.stylePrint("No matching commands found. Run %help% to see all commands.");
+        return;
+      }
+
+      const maxCmdLength = Math.max(...Object.keys(help).map((x) => x.length));
+      matches.forEach(function (kv) {
+        const cmd = kv[0];
+        const desc = kv[1];
+        if (term.cols >= 80) {
+          const rightPad = maxCmdLength - cmd.length + 2;
+          const sep = " ".repeat(rightPad);
+          term.stylePrint(`${cmd}${sep}${desc}`);
+        } else {
+          term.stylePrint(cmd);
+          term.stylePrint(desc);
+        }
+      });
+      return;
+    }
+
     const maxCmdLength = Math.max(...Object.keys(help).map((x) => x.length));
     Object.entries(help).forEach(function (kv) {
       const cmd = kv[0];
