@@ -946,11 +946,12 @@ describe("terminal-ext", () => {
   });
 
   it.each([
-    ["fake | wc", "wc: supported flags are -l, -w"],
-    ["fake | wc -x", "wc: supported flags are -l, -w"],
-    ["fake | wc -lw", "wc: supported flags are -l, -w"],
-    ["fake | wc words", "wc: supported flags are -l, -w"],
-    ["fake | wc -w extra", "wc: supported flags are -l, -w"],
+    ["fake | wc", "wc: supported flags are -l and -w"],
+    ["fake | wc -x", "wc: supported flags are -l and -w"],
+    ["fake | wc -lw", "wc: supported flags are -l and -w"],
+    ["fake | wc -l -w", "wc: supported flags are -l and -w"],
+    ["fake | wc words", "wc: supported flags are -l and -w"],
+    ["fake | wc -w extra", "wc: supported flags are -l and -w"],
     ["fake | head nope", "head: count must be a positive base-10 integer"],
     ["fake | tail 0", "tail: count must be a positive base-10 integer"],
     ["fake | sort -x", "sort: supported flags are -r, -n, -u"],

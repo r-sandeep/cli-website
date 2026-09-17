@@ -45,6 +45,9 @@ replace the existing standalone commands with the same names.
 - `COMMAND | head [N]` keeps the first N lines. N defaults to 10.
 - `COMMAND | tail [N]` keeps the last N lines. N defaults to 10.
 - `COMMAND | wc -l` prints the number of output lines.
+- `COMMAND | wc -w` prints the number of maximal non-whitespace sequences in
+  visible text. Empty and whitespace-only lines contribute zero, and line
+  boundaries separate words.
 - `COMMAND | sort [-rnu]` sorts lines by visible text. Add `-r` to reverse the
   order, `-n` to compare leading numeric values, or `-u` to remove exact
   duplicates after sorting. Flags may be combined, as in `sort -rn`.
