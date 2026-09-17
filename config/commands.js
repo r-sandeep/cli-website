@@ -100,23 +100,35 @@ const commands = {
 
   // Lists all public commands from help.js, aligned to terminal width.
   help: function (args = []) {
-    const query = args.join(" ").trim().toLowerCase();
+    const query = args.join(" ").trim();
+    const maxCmdLength = Math.max(...Object.keys(help).map((x) => x.length));
+
     if (query) {
+      const normalizedQuery = query.toLowerCase();
       const matches = Object.entries(help).filter(function (kv) {
-        const commandNames = Array.from(kv[0].matchAll(/%([^%]+)%/g), (match) => match[1].toLowerCase());
-        const visibleDescription = kv[1].replaceAll("%", "").toLowerCase();
+        const cmd = kv[0];
+        const desc = kv[1];
+        const commandNames = Array.from(
+          cmd.matchAll(/%([^%]+)%/g),
+          (match) => match[1].toLowerCase()
+        );
+        if (cmd === "help") {
+          commandNames.push(cmd);
+        }
+        const visibleDescription = desc.replaceAll("%", "").toLowerCase();
         return commandNames.length > 0 && (
-          commandNames.some((commandName) => commandName.includes(query)) ||
-          visibleDescription.includes(query)
+          commandNames.some((name) => name.includes(normalizedQuery)) ||
+          visibleDescription.includes(normalizedQuery)
         );
       });
 
       if (matches.length === 0) {
-        term.stylePrint("No matching commands found. Run %help% to see all commands.");
+        term.stylePrint(
+          "No help results. Use %help% to view the complete command catalogue."
+        );
         return;
       }
 
-      const maxCmdLength = Math.max(...Object.keys(help).map((x) => x.length));
       matches.forEach(function (kv) {
         const cmd = kv[0];
         const desc = kv[1];
@@ -125,6 +137,9 @@ const commands = {
           const sep = " ".repeat(rightPad);
           term.stylePrint(`${cmd}${sep}${desc}`);
         } else {
+          if (cmd != "help") {
+            term.writeln("");
+          }
           term.stylePrint(cmd);
           term.stylePrint(desc);
         }
@@ -132,7 +147,6 @@ const commands = {
       return;
     }
 
-    const maxCmdLength = Math.max(...Object.keys(help).map((x) => x.length));
     Object.entries(help).forEach(function (kv) {
       const cmd = kv[0];
       const desc = kv[1];
