@@ -1057,6 +1057,14 @@ describe("searchable help", () => {
     ]);
   });
 
+  it("joins and trims a mixed-case multiword description query", () => {
+    const { term } = helpCalls({ args: ["  THIRD", "TASK  "] });
+
+    expect(term.stylePrint.mock.calls).toEqual([
+      [expect.stringMatching(/^%gamma% multi word\s+Third task catalogue row$/)],
+    ]);
+  });
+
   it.each([
     ["[literal]*", "%beta% inspect"],
     ["(fast+safe)", "%alpha% run.file [FILE]"],
