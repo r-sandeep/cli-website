@@ -17,6 +17,7 @@ const help = {
   "%bookmark% add NAME": "save the current directory as NAME",
   "%bookmark% list": "list saved directory bookmarks",
   "%bookmark% remove NAME": "remove a saved directory bookmark",
+  "%bookmark% rename OLD NEW": "rename a saved directory bookmark without changing its path",
   "%go% NAME": "go to the directory saved as NAME",
   "PIPELINES": "pipe command output through filters from left to right",
   "  COMMAND | %grep% [-ivn] PATTERN": "keep literal matching lines (-i case-insensitive, -v invert, -n number)",
