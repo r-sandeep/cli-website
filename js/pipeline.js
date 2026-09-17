@@ -153,12 +153,15 @@ var Pipeline = (function () {
     if (stage.name === "sort") return compileFlagFilter(stage, "rnu");
     if (stage.name === "uniq") return compileFlagFilter(stage, "cd");
     if (stage.name === "wc") {
-      if (stage.args.length !== 1 || stage.args[0] !== "-l") {
-        return preDispatchError(stage.name, "wc: only wc -l is supported");
+      if (
+        stage.args.length !== 1 ||
+        (stage.args[0] !== "-l" && stage.args[0] !== "-w")
+      ) {
+        return preDispatchError(stage.name, "wc: supported flags are -l and -w");
       }
       return {
         ok: true,
-        filter: { type: "wc", name: stage.name },
+        filter: { type: "wc", name: stage.name, mode: stage.args[0].slice(1) },
       };
     }
 
@@ -223,6 +226,14 @@ var Pipeline = (function () {
       return { lines: lines.slice(Math.max(0, lines.length - filter.count)), error: null };
     }
     if (filter.type === "wc") {
+      if (filter.mode === "w") {
+        var wordCount = 0;
+        lines.forEach(function (line) {
+          var matches = String(getText(line)).match(/\S+/g);
+          wordCount += matches ? matches.length : 0;
+        });
+        return { lines: [String(wordCount)], error: null };
+      }
       return { lines: [String(lines.length)], error: null };
     }
     if (filter.type === "sort") {
