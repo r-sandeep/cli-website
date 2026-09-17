@@ -1319,6 +1319,13 @@ commands.man = function (args) {
     term.stylePrint("With --json, print a compact object with version and buildDate.");
     return;
   }
+  if (args.length === 1 && topic === "date") {
+    term.stylePrint("date — show the local date and time or a UTC ISO timestamp");
+    term.stylePrint("Usage: date [--iso]");
+    term.stylePrint("With no option, print the local date and time.");
+    term.stylePrint("With --iso, print UTC ISO-8601 with milliseconds and Z.");
+    return;
+  }
   if (args.length === 1 && topic === "bookmark") {
     term.stylePrint(
       "bookmark - save and manage directory bookmarks\r\n" +

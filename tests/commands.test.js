@@ -297,6 +297,41 @@ describe("date", () => {
   });
 });
 
+describe("date documentation", () => {
+  it("advertises the accepted date syntax in help", () => {
+    const { commands, term } = loadCommands();
+
+    commands.help([]);
+
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^%date% \[--iso\]\s+show local date and time, or UTC ISO-8601 with --iso$/
+        ),
+      ])
+    );
+  });
+
+  it("documents both date modes locally without disturbing fallback topics", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["date"]);
+
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "date — show the local date and time or a UTC ISO timestamp",
+      "Usage: date [--iso]",
+      "With no option, print the local date and time.",
+      "With --iso, print UTC ISO-8601 with milliseconds and Z.",
+    ]);
+    expect(term.command).not.toHaveBeenCalled();
+
+    term.stylePrint.mockClear();
+    commands.man(["esper"]);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.command).toHaveBeenCalledWith("tldr esper");
+  });
+});
+
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {
     const { commands, term } = loadCommands();
