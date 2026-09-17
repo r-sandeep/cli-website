@@ -587,6 +587,87 @@ describe("environment commands", () => {
     expect(term.stylePrint).not.toHaveBeenCalled();
   });
 
+  it("looks up stored environment values literally and distinguishes absence", () => {
+    const { commands, term } = loadEnvironmentCommands([
+      ["EMPTY", ""],
+      ["EQUALS", "left=middle=right"],
+      ["SHELL", "$(echo should-not-run); rm -rf /"],
+      ["FORMAT", "%help%"],
+      ["__proto__", "own-value"],
+    ]);
+
+    for (const [name, value] of [
+      ["EMPTY", ""],
+      ["EQUALS", "left=middle=right"],
+      ["SHELL", "$(echo should-not-run); rm -rf /"],
+      ["FORMAT", "%help%"],
+      ["__proto__", "own-value"],
+    ]) {
+      commands.env([name]);
+      expect(term.writeln).toHaveBeenLastCalledWith(`${name}=${value}`);
+    }
+
+    expect(term.writeln).toHaveBeenCalledTimes(5);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+
+    commands.env(["MISSING"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Environment variable not found: MISSING"
+    );
+    expect(term.writeln).toHaveBeenCalledTimes(5);
+
+    for (const args of [["NOT.VALID"], ["EMPTY", "EXTRA"]]) {
+      commands.env(args);
+      expect(term.stylePrint).toHaveBeenLastCalledWith("Usage: env [NAME]");
+      expect(term.writeln).toHaveBeenCalledTimes(5);
+    }
+  });
+
+  it("keeps repeated lookup read-only and preserves the sorted listing", () => {
+    const entries = [
+      ["ZED", "last"],
+      ["ALPHA", "first"],
+      ["FORMAT", "%help%"],
+    ];
+    const { commands, term } = loadEnvironmentCommands(entries);
+    const before = [...term.environment.snapshot()];
+
+    commands.env(["FORMAT"]);
+    commands.env(["ALPHA"]);
+    commands.env(["FORMAT"]);
+
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "FORMAT=%help%",
+      "ALPHA=first",
+      "FORMAT=%help%",
+    ]);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.environment.set).not.toHaveBeenCalled();
+    expect(term.environment.unset).not.toHaveBeenCalled();
+    expect([...term.environment.snapshot()]).toEqual(before);
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.location.navigate).not.toHaveBeenCalled();
+    expect(term.location.reload).not.toHaveBeenCalled();
+
+    commands.env([]);
+
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "ALPHA=first",
+      "FORMAT=%help%",
+      "ZED=last",
+    ]);
+    expect([...term.environment.snapshot()]).toEqual(before);
+    expect(term.environment.set).not.toHaveBeenCalled();
+    expect(term.environment.unset).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.location.navigate).not.toHaveBeenCalled();
+    expect(term.location.reload).not.toHaveBeenCalled();
+  });
+
   it("does not bypass the normal command lifecycle for environment handlers", () => {
     const { commands, term } = loadEnvironmentCommands([["NAME", "value"]]);
 
