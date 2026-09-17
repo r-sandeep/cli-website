@@ -23,6 +23,7 @@ const help = {
   "  COMMAND | %head% [N]": "keep the first N lines (default: 10; N must be positive)",
   "  COMMAND | %tail% [N]": "keep the last N lines (default: 10; N must be positive)",
   "  COMMAND | %wc% -l": "print the number of output lines",
+  "  COMMAND | %wc% -w": "print the number of visible-text words",
   "  COMMAND | %sort% [-rnu]": "sort visible text (-r reverse, -n numeric, -u unique; flags combine)",
   "  COMMAND | %uniq% [-cd]": "collapse adjacent equal visible text (-c count, -d repeated only; flags combine)",
   "  %whois% | %grep% -i root | %head% 3": "example of a chained pipeline",

@@ -1277,8 +1277,9 @@ const _pipelineManuals = {
     "N defaults to 10 and must be a positive base-10 integer.",
   ],
   wc: [
-    "%WC(1)% — count output lines",
-    "Usage: COMMAND | %wc% -l",
+    "%WC(1)% — count pipeline output",
+    "Usage: COMMAND | %wc% -l | %wc% -w",
+    "Use -l to count output lines or -w to count maximal non-whitespace sequences in visible text. Line boundaries separate words.",
   ],
 };
 

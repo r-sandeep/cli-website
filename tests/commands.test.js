@@ -1021,6 +1021,7 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("COMMAND | %tail% [N]");
     expect(output).toContain("default: 10");
     expect(output).toContain("COMMAND | %wc% -l");
+    expect(output).toContain("COMMAND | %wc% -w");
     expect(output).toContain("COMMAND | %sort% [-rnu]");
     expect(output).toContain("-r reverse, -n numeric, -u unique");
     expect(output).toContain("COMMAND | %uniq% [-cd]");
@@ -1042,6 +1043,18 @@ describe("pipeline manual pages preserve standalone commands", () => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
     expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it("documents both exact wc modes and their meanings", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["wc"]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("COMMAND | %wc% -l | %wc% -w");
+    expect(output).toContain("-l to count output lines");
+    expect(output).toContain("-w to count maximal non-whitespace sequences in visible text");
+    expect(output).toContain("Line boundaries separate words");
   });
 
   it("documents every sort and uniq flag", () => {
