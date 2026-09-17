@@ -98,55 +98,9 @@ const commands = {
 
   // ── Info & Discovery ────────────────────────────────────────────────────────
 
-  // Lists all public commands from help.js, aligned to terminal width.
-  help: function (args = []) {
-    const query = args.join(" ").trim();
+  // Lists all public commands from help.js, aligned to terminal width. 
+  help: function () {
     const maxCmdLength = Math.max(...Object.keys(help).map((x) => x.length));
-
-    if (query) {
-      const normalizedQuery = query.toLowerCase();
-      const matches = Object.entries(help).filter(function (kv) {
-        const cmd = kv[0];
-        const desc = kv[1];
-        const commandNames = Array.from(
-          cmd.matchAll(/%([^%]+)%/g),
-          (match) => match[1].toLowerCase()
-        );
-        if (cmd === "help") {
-          commandNames.push(cmd);
-        }
-        const visibleDescription = desc.replaceAll("%", "").toLowerCase();
-        return commandNames.length > 0 && (
-          commandNames.some((name) => name.includes(normalizedQuery)) ||
-          visibleDescription.includes(normalizedQuery)
-        );
-      });
-
-      if (matches.length === 0) {
-        term.stylePrint(
-          "No help results. Use %help% to view the complete command catalogue."
-        );
-        return;
-      }
-
-      matches.forEach(function (kv) {
-        const cmd = kv[0];
-        const desc = kv[1];
-        if (term.cols >= 80) {
-          const rightPad = maxCmdLength - cmd.length + 2;
-          const sep = " ".repeat(rightPad);
-          term.stylePrint(`${cmd}${sep}${desc}`);
-        } else {
-          if (cmd != "help") {
-            term.writeln("");
-          }
-          term.stylePrint(cmd);
-          term.stylePrint(desc);
-        }
-      });
-      return;
-    }
-
     Object.entries(help).forEach(function (kv) {
       const cmd = kv[0];
       const desc = kv[1];
