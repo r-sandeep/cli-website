@@ -327,8 +327,10 @@ describe("date documentation", () => {
 
     term.stylePrint.mockClear();
     commands.man(["esper"]);
-    expect(term.stylePrint).not.toHaveBeenCalled();
     expect(term.command).toHaveBeenCalledWith("tldr esper");
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "Portfolio company esper not found. Should we talk to them? Email us: hello@example.com"
+    );
   });
 });
 
