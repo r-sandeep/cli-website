@@ -1075,12 +1075,17 @@ describe("searchable help", () => {
   it("explains no matches, points to full help, and omits non-executable headings", () => {
     const missing = helpCalls({ args: ["not", "present"] });
     expect(missing.term.stylePrint).toHaveBeenCalledWith(
-      'No help results for "not present". Use %help% to view the complete command catalogue.'
+      "No help results. Use %help% to view the complete command catalogue."
     );
 
     const heading = helpCalls({ args: ["non-executable"] });
     expect(heading.term.stylePrint).toHaveBeenCalledWith(
-      'No help results for "non-executable". Use %help% to view the complete command catalogue.'
+      "No help results. Use %help% to view the complete command catalogue."
+    );
+
+    const presentationMarker = helpCalls({ args: ["%"] });
+    expect(presentationMarker.term.stylePrint).toHaveBeenCalledWith(
+      "No help results. Use %help% to view the complete command catalogue."
     );
   });
 

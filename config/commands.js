@@ -108,15 +108,18 @@ const commands = {
       const matches = Object.entries(help).filter(function (kv) {
         const cmd = kv[0];
         const desc = kv[1];
-        return cmd.includes("%") && (
-          cmd.toLowerCase().includes(normalizedQuery) ||
-          desc.toLowerCase().includes(normalizedQuery)
-        );
+        const commandNames = Array.from(
+          cmd.matchAll(/%([^%]+)%/g),
+          (match) => match[1]
+        ).join(" ").toLowerCase();
+        const visibleDescription = desc.replaceAll("%", "").toLowerCase();
+        return commandNames.includes(normalizedQuery) ||
+          visibleDescription.includes(normalizedQuery);
       });
 
       if (matches.length === 0) {
         term.stylePrint(
-          `No help results for "${query}". Use %help% to view the complete command catalogue.`
+          "No help results. Use %help% to view the complete command catalogue."
         );
         return;
       }
