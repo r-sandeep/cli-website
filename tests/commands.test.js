@@ -399,6 +399,8 @@ function createEnvironmentDouble(
   const api = {
     snapshot: vi.fn(() => new Map(state)),
     entries: vi.fn(() => [...state.entries()]),
+    isValidName: vi.fn((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)),
+    get: vi.fn((name) => state.get(name)),
     set: vi.fn((name, value) => {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
         return result(
@@ -610,16 +612,24 @@ describe("environment commands", () => {
     expect(term.writeln).toHaveBeenCalledTimes(5);
     expect(term.stylePrint).not.toHaveBeenCalled();
 
+    const beforeFailures = [...term.environment.snapshot()];
     commands.env(["MISSING"]);
-    expect(term.stylePrint).toHaveBeenLastCalledWith(
-      "Environment variable not found: MISSING"
-    );
-    expect(term.writeln).toHaveBeenCalledTimes(5);
+    expect(term.writeln).toHaveBeenLastCalledWith("env: MISSING: not found");
+    expect(term.writeln).toHaveBeenCalledTimes(6);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.environment.set).not.toHaveBeenCalled();
+    expect(term.environment.unset).not.toHaveBeenCalled();
+    expect([...term.environment.snapshot()]).toEqual(beforeFailures);
 
     for (const args of [["NOT.VALID"], ["EMPTY", "EXTRA"]]) {
+      const previousLines = term.writeln.mock.calls.length;
       commands.env(args);
-      expect(term.stylePrint).toHaveBeenLastCalledWith("Usage: env [NAME]");
-      expect(term.writeln).toHaveBeenCalledTimes(5);
+      expect(term.writeln).toHaveBeenLastCalledWith("Usage: env [NAME]");
+      expect(term.writeln).toHaveBeenCalledTimes(previousLines + 1);
+      expect(term.stylePrint).not.toHaveBeenCalled();
+      expect(term.environment.set).not.toHaveBeenCalled();
+      expect(term.environment.unset).not.toHaveBeenCalled();
+      expect([...term.environment.snapshot()]).toEqual(beforeFailures);
     }
   });
 
