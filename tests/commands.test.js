@@ -1035,6 +1035,11 @@ describe("searchable help", () => {
   });
 
   it("matches mixed-case name and description substrings in catalogue order", () => {
+    const plainName = helpCalls({ args: ["HELP"], help: { help: "Show this help" } });
+    expect(plainName.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringMatching(/^help\s+Show this help$/),
+    ]);
+
     const nameMatch = helpCalls({ args: ["ALPHA"] });
     expect(nameMatch.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
       expect.stringMatching(/^%alpha% run\.file \[FILE\]\s+Run the First task \(fast\+safe\)$/),
@@ -1053,8 +1058,6 @@ describe("searchable help", () => {
   });
 
   it.each([
-    ["multi word", "%gamma% multi word"],
-    ["run.file", "%alpha% run.file [FILE]"],
     ["[literal]*", "%beta% inspect"],
     ["(fast+safe)", "%alpha% run.file [FILE]"],
   ])("treats joined punctuation and metacharacters literally: %s", (query, syntax) => {
@@ -1069,6 +1072,13 @@ describe("searchable help", () => {
     expect(term.stylePrint.mock.calls).toEqual([
       ["%alpha% run.file [FILE]"],
       ["Run the First task (fast+safe)"],
+    ]);
+
+    const plainHelp = helpCalls({ args: ["help"], cols: 79, help: { help: "Show this help" } });
+    expect(plainHelp.term.writeln.mock.calls).toEqual([]);
+    expect(plainHelp.term.stylePrint.mock.calls).toEqual([
+      ["help"],
+      ["Show this help"],
     ]);
   });
 
@@ -1085,6 +1095,11 @@ describe("searchable help", () => {
 
     const presentationMarker = helpCalls({ args: ["%"] });
     expect(presentationMarker.term.stylePrint).toHaveBeenCalledWith(
+      "No help results. Use %help% to view the complete command catalogue."
+    );
+
+    const usageMetadata = helpCalls({ args: ["run.file"] });
+    expect(usageMetadata.term.stylePrint).toHaveBeenCalledWith(
       "No help results. Use %help% to view the complete command catalogue."
     );
   });

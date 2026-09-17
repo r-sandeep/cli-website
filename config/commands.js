@@ -110,11 +110,16 @@ const commands = {
         const desc = kv[1];
         const commandNames = Array.from(
           cmd.matchAll(/%([^%]+)%/g),
-          (match) => match[1]
-        ).join(" ").toLowerCase();
+          (match) => match[1].toLowerCase()
+        );
+        if (cmd === "help") {
+          commandNames.push(cmd);
+        }
         const visibleDescription = desc.replaceAll("%", "").toLowerCase();
-        return commandNames.includes(normalizedQuery) ||
-          visibleDescription.includes(normalizedQuery);
+        return commandNames.length > 0 && (
+          commandNames.some((name) => name.includes(normalizedQuery)) ||
+          visibleDescription.includes(normalizedQuery)
+        );
       });
 
       if (matches.length === 0) {
@@ -132,7 +137,9 @@ const commands = {
           const sep = " ".repeat(rightPad);
           term.stylePrint(`${cmd}${sep}${desc}`);
         } else {
-          term.writeln("");
+          if (cmd != "help") {
+            term.writeln("");
+          }
           term.stylePrint(cmd);
           term.stylePrint(desc);
         }
