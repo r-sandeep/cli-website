@@ -85,6 +85,27 @@ function createBookmarkStore(storage) {
         ? { ok: true }
         : { ok: false, error: "storage" };
     },
+
+    rename(oldName, newName) {
+      if (!_validBookmarkName(oldName) || !_validBookmarkName(newName)) {
+        return { ok: false, error: "invalid-name" };
+      }
+      if (bookmarks === null) return { ok: false, error: "storage" };
+
+      const index = bookmarks.findIndex(([savedName]) => savedName === oldName);
+      if (index === -1) return { ok: false, error: "not-found" };
+      if (oldName === newName) return { ok: true };
+      if (bookmarks.some(([savedName]) => savedName === newName)) {
+        return { ok: false, error: "duplicate" };
+      }
+
+      const nextBookmarks = bookmarks.map((entry, entryIndex) =>
+        entryIndex === index ? [newName, entry[1]] : entry
+      );
+      return persist(nextBookmarks)
+        ? { ok: true }
+        : { ok: false, error: "storage" };
+    },
   });
 }
 
