@@ -1050,8 +1050,11 @@ describe("pipeline manual pages preserve standalone commands", () => {
 
     commands.man(["wc"]);
 
-    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
-    expect(output).toContain("COMMAND | %wc% -l | %wc% -w");
+    const manualLines = term.stylePrint.mock.calls.map(([line]) => line);
+    const output = manualLines.join("\n");
+    expect(manualLines).toContain("Usage: COMMAND | %wc% -l");
+    expect(manualLines).toContain("       COMMAND | %wc% -w");
+    expect(output).not.toContain("COMMAND | %wc% -l | %wc% -w");
     expect(output).toContain("-l to count output lines");
     expect(output).toContain("-w to count maximal non-whitespace sequences in visible text");
     expect(output).toContain("Line boundaries separate words");

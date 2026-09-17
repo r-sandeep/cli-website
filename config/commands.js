@@ -1278,7 +1278,8 @@ const _pipelineManuals = {
   ],
   wc: [
     "%WC(1)% — count pipeline output",
-    "Usage: COMMAND | %wc% -l | %wc% -w",
+    "Usage: COMMAND | %wc% -l",
+    "       COMMAND | %wc% -w",
     "Use -l to count output lines or -w to count maximal non-whitespace sequences in visible text. Line boundaries separate words.",
   ],
 };
