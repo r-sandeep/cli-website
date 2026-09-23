@@ -302,7 +302,7 @@ describe("bookmark terminal integration", () => {
     first.term.writeln.mockClear();
     await submit(first.term, "bookmark export");
     expect(first.term.writeln).toHaveBeenCalledWith(backup);
-    const exported = first.term.writeln.mock.calls[0][0];
+    const exported = first.term.writeln.mock.calls.find(([line]) => line === backup)[0];
 
     await submit(first.term, "bookmark import --replace '{\"version\":1,\"bookmarks\":[]}'");
     expect(first.term.cwd).toBe("work");
