@@ -237,4 +237,191 @@ describe("bookmark store", () => {
     expect(storage.value()).toBe(serialized);
     expect(store.lookup("home")).toEqual({ ok: true, path: "/home" });
   });
+
+  it.each([
+    ["malformed JSON", "{", "malformed-json"],
+    ["non-object document", "[]", "invalid-backup"],
+    ["missing version", JSON.stringify({ bookmarks: [] }), "unsupported-version"],
+    ["string version", JSON.stringify({ version: "1", bookmarks: [] }), "unsupported-version"],
+    ["unsupported version", JSON.stringify({ version: 2, bookmarks: [] }), "unsupported-version"],
+    ["missing bookmarks", JSON.stringify({ version: 1 }), "invalid-backup"],
+    ["non-array bookmarks", JSON.stringify({ version: 1, bookmarks: {} }), "invalid-backup"],
+    ["non-object entry", JSON.stringify({ version: 1, bookmarks: [null] }), "invalid-backup"],
+    ["missing name", JSON.stringify({ version: 1, bookmarks: [{ path: "/x" }] }), "invalid-name"],
+    ["invalid name", JSON.stringify({ version: 1, bookmarks: [{ name: "bad name", path: "/x" }] }), "invalid-name"],
+    ["missing path", JSON.stringify({ version: 1, bookmarks: [{ name: "x" }] }), "invalid-backup"],
+    ["non-string path", JSON.stringify({ version: 1, bookmarks: [{ name: "x", path: 1 }] }), "invalid-backup"],
+    ["duplicate name", JSON.stringify({ version: 1, bookmarks: [{ name: "x", path: "/x" }, { name: "x", path: "/y" }] }), "duplicate"],
+  ])("rejects import state %s before mutation", (_, backup, error) => {
+    const serialized = JSON.stringify([["home", "/home"]]);
+    const storage = memoryStorage({ [STORAGE_KEY]: serialized });
+    const { store } = loadStore(storage);
+
+    expect(store.importBackup(backup, { mode: "replace" })).toEqual({ ok: false, error });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(serialized);
+    expect(store.list()).toEqual({ ok: true, entries: [{ name: "home", path: "/home" }] });
+  });
+
+  it("merges absent and identical entries, rejects conflicts, and ignores unknown fields", () => {
+    const serialized = JSON.stringify([["home", "/home"]]);
+    const storage = memoryStorage({ [STORAGE_KEY]: serialized });
+    const { createBookmarkStore, store } = loadStore(storage);
+    const backup = JSON.stringify({
+      version: 1,
+      future: "ignored",
+      bookmarks: [
+        { name: "home", path: "/home", note: "ignored" },
+        { name: "__proto__", path: "/missing path", extra: true },
+        { name: "constructor", path: "/constructor" },
+      ],
+    });
+
+    expect(store.importBackup(backup, { mode: "merge" })).toEqual({
+      ok: true,
+      added: 2,
+      updated: 0,
+      removed: 0,
+      unchanged: 1,
+    });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(createBookmarkStore(storage).list()).toEqual({
+      ok: true,
+      entries: [
+        { name: "__proto__", path: "/missing path" },
+        { name: "constructor", path: "/constructor" },
+        { name: "home", path: "/home" },
+      ],
+    });
+
+    storage.setItem.mockClear();
+    const committed = storage.value();
+    expect(store.importBackup(JSON.stringify({
+      version: 1,
+      bookmarks: [{ name: "home", path: "/different" }],
+    }), { mode: "merge" })).toEqual({ ok: false, error: "conflict" });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(committed);
+    expect(store.lookup("home")).toEqual({ ok: true, path: "/home" });
+  });
+
+  it("uses one planner for dry-run and commit counts without preview or no-op writes", () => {
+    const serialized = JSON.stringify([["home", "/home"], ["old", "/old"]]);
+    const storage = memoryStorage({ [STORAGE_KEY]: serialized });
+    const { store } = loadStore(storage);
+    const backup = JSON.stringify({
+      version: 1,
+      bookmarks: [
+        { name: "home", path: "/new-home" },
+        { name: "new", path: "/new" },
+      ],
+    });
+    const expected = { ok: true, added: 1, updated: 1, removed: 1, unchanged: 0 };
+
+    expect(store.importBackup(backup, { mode: "replace", dryRun: true })).toEqual(expected);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(serialized);
+    expect(store.lookup("home")).toEqual({ ok: true, path: "/home" });
+
+    expect(store.importBackup(backup, { mode: "replace" })).toEqual(expected);
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(store.list()).toEqual({
+      ok: true,
+      entries: [
+        { name: "home", path: "/new-home" },
+        { name: "new", path: "/new" },
+      ],
+    });
+
+    storage.setItem.mockClear();
+    expect(store.importBackup(backup, { mode: "replace" })).toEqual({
+      ok: true,
+      added: 0,
+      updated: 0,
+      removed: 0,
+      unchanged: 2,
+    });
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("atomically reloads non-empty and empty replacements", () => {
+    const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify([["old", "/old"]]) });
+    const { createBookmarkStore, store } = loadStore(storage);
+    const replacement = JSON.stringify({
+      version: 1,
+      bookmarks: [{ name: "new", path: "/does/not/exist" }],
+    });
+
+    expect(store.importBackup(replacement, { mode: "replace" })).toEqual({
+      ok: true,
+      added: 1,
+      updated: 0,
+      removed: 1,
+      unchanged: 0,
+    });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(createBookmarkStore(storage).lookup("new")).toEqual({ ok: true, path: "/does/not/exist" });
+
+    storage.setItem.mockClear();
+    expect(store.importBackup('{"version":1,"bookmarks":[]}', { mode: "replace" })).toEqual({
+      ok: true,
+      added: 0,
+      updated: 0,
+      removed: 1,
+      unchanged: 0,
+    });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(createBookmarkStore(storage).list()).toEqual({ ok: true, entries: [] });
+  });
+
+  it("rejects resulting overflow before mutation", () => {
+    const existing = Array.from({ length: 25 }, (_, index) => [`saved-${index}`, `/saved/${index}`]);
+    const serialized = JSON.stringify(existing);
+    const storage = memoryStorage({ [STORAGE_KEY]: serialized });
+    const { store } = loadStore(storage);
+    const merge = JSON.stringify({
+      version: 1,
+      bookmarks: [{ name: "extra", path: "/extra" }],
+    });
+    const oversizedReplace = JSON.stringify({
+      version: 1,
+      bookmarks: Array.from({ length: 26 }, (_, index) => ({ name: `new-${index}`, path: `/new/${index}` })),
+    });
+
+    expect(store.importBackup(merge, { mode: "merge", dryRun: true })).toEqual({ ok: false, error: "limit" });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(store.importBackup(oversizedReplace, { mode: "replace" })).toEqual({ ok: false, error: "limit" });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(serialized);
+    expect(store.list().entries).toHaveLength(25);
+  });
+
+  it("rolls back a failed import write and fails closed for unreadable current state", () => {
+    const serialized = JSON.stringify([["home", "/home"]]);
+    const storage = memoryStorage({ [STORAGE_KEY]: serialized });
+    const { store } = loadStore(storage);
+    storage.setItem.mockImplementation(() => {
+      throw new Error("write denied");
+    });
+    const backup = JSON.stringify({ version: 1, bookmarks: [{ name: "work", path: "/work" }] });
+
+    expect(store.importBackup(backup, { mode: "replace" })).toEqual({ ok: false, error: "storage" });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.value()).toBe(serialized);
+    expect(store.lookup("home")).toEqual({ ok: true, path: "/home" });
+    expect(store.lookup("work")).toEqual({ ok: false, error: "not-found" });
+
+    const corruptStorage = memoryStorage({ [STORAGE_KEY]: "corrupt" });
+    const { store: corruptStore } = loadStore(corruptStorage);
+    expect(corruptStore.importBackup(backup, { mode: "replace", dryRun: true })).toEqual({ ok: false, error: "storage" });
+    expect(corruptStorage.setItem).not.toHaveBeenCalled();
+
+    const inaccessibleStorage = memoryStorage();
+    inaccessibleStorage.getItem.mockImplementation(() => {
+      throw new Error("read denied");
+    });
+    const { store: inaccessibleStore } = loadStore(inaccessibleStorage);
+    expect(inaccessibleStore.importBackup(backup, { mode: "merge" })).toEqual({ ok: false, error: "storage" });
+    expect(inaccessibleStorage.setItem).not.toHaveBeenCalled();
+  });
 });
