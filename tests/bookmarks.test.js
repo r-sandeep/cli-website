@@ -379,6 +379,10 @@ describe("bookmark store", () => {
     const serialized = JSON.stringify(existing);
     const storage = memoryStorage({ [STORAGE_KEY]: serialized });
     const { store } = loadStore(storage);
+    const exactLimitReplace = JSON.stringify({
+      version: 1,
+      bookmarks: Array.from({ length: 25 }, (_, index) => ({ name: `new-${index}`, path: `/new/${index}` })),
+    });
     const merge = JSON.stringify({
       version: 1,
       bookmarks: [{ name: "extra", path: "/extra" }],
@@ -388,6 +392,15 @@ describe("bookmark store", () => {
       bookmarks: Array.from({ length: 26 }, (_, index) => ({ name: `new-${index}`, path: `/new/${index}` })),
     });
 
+    expect(store.importBackup(exactLimitReplace, { mode: "replace", dryRun: true })).toEqual({
+      ok: true,
+      added: 25,
+      updated: 0,
+      removed: 25,
+      unchanged: 0,
+    });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(serialized);
     expect(store.importBackup(merge, { mode: "merge", dryRun: true })).toEqual({ ok: false, error: "limit" });
     expect(storage.setItem).not.toHaveBeenCalled();
     expect(store.importBackup(oversizedReplace, { mode: "replace" })).toEqual({ ok: false, error: "limit" });

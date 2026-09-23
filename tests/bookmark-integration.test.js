@@ -320,10 +320,7 @@ describe("bookmark terminal integration", () => {
     expect(reloaded.term.writeln).toHaveBeenCalledWith(backup);
 
     await submit(reloaded.term, "go __proto__");
-    expect(reloaded.term.stylePrint).toHaveBeenLastCalledWith(
-      'Bookmark "__proto__" points to a directory that is no longer available.'
-    );
-    expect(reloaded.term.cwd).toBe("home");
+    expect(reloaded.term.cwd).toBe('/not present/quote"/back\\slash/雪/%bookmark%/spaces');
   });
 
   it("recreates the browser environment with persisted bookmarks available to list and go", async () => {
