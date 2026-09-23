@@ -29,6 +29,50 @@ afterEach(() => {
 });
 
 describe("bookmark store", () => {
+  it("exports compact versioned JSON in code-unit name order without mutation", () => {
+    const storage = memoryStorage({
+      [STORAGE_KEY]: JSON.stringify([
+        ["zeta", "/space path/%link%/\\quoted\"/雪"],
+        ["Alpha", ""],
+        ["__proto__", "https://example.com/a?b=1"],
+      ]),
+    });
+    const { store } = loadStore(storage);
+    const persistedBefore = storage.value();
+    const stateBefore = store.list();
+
+    expect(store.exportBackup()).toEqual({
+      ok: true,
+      json: '{"version":1,"bookmarks":[{"name":"Alpha","path":""},{"name":"__proto__","path":"https://example.com/a?b=1"},{"name":"zeta","path":"/space path/%link%/\\\\quoted\\\"/雪"}]}',
+    });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(persistedBefore);
+    expect(store.list()).toEqual(stateBefore);
+  });
+
+  it("exports an empty store and fails closed for corrupt or inaccessible storage", () => {
+    const emptyStorage = memoryStorage();
+    const { store: emptyStore } = loadStore(emptyStorage);
+    expect(emptyStore.exportBackup()).toEqual({
+      ok: true,
+      json: '{"version":1,"bookmarks":[]}',
+    });
+    expect(emptyStorage.setItem).not.toHaveBeenCalled();
+
+    const corruptStorage = memoryStorage({ [STORAGE_KEY]: "not json" });
+    const { store: corruptStore } = loadStore(corruptStorage);
+    expect(corruptStore.exportBackup()).toEqual({ ok: false, error: "storage" });
+    expect(corruptStorage.setItem).not.toHaveBeenCalled();
+
+    const inaccessibleStorage = memoryStorage();
+    inaccessibleStorage.getItem.mockImplementation(() => {
+      throw new Error("read denied");
+    });
+    const { store: inaccessibleStore } = loadStore(inaccessibleStorage);
+    expect(inaccessibleStore.exportBackup()).toEqual({ ok: false, error: "storage" });
+    expect(inaccessibleStorage.setItem).not.toHaveBeenCalled();
+  });
+
   it("validates names and keeps invalid and duplicate additions atomic", () => {
     const { storage, store } = loadStore();
 

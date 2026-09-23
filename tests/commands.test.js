@@ -658,6 +658,39 @@ describe("cd", () => {
 });
 
 describe("bookmark and go", () => {
+  it("writes one literal export document through the raw terminal path", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "/space path/%marker%/https://example.com/雪" });
+    commands.bookmark(["add", "__proto__"]);
+    const persistedBefore = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockClear();
+    term.stylePrint.mockClear();
+    term.writeln.mockClear();
+
+    commands.bookmark(["export"]);
+
+    expect(term.writeln).toHaveBeenCalledTimes(1);
+    expect(term.writeln).toHaveBeenCalledWith(
+      '{"version":1,"bookmarks":[{"name":"__proto__","path":"/space path/%marker%/https://example.com/雪"}]}'
+    );
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(persistedBefore);
+  });
+
+  it("does not emit a backup when bookmark storage is corrupt", () => {
+    const { commands, storage, term } = loadCommands();
+    storage.setItem("rootvc.bookmarks.v1", "not json");
+    const reloaded = loadCommands({ storage });
+
+    reloaded.commands.bookmark(["export"]);
+
+    expect(reloaded.term.writeln).not.toHaveBeenCalled();
+    expect(reloaded.term.stylePrint).toHaveBeenCalledWith(
+      "Could not export bookmarks: browser storage is unavailable or corrupt."
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe("not json");
+  });
+
   it("adds every valid NAME form at the current cwd and rejects an invalid name atomically", () => {
     const { commands, storage, term } = loadCommands({ cwd: "bin" });
 

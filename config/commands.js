@@ -459,6 +459,16 @@ const commands = {
     const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME";
     const subcommand = args[0];
 
+    if (subcommand === "export" && args.length === 1) {
+      const result = bookmarkStore.exportBackup();
+      if (result.ok) {
+        term.writeln(result.json);
+      } else {
+        term.stylePrint("Could not export bookmarks: browser storage is unavailable or corrupt.");
+      }
+      return;
+    }
+
     if (subcommand === "add" && args.length === 2) {
       const name = args[1];
       const result = bookmarkStore.add(name, term.cwd);

@@ -37,7 +37,18 @@ function createBookmarkStore(storage) {
       if (!_validBookmarkName(name)) return { ok: false, error: "invalid-name" };
       if (bookmarks === null) return { ok: false, error: "storage" };
       if (bookmarks.some(([savedName]) => savedName === name)) {
-        return { ok: false, error: "duplicate" };
+        return {
+    exportBackup() {
+      if (loadError) return { ok: false, error: "storage" };
+
+      const bookmarks = Array.from(entries, ([name, path]) => ({ name, path }))
+        .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+      return {
+        ok: true,
+        json: JSON.stringify({ version: 1, bookmarks }),
+      };
+    },
+ ok: false, error: "duplicate" };
       }
       if (bookmarks.length === BOOKMARK_LIMIT) {
         return { ok: false, error: "limit" };
