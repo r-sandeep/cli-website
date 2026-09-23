@@ -67,6 +67,9 @@ function createBookmarkStore(storage) {
     importBackup(serialized, options = {}) {
       if (bookmarks === null) return { ok: false, error: "storage" };
 
+      if (options === null || typeof options !== "object" || Array.isArray(options)) {
+        return { ok: false, error: "invalid-options" };
+      }
       const { mode, dryRun = false } = options;
       if ((mode !== "merge" && mode !== "replace") || typeof dryRun !== "boolean") {
         return { ok: false, error: "invalid-options" };
