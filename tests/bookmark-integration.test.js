@@ -278,6 +278,54 @@ describe("bookmark terminal integration", () => {
     expect(terminal.term.cwd).toBe("home");
   });
 
+  it("copy/pastes exported prototype-like bookmarks through replace and reload", async () => {
+    const storage = createSharedStorage();
+    const first = createTerminalEnvironment(storage, "work");
+    environments.push(first);
+    const backup = JSON.stringify({
+      version: 1,
+      bookmarks: [
+        {
+          name: "__proto__",
+          path: '/not present/quote"/back\\slash/雪/%bookmark%/spaces',
+        },
+        { name: "constructor", path: "/also missing" },
+      ],
+    });
+
+    await submit(first.term, `bookmark import --merge '${backup}'`);
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=2, updated=0, removed=0, unchanged=0"
+    );
+    expect(first.term.cwd).toBe("work");
+
+    first.term.writeln.mockClear();
+    await submit(first.term, "bookmark export");
+    expect(first.term.writeln).toHaveBeenCalledWith(backup);
+    const exported = first.term.writeln.mock.calls[0][0];
+
+    await submit(first.term, "bookmark import --replace '{\"version\":1,\"bookmarks\":[]}'");
+    expect(first.term.cwd).toBe("work");
+    await submit(first.term, `bookmark import --replace '${exported}'`);
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=2, updated=0, removed=0, unchanged=0"
+    );
+    expect(first.term.cwd).toBe("work");
+
+    first.env.cleanup();
+    environments = [];
+    const reloaded = createTerminalEnvironment(storage, "home");
+    environments.push(reloaded);
+    await submit(reloaded.term, "bookmark export");
+    expect(reloaded.term.writeln).toHaveBeenCalledWith(backup);
+
+    await submit(reloaded.term, "go __proto__");
+    expect(reloaded.term.stylePrint).toHaveBeenLastCalledWith(
+      'Bookmark "__proto__" points to a directory that is no longer available.'
+    );
+    expect(reloaded.term.cwd).toBe("home");
+  });
+
   it("recreates the browser environment with persisted bookmarks available to list and go", async () => {
     const storage = createSharedStorage();
     const first = createTerminalEnvironment(storage, "work");
