@@ -52,6 +52,166 @@ const extend = (term) => {
   term.historyCursor = -1;
   term.busy = false;
 
+  // Preferences are closure-owned and committed storage-first. Invalid or
+  // unreadable preexisting data remains untouched and blocks mutations rather
+  // than being mistaken for an empty store.
+  const PREFERENCES_STORAGE_KEY = "rootvc.preferences.v1";
+  const PREFERENCES_STORAGE_VERSION = 1;
+  const PREFERENCE_KEYS = [
+    "version",
+    "fontSize",
+    "cursorBlink",
+    "screenReaderMode",
+  ];
+  const DEFAULT_PREFERENCES = Object.freeze({
+    version: PREFERENCES_STORAGE_VERSION,
+    fontSize: 15,
+    cursorBlink: true,
+    screenReaderMode: false,
+  });
+  const preferenceMessage = {
+    corrupt: "Preferences could not be loaded because stored data is invalid.",
+    inaccessible: "Preferences could not be loaded because storage is unavailable.",
+    unsupported: "Preferences could not be loaded because the stored version is unsupported.",
+  };
+
+  const copyPreferences = (preferences) =>
+    Object.freeze({
+      version: preferences.version,
+      fontSize: preferences.fontSize,
+      cursorBlink: preferences.cursorBlink,
+      screenReaderMode: preferences.screenReaderMode,
+    });
+
+  const isCompletePreferences = (candidate) => {
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return false;
+    }
+    const keys = Object.keys(candidate);
+    return (
+      keys.length === PREFERENCE_KEYS.length &&
+      PREFERENCE_KEYS.every((key) =>
+        Object.prototype.hasOwnProperty.call(candidate, key)
+      ) &&
+      candidate.version === PREFERENCES_STORAGE_VERSION &&
+      Number.isInteger(candidate.fontSize) &&
+      candidate.fontSize >= 12 &&
+      candidate.fontSize <= 24 &&
+      typeof candidate.cursorBlink === "boolean" &&
+      typeof candidate.screenReaderMode === "boolean"
+    );
+  };
+
+  const samePreferences = (left, right) =>
+    PREFERENCE_KEYS.every((key) => left[key] === right[key]);
+
+  let preferenceState;
+  try {
+    const serialized = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (serialized === null) {
+      preferenceState = {
+        code: "missing",
+        preferences: copyPreferences(DEFAULT_PREFERENCES),
+      };
+    } else {
+      let payload;
+      try {
+        payload = JSON.parse(serialized);
+      } catch (_error) {
+        preferenceState = { code: "corrupt", preferences: null };
+      }
+
+      if (payload !== undefined) {
+        if (
+          payload !== null &&
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          Object.prototype.hasOwnProperty.call(payload, "version") &&
+          typeof payload.version === "number" &&
+          payload.version !== PREFERENCES_STORAGE_VERSION
+        ) {
+          preferenceState = { code: "unsupported", preferences: null };
+        } else if (!isCompletePreferences(payload)) {
+          preferenceState = { code: "corrupt", preferences: null };
+        } else {
+          preferenceState = {
+            code: "valid",
+            preferences: copyPreferences(payload),
+          };
+        }
+      }
+    }
+  } catch (_error) {
+    preferenceState = { code: "inaccessible", preferences: null };
+  }
+
+  const preferenceResult = (ok, code, message = "") => ({
+    ok,
+    code,
+    message,
+    preferences:
+      preferenceState.preferences === null
+        ? null
+        : copyPreferences(preferenceState.preferences),
+  });
+
+  const blockedPreferenceMutation = () =>
+    preferenceResult(false, "storage", preferenceMessage[preferenceState.code]);
+
+  const commitPreferences = (candidate) => {
+    if (!isCompletePreferences(candidate)) {
+      return preferenceResult(
+        false,
+        "invalid",
+        "Preferences must include version 1, fontSize 12 to 24, cursorBlink, and screenReaderMode."
+      );
+    }
+    if (preferenceState.preferences === null) {
+      return blockedPreferenceMutation();
+    }
+    if (samePreferences(preferenceState.preferences, candidate)) {
+      return preferenceResult(true, "unchanged");
+    }
+
+    const committed = copyPreferences(candidate);
+    try {
+      window.localStorage.setItem(
+        PREFERENCES_STORAGE_KEY,
+        JSON.stringify(committed)
+      );
+    } catch (_error) {
+      return preferenceResult(
+        false,
+        "storage",
+        "Preferences could not be saved because storage is unavailable."
+      );
+    }
+    preferenceState = { code: "valid", preferences: committed };
+    return preferenceResult(true, "updated");
+  };
+
+  term.preferences = Object.freeze({
+    snapshot() {
+      return preferenceState.preferences === null
+        ? null
+        : copyPreferences(preferenceState.preferences);
+    },
+    status() {
+      const ok = preferenceState.preferences !== null;
+      return preferenceResult(
+        ok,
+        preferenceState.code,
+        ok ? "" : preferenceMessage[preferenceState.code]
+      );
+    },
+    update(candidate) {
+      return commitPreferences(candidate);
+    },
+    reset() {
+      return commitPreferences(DEFAULT_PREFERENCES);
+    },
+  });
+
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
   // names such as `constructor` and `__proto__` without object-key surprises.
