@@ -126,6 +126,30 @@ describe("apply", () => {
 // Loads the full command set with a fake terminal. `cd` is the one command with
 // real branching logic — a switch over ~, .., /home, /bin and team member names
 // — and it drives term.cwd, which the prompt renders on every keystroke.
+function createPreferencesDouble(initial = {
+  version: 1,
+  fontSize: 15,
+  cursorBlink: true,
+  screenReaderMode: false,
+}) {
+  let committed = initial === null ? null : { ...initial };
+  const api = {
+    snapshot: vi.fn(() => committed === null ? null : { ...committed }),
+    status: vi.fn(() => committed === null
+      ? { ok: false, code: "corrupt", message: "Preferences could not be loaded because stored data is invalid." }
+      : { ok: true, code: "valid", message: "", preferences: { ...committed } }),
+    update: vi.fn((candidate) => {
+      committed = { ...candidate };
+      return { ok: true, code: "updated", message: "", preferences: { ...committed } };
+    }),
+    reset: vi.fn(() => {
+      committed = { version: 1, fontSize: 15, cursorBlink: true, screenReaderMode: false };
+      return { ok: true, code: "updated", message: "", preferences: { ...committed } };
+    }),
+  };
+  return api;
+}
+
 function loadCommands({
   cwd = "~",
   user = "guest",
@@ -133,6 +157,7 @@ function loadCommands({
   storage = createMemoryStorage(),
   help = {},
   portfolio = {},
+  preferences = createPreferencesDouble(),
 } = {}) {
   const aliases = new Map();
   const location = {
@@ -166,6 +191,7 @@ function loadCommands({
       )
     ),
     removeAlias: vi.fn((name) => aliases.delete(name)),
+    preferences,
   };
   const context = vm.createContext({
     term,
@@ -196,6 +222,149 @@ function loadCommands({
   });
   return { commands, location, storage, term };
 }
+
+describe("preferences", () => {
+  const usage =
+    "Usage: preferences | preferences set font-size N | preferences set cursor-blink on|off | preferences set screen-reader on|off | preferences reset --confirm";
+
+  it("shows the three committed values", () => {
+    const preferences = createPreferencesDouble({
+      version: 1,
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    });
+    const { commands, term } = loadCommands({ preferences });
+
+    commands.preferences([]);
+
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "font-size: 18",
+      "cursor-blink: off",
+      "screen-reader: on",
+    ]);
+    expect(preferences.update).not.toHaveBeenCalled();
+    expect(preferences.reset).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["font-size", "18", { fontSize: 18 }],
+    ["cursor-blink", "off", { cursorBlink: false }],
+    ["screen-reader", "on", { screenReaderMode: true }],
+  ])("sets %s from its exact value grammar", (key, value, changed) => {
+    const preferences = createPreferencesDouble();
+    const { commands, term } = loadCommands({ preferences });
+
+    commands.preferences(["set", key, value]);
+
+    expect(preferences.update).toHaveBeenCalledTimes(1);
+    expect(preferences.update).toHaveBeenCalledWith(expect.objectContaining({
+      version: 1,
+      fontSize: 15,
+      cursorBlink: true,
+      screenReaderMode: false,
+      ...changed,
+    }));
+    expect(term.stylePrint).toHaveBeenLastCalledWith("Preferences saved.");
+    expect(preferences.reset).not.toHaveBeenCalled();
+  });
+
+  it("resets only with the exact confirmation argument", () => {
+    const preferences = createPreferencesDouble();
+    const { commands, term } = loadCommands({ preferences });
+
+    commands.preferences(["reset", "--confirm"]);
+
+    expect(preferences.reset).toHaveBeenCalledTimes(1);
+    expect(preferences.update).not.toHaveBeenCalled();
+    expect(term.stylePrint).toHaveBeenLastCalledWith("Preferences reset.");
+  });
+
+  it.each([
+    ["set"],
+    ["set", "font-size"],
+    ["set", "font-size", "18", "extra"],
+    ["set", "unknown", "on"],
+    ["reset"],
+    ["reset", "--confirm", "extra"],
+    ["reset", "yes"],
+    ["unknown"],
+  ])("rejects malformed command shape without mutation: %j", (args) => {
+    const preferences = createPreferencesDouble();
+    const { commands, term } = loadCommands({ preferences });
+
+    commands.preferences(args);
+
+    expect(term.stylePrint).toHaveBeenLastCalledWith(usage);
+    expect(preferences.update).not.toHaveBeenCalled();
+    expect(preferences.reset).not.toHaveBeenCalled();
+  });
+
+  it.each(["11", "25", "15.5", "12px", "-12", "NaN"])(
+    "rejects invalid font size %s without mutation",
+    (value) => {
+      const preferences = createPreferencesDouble();
+      const { commands, term } = loadCommands({ preferences });
+
+      commands.preferences(["set", "font-size", value]);
+
+      expect(term.stylePrint).toHaveBeenLastCalledWith(
+        "Font size must be an integer from 12 to 24."
+      );
+      expect(preferences.update).not.toHaveBeenCalled();
+      expect(preferences.reset).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["cursor-blink", "true"],
+    ["cursor-blink", "ON"],
+    ["screen-reader", "false"],
+    ["screen-reader", "yes"],
+  ])("rejects invalid boolean %s=%s without mutation", (key, value) => {
+    const preferences = createPreferencesDouble();
+    const { commands, term } = loadCommands({ preferences });
+
+    commands.preferences(["set", key, value]);
+
+    expect(term.stylePrint).toHaveBeenLastCalledWith(`${key} must be on or off.`);
+    expect(preferences.update).not.toHaveBeenCalled();
+    expect(preferences.reset).not.toHaveBeenCalled();
+  });
+
+  it("surfaces unavailable storage without claiming success", () => {
+    const preferences = createPreferencesDouble(null);
+    const { commands, term } = loadCommands({ preferences });
+
+    commands.preferences([]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Preferences could not be loaded because stored data is invalid."
+    );
+    term.stylePrint.mockClear();
+    commands.preferences(["set", "font-size", "18"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Preferences could not be loaded because stored data is invalid."
+    );
+    expect(preferences.update).not.toHaveBeenCalled();
+  });
+
+  it("documents the command in help and its dedicated manual", () => {
+    const { commands, term } = loadCommands();
+
+    commands.help([]);
+    expect(term.stylePrint.mock.calls.flat().join("\n")).toContain(
+      "%preferences% [set font-size N|set cursor-blink on|off|set screen-reader on|off|reset --confirm]"
+    );
+
+    term.stylePrint.mockClear();
+    term.command.mockClear();
+    commands.man(["preferences"]);
+    const manual = term.stylePrint.mock.calls.flat().join("\n");
+    expect(manual).toContain("Usage: preferences set font-size N");
+    expect(manual).toContain("Usage: preferences reset --confirm");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+});
 
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {

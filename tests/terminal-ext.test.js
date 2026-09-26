@@ -299,6 +299,121 @@ describe("terminal-ext", () => {
     expect(env.window.localStorage.getItem("unrelated")).toBe("other-data");
   });
 
+  it("applies saved options on the existing terminal after addon setup", () => {
+    const fit = vi.fn();
+    const { extend } = loadTerminalExt({ fitAddon: { fit } });
+    env.window.localStorage.setItem(
+      preferenceStorageKey,
+      JSON.stringify({
+        version: 1,
+        fontSize: 20,
+        cursorBlink: false,
+        screenReaderMode: true,
+      })
+    );
+    const term = createTerm({
+      options: { fontSize: 15, cursorBlink: true, screenReaderMode: false },
+      cwd: "bin",
+      currentLine: "typed input",
+      history: ["help"],
+    });
+
+    extend(term);
+
+    expect(term.options).toEqual({
+      fontSize: 20,
+      cursorBlink: false,
+      screenReaderMode: true,
+    });
+    expect(fit).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("~");
+    expect(term.currentLine).toBe("");
+    expect(term.history).toEqual([]);
+    expect(term.open).not.toHaveBeenCalled();
+    expect(term.loadAddon).not.toHaveBeenCalled();
+  });
+
+  it("applies successful updates live, refits only font changes, and preserves interactive state", () => {
+    const fit = vi.fn();
+    const { extend } = loadTerminalExt({ fitAddon: { fit } });
+    const term = createTerm({
+      options: { fontSize: 15, cursorBlink: true, screenReaderMode: false },
+    });
+    extend(term);
+    term.cwd = "bin";
+    term.currentLine = "typed input";
+    term.history = ["help", "whois"];
+    term.defineAlias("kept", "echo safe");
+    term.environment.set("KEEP", "value");
+    const identity = term;
+    const command = vi.spyOn(term, "command");
+
+    expect(term.preferences.update({
+      version: 1,
+      fontSize: 15,
+      cursorBlink: false,
+      screenReaderMode: true,
+    })).toMatchObject({ ok: true, code: "updated" });
+    expect(term.options).toEqual({
+      fontSize: 15,
+      cursorBlink: false,
+      screenReaderMode: true,
+    });
+    expect(fit).not.toHaveBeenCalled();
+
+    expect(term.preferences.update({
+      version: 1,
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    })).toMatchObject({ ok: true, code: "updated" });
+    expect(term).toBe(identity);
+    expect(term.options.fontSize).toBe(18);
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(term.cwd).toBe("bin");
+    expect(term.currentLine).toBe("typed input");
+    expect(term.history).toEqual(["help", "whois"]);
+    expect(term.getAlias("kept")).toBe("echo safe");
+    expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+    expect(command).not.toHaveBeenCalled();
+    expect(term.open).not.toHaveBeenCalled();
+    expect(term.loadAddon).not.toHaveBeenCalled();
+  });
+
+  it("leaves live options and interactive state unchanged when persistence fails", () => {
+    const fit = vi.fn();
+    const { extend } = loadTerminalExt({ fitAddon: { fit } });
+    const term = createTerm({
+      options: { fontSize: 15, cursorBlink: true, screenReaderMode: false },
+    });
+    extend(term);
+    term.cwd = "home";
+    term.currentLine = "unfinished";
+    term.history = ["help"];
+    const setItem = vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+
+    const result = term.preferences.update({
+      version: 1,
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "storage" });
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(term.options).toEqual({
+      fontSize: 15,
+      cursorBlink: true,
+      screenReaderMode: false,
+    });
+    expect(fit).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("home");
+    expect(term.currentLine).toBe("unfinished");
+    expect(term.history).toEqual(["help"]);
+  });
+
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -520,6 +635,40 @@ describe("terminal-ext", () => {
     expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
       persistedBeforeResize
     );
+  });
+
+  it("dispatches preferences through the real tokenizer without replaying or replacing terminal state", async () => {
+    const { commands, term } = loadAliasTerminal();
+    term.options = { fontSize: 15, cursorBlink: true, screenReaderMode: false };
+    const fit = vi.spyOn(env.window.fitAddon, "fit");
+
+    term.cwd = "bin";
+    term.command("bookmark add saved");
+    term.command("alias kept=echo safe");
+    term.environment.set("KEEP", "value");
+    term.currentLine = "draft input";
+    term.history = ["whois"];
+    const identity = term;
+    const whois = vi.spyOn(commands, "whois");
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("preferences set font-size 18");
+
+    expect(term).toBe(identity);
+    expect(term.options).toEqual({
+      fontSize: 18,
+      cursorBlink: true,
+      screenReaderMode: false,
+    });
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(term.writeln).toHaveBeenCalledWith("Preferences saved.");
+    expect(term.cwd).toBe("bin");
+    expect(term.currentLine).toBe("draft input");
+    expect(term.history).toEqual(["whois", "preferences set font-size 18"]);
+    expect(whois).not.toHaveBeenCalled();
+    expect(term.getAlias("kept")).toBe("echo safe");
+    expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+    expect(env.window.localStorage.getItem("rootvc.bookmarks.v1")).toContain("saved");
   });
 
   it("hydrates only valid persisted aliases, including prototype-shaped names", () => {
