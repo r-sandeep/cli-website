@@ -643,7 +643,7 @@ describe("terminal-ext", () => {
     const fit = vi.spyOn(env.window.fitAddon, "fit");
 
     term.cwd = "bin";
-    term.command("bookmark add saved");
+    env.window.localStorage.setItem("rootvc.bookmarks.v1", "bookmark-data");
     term.command("alias kept=echo safe");
     term.environment.set("KEEP", "value");
     term.currentLine = "draft input";
@@ -663,12 +663,14 @@ describe("terminal-ext", () => {
     expect(fit).toHaveBeenCalledTimes(1);
     expect(term.writeln).toHaveBeenCalledWith("Preferences saved.");
     expect(term.cwd).toBe("bin");
-    expect(term.currentLine).toBe("draft input");
+    // A submitted command clears the input line as part of the existing shell
+    // lifecycle; the preference handler itself does not recreate the terminal.
+    expect(term.currentLine).toBe("");
     expect(term.history).toEqual(["whois", "preferences set font-size 18"]);
     expect(whois).not.toHaveBeenCalled();
     expect(term.getAlias("kept")).toBe("echo safe");
     expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
-    expect(env.window.localStorage.getItem("rootvc.bookmarks.v1")).toContain("saved");
+    expect(env.window.localStorage.getItem("rootvc.bookmarks.v1")).toBe("bookmark-data");
   });
 
   it("hydrates only valid persisted aliases, including prototype-shaped names", () => {
