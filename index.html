@@ -78,6 +78,51 @@
 
       <div id="aa-all" style="display: none;"></div>
       <div id="files-all" style="display: none;"></div>
+      <button
+        id="terminal-settings-toggle"
+        class="terminal-settings-toggle"
+        type="button"
+        aria-controls="terminal-settings"
+        aria-expanded="false"
+      >Terminal settings</button>
+      <section
+        id="terminal-settings"
+        class="terminal-settings-panel"
+        aria-labelledby="terminal-settings-title"
+        tabindex="-1"
+        hidden
+      >
+        <h2 id="terminal-settings-title">Terminal settings</h2>
+        <label for="terminal-font-size">Font size</label>
+        <input
+          id="terminal-font-size"
+          type="number"
+          min="12"
+          max="24"
+          step="1"
+          value="15"
+        />
+        <label class="terminal-settings-checkbox" for="terminal-cursor-blink">
+          <input id="terminal-cursor-blink" type="checkbox" checked />
+          Blink cursor
+        </label>
+        <label class="terminal-settings-checkbox" for="terminal-screen-reader">
+          <input id="terminal-screen-reader" type="checkbox" />
+          Screen reader mode
+        </label>
+        <div class="terminal-settings-actions">
+          <button id="terminal-settings-save" type="button">Save</button>
+          <button id="terminal-settings-reset" type="button">Reset to defaults</button>
+          <button id="terminal-settings-close" type="button">Close</button>
+        </div>
+        <p
+          id="terminal-settings-status"
+          class="terminal-settings-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></p>
+      </section>
       <div id="terminal"></div>
     </body>
   </html>
