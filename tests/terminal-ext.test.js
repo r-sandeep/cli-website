@@ -414,6 +414,98 @@ describe("terminal-ext", () => {
     expect(term.history).toEqual(["help"]);
   });
 
+  it("hydrates committed options on a replacement terminal after a full reload", () => {
+    const { extend } = loadTerminalExt();
+    const first = createTerm({
+      options: { fontSize: 15, cursorBlink: true, screenReaderMode: false },
+    });
+    extend(first);
+    const committed = {
+      version: 1,
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    };
+
+    expect(first.preferences.update(committed)).toMatchObject({
+      ok: true,
+      code: "updated",
+      preferences: committed,
+    });
+
+    const reloaded = createTerm({
+      options: { fontSize: 15, cursorBlink: true, screenReaderMode: false },
+    });
+    extend(reloaded);
+
+    expect(reloaded).not.toBe(first);
+    expect(reloaded.preferences.status()).toMatchObject({ ok: true, code: "valid" });
+    expect(reloaded.preferences.snapshot()).toEqual(committed);
+    expect(reloaded.options).toEqual({
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    });
+  });
+
+  it("preserves all terminal and stored state when a later preference mutation fails", () => {
+    const fit = vi.fn();
+    const { extend } = loadTerminalExt({ fitAddon: { fit } });
+    const term = createTerm({
+      options: { fontSize: 15, cursorBlink: true, screenReaderMode: false },
+    });
+    extend(term);
+    const committed = {
+      version: 1,
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    };
+    expect(term.preferences.update(committed)).toMatchObject({ ok: true });
+
+    term.cwd = "bin";
+    term.currentLine = "draft input";
+    term.history = ["help", "whois"];
+    term.defineAlias("kept", "echo safe");
+    term.environment.set("KEEP", "value");
+    env.window.localStorage.setItem("rootvc.bookmarks.v1", "bookmark-data");
+    const identity = term;
+    const persistedPreferences = env.window.localStorage.getItem(preferenceStorageKey);
+    const command = vi.spyOn(term, "command");
+    fit.mockClear();
+    const setItem = vi.spyOn(env.window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+
+    const result = term.preferences.update({
+      version: 1,
+      fontSize: 20,
+      cursorBlink: true,
+      screenReaderMode: false,
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "storage", preferences: committed });
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(term).toBe(identity);
+    expect(term.preferences.snapshot()).toEqual(committed);
+    expect(term.options).toEqual({
+      fontSize: 18,
+      cursorBlink: false,
+      screenReaderMode: true,
+    });
+    expect(fit).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("bin");
+    expect(term.currentLine).toBe("draft input");
+    expect(term.history).toEqual(["help", "whois"]);
+    expect(term.getAlias("kept")).toBe("echo safe");
+    expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
+    expect(env.window.localStorage.getItem("rootvc.bookmarks.v1")).toBe("bookmark-data");
+    expect(env.window.localStorage.getItem(preferenceStorageKey)).toBe(persistedPreferences);
+    expect(command).not.toHaveBeenCalled();
+    expect(term.open).not.toHaveBeenCalled();
+    expect(term.loadAddon).not.toHaveBeenCalled();
+  });
+
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
