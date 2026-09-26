@@ -508,6 +508,72 @@ const commands = {
     term.stylePrint(usage);
   },
 
+  preferences: function (args) {
+    const usage =
+      "Usage: preferences | preferences set font-size N | preferences set cursor-blink on|off | preferences set screen-reader on|off | preferences reset --confirm";
+    const current = term.preferences.snapshot();
+
+    if (args.length === 0) {
+      const status = term.preferences.status();
+      if (!status.ok) {
+        term.stylePrint(status.message);
+        return;
+      }
+      term.stylePrint(`font-size: ${current.fontSize}`);
+      term.stylePrint(`cursor-blink: ${current.cursorBlink ? "on" : "off"}`);
+      term.stylePrint(`screen-reader: ${current.screenReaderMode ? "on" : "off"}`);
+      return;
+    }
+
+    if (args[0] === "reset") {
+      if (args.length !== 2 || args[1] !== "--confirm") {
+        term.stylePrint(usage);
+        return;
+      }
+      const result = term.preferences.reset();
+      term.stylePrint(result.ok ? "Preferences reset." : result.message);
+      return;
+    }
+
+    if (args[0] !== "set" || args.length !== 3 || current === null) {
+      if (current === null) {
+        term.stylePrint(term.preferences.status().message);
+      } else {
+        term.stylePrint(usage);
+      }
+      return;
+    }
+
+    const key = args[1];
+    const value = args[2];
+    const candidate = {
+      version: current.version,
+      fontSize: current.fontSize,
+      cursorBlink: current.cursorBlink,
+      screenReaderMode: current.screenReaderMode,
+    };
+    if (key === "font-size") {
+      if (!/^\d+$/.test(value) || Number(value) < 12 || Number(value) > 24) {
+        term.stylePrint("Font size must be an integer from 12 to 24.");
+        return;
+      }
+      candidate.fontSize = Number(value);
+    } else if (key === "cursor-blink" || key === "screen-reader") {
+      if (value !== "on" && value !== "off") {
+        term.stylePrint(`${key} must be on or off.`);
+        return;
+      }
+      candidate[key === "cursor-blink" ? "cursorBlink" : "screenReaderMode"] =
+        value === "on";
+    } else {
+      term.stylePrint(usage);
+      return;
+    }
+
+    const result = term.preferences.update(candidate);
+    term.stylePrint(result.ok ? "Preferences saved." : result.message);
+  },
+
   // Navigates by assigning the terminal's established cwd representation only.
   go: function (args) {
     if (args.length !== 1) {
@@ -1330,6 +1396,15 @@ commands.man = function (args) {
       "Usage: go NAME\r\n" +
       "Changes the terminal's current directory to the path saved under NAME."
     );
+    return;
+  }
+  if (args.length === 1 && topic === "preferences") {
+    term.stylePrint("preferences — show or update persistent terminal preferences");
+    term.stylePrint("Usage: preferences");
+    term.stylePrint("Usage: preferences set font-size N");
+    term.stylePrint("Usage: preferences set cursor-blink on|off");
+    term.stylePrint("Usage: preferences set screen-reader on|off");
+    term.stylePrint("Usage: preferences reset --confirm");
     return;
   }
   const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)

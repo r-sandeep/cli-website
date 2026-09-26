@@ -158,6 +158,24 @@ const extend = (term) => {
   const blockedPreferenceMutation = () =>
     preferenceResult(false, "storage", preferenceMessage[preferenceState.code]);
 
+  const applyPreferences = (preferences, previousPreferences = null) => {
+    if (!preferences || !term.options) return;
+    const fontChanged =
+      previousPreferences !== null &&
+      previousPreferences.fontSize !== preferences.fontSize;
+    term.options.fontSize = preferences.fontSize;
+    term.options.cursorBlink = preferences.cursorBlink;
+    term.options.screenReaderMode = preferences.screenReaderMode;
+    if (
+      fontChanged &&
+      typeof window.fitAddon !== "undefined" &&
+      window.fitAddon &&
+      typeof window.fitAddon.fit === "function"
+    ) {
+      window.fitAddon.fit();
+    }
+  };
+
   const commitPreferences = (candidate) => {
     if (!isCompletePreferences(candidate)) {
       return preferenceResult(
@@ -186,7 +204,9 @@ const extend = (term) => {
         "Preferences could not be saved because storage is unavailable."
       );
     }
+    const previousPreferences = preferenceState.preferences;
     preferenceState = { code: "valid", preferences: committed };
+    applyPreferences(committed, previousPreferences);
     return preferenceResult(true, "updated");
   };
 
@@ -211,6 +231,11 @@ const extend = (term) => {
       return commitPreferences(DEFAULT_PREFERENCES);
     },
   });
+
+  // The addons have already been installed by bootstrap before `extend` runs,
+  // so valid persisted options can safely win over xterm's construction
+  // defaults without replacing the terminal or disturbing interactive state.
+  applyPreferences(preferenceState.preferences);
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
