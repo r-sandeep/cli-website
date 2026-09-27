@@ -800,6 +800,14 @@ describe("index.html", () => {
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
   });
 
+  it("includes a native terminal focus button outside the terminal", () => {
+    const button = doc.querySelector("button#terminal-focus");
+    expect(button).not.toBeNull();
+    expect(button.textContent).toBe("Focus terminal");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(doc.querySelector("#terminal #terminal-focus")).toBeNull();
+  });
+
   it("uses absolute Open Graph image URLs", () => {
     for (const selector of [
       'meta[property="og:image"]',

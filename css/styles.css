@@ -20,6 +20,27 @@ body {
   height: 100%;
 }
 
+#terminal-focus {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  z-index: 10;
+  max-width: calc(100vw - 16px);
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 3px;
+  background: var(--brand-bg-color);
+  color: var(--brand-txt-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+#terminal-focus:focus-visible {
+  outline: 3px solid #66bfff;
+  outline-offset: 2px;
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */
