@@ -38,7 +38,27 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
-          <div id="terminal"></div>
+          <div id="terminal">
+            <div class="xterm-screen">terminal output</div>
+            <textarea class="xterm-helper-textarea"></textarea>
+          </div>
+          <button
+            id="getting-started-toggle"
+            type="button"
+            aria-controls="getting-started-panel"
+            aria-expanded="false"
+          >Getting started</button>
+          <section
+            id="getting-started-panel"
+            role="dialog"
+            aria-modal="false"
+            aria-labelledby="getting-started-title"
+            hidden
+          >
+            <h2 id="getting-started-title">Getting started</h2>
+            <p>Type help in the terminal to see the available commands.</p>
+            <button id="getting-started-close" type="button">Close</button>
+          </section>
         </body>
       </html>
     `,
@@ -137,5 +157,80 @@ describe("bootstrap", () => {
 
     appendedScripts[1].onload();
     await rickrollPromise;
+  });
+
+  it("opens and closes the panel without disturbing the terminal", () => {
+    const state = loadBootstrap();
+    const toggle = env.document.getElementById("getting-started-toggle");
+    const panel = env.document.getElementById("getting-started-panel");
+    const close = env.document.getElementById("getting-started-close");
+    const terminal = env.document.getElementById("terminal");
+    const terminalInput = terminal.querySelector(".xterm-helper-textarea");
+    const terminalMarkup = terminal.innerHTML;
+    const bootstrapGlobals = Object.keys(env.window).sort();
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(close);
+
+    terminalInput.focus();
+    const outsideEscape = new env.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+
+    expect(terminalInput.dispatchEvent(outsideEscape)).toBe(true);
+    expect(outsideEscape.defaultPrevented).toBe(false);
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(terminalInput);
+
+    close.click();
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(close);
+
+    const panelEscape = new env.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+
+    expect(close.dispatchEvent(panelEscape)).toBe(false);
+    expect(panelEscape.defaultPrevented).toBe(true);
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(close);
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+    expect(env.document.getElementById("terminal")).toBe(terminal);
+    expect(terminal.innerHTML).toBe(terminalMarkup);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.term.open).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(Object.keys(env.window).sort()).toEqual(bootstrapGlobals);
   });
 });
