@@ -143,6 +143,20 @@ describe("script load order", () => {
     );
   });
 
+  it("gives the Geo Bootstrap image link an accessible name", () => {
+    const source = fs.readFileSync(path.join(REPO_ROOT, "welcome.htm"), "utf8");
+    const doc = parse(source);
+    const anchor = doc.querySelector(
+      'a[href="https://github.com/divshot/geo-bootstrap"]'
+    );
+
+    expect(anchor).not.toBeNull();
+    expect(anchor.getAttribute("target")).toBe("_blank");
+    const image = anchor.querySelector('img[src="images/geo/geocities.jpg"]');
+    expect(image).not.toBeNull();
+    expect(image.getAttribute("alt")).toBe("Geo Bootstrap");
+  });
+
   it("uses one fixed metadata snapshot in the emitted raw page and bundle topologies", async () => {
     const {
       createAppBundleSource,
@@ -165,6 +179,18 @@ describe("script load order", () => {
     const welcomeScripts = [
       ...welcomeSource.matchAll(/<script\s+src="([^"]+)"/g),
     ].map((match) => match[1]);
+    const welcomeDoc = parse(welcomeSource);
+    const geoBootstrapAnchor = welcomeDoc.querySelector(
+      'a[href="https://github.com/divshot/geo-bootstrap"]'
+    );
+
+    expect(geoBootstrapAnchor).not.toBeNull();
+    expect(geoBootstrapAnchor.getAttribute("target")).toBe("_blank");
+    const geoBootstrapImage = geoBootstrapAnchor.querySelector(
+      'img[src="images/geo/geocities.jpg"]'
+    );
+    expect(geoBootstrapImage).not.toBeNull();
+    expect(geoBootstrapImage.getAttribute("alt")).toBe("Geo Bootstrap");
 
     expect(welcomeScripts).toEqual([
       "js/geo.js",
