@@ -44,9 +44,7 @@ function loadBootstrap(overrides = {}) {
         <head></head>
         <body>
           <button id="terminal-focus" type="button">Focus terminal</button>
-          <div id="terminal">
-            <textarea class="xterm-helper-textarea"></textarea>
-          </div>
+          <div id="terminal"></div>
         </body>
       </html>
     `,
@@ -63,6 +61,10 @@ function loadBootstrap(overrides = {}) {
       ...overrides,
     },
   });
+
+  const helper = env.document.createElement("textarea");
+  helper.className = "xterm-helper-textarea";
+  env.document.getElementById("terminal").appendChild(helper);
 
   env.loadScripts(["js/bootstrap.js"]);
 
