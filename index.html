@@ -79,5 +79,23 @@
       <div id="aa-all" style="display: none;"></div>
       <div id="files-all" style="display: none;"></div>
       <div id="terminal"></div>
+
+      <button
+        id="getting-started-toggle"
+        type="button"
+        aria-controls="getting-started-panel"
+        aria-expanded="false"
+      >Getting started</button>
+      <section
+        id="getting-started-panel"
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="getting-started-title"
+        hidden
+      >
+        <h2 id="getting-started-title">Getting started</h2>
+        <p>Type help in the terminal to see the available commands.</p>
+        <button id="getting-started-close" type="button">Close</button>
+      </section>
     </body>
   </html>

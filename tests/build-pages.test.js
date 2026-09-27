@@ -858,6 +858,31 @@ describe("index.html", () => {
     expect(doc.querySelector("#aa-all")).not.toBeNull();
     expect(doc.querySelector("#files-all")).not.toBeNull();
   });
+
+  it("includes the initially collapsed Getting started controls outside the terminal", () => {
+    const terminal = doc.querySelector("#terminal");
+    const toggle = doc.querySelector("#getting-started-toggle");
+    const panel = doc.querySelector("#getting-started-panel");
+    const title = doc.querySelector("#getting-started-title");
+    const close = doc.querySelector("#getting-started-close");
+
+    expect(toggle?.tagName).toBe("BUTTON");
+    expect(toggle?.textContent.trim()).toBe("Getting started");
+    expect(toggle?.getAttribute("aria-controls")).toBe("getting-started-panel");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(terminal.contains(toggle)).toBe(false);
+
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.getAttribute("role")).toBe("dialog");
+    expect(panel?.getAttribute("aria-modal")).toBe("false");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("getting-started-title");
+    expect(panel?.contains(terminal)).toBe(false);
+    expect(title?.textContent.trim()).toBe("Getting started");
+    expect(title?.hidden).toBe(false);
+    expect(panel?.textContent).toContain("Type help");
+    expect(close?.tagName).toBe("BUTTON");
+    expect(close?.textContent.trim()).toBe("Close");
+  });
 });
 
 describe("terminal still reads from config/firm.js", () => {
