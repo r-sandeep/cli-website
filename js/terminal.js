@@ -74,6 +74,11 @@ function runRootTerminal(term) {
   term.prompt();
   term.runDeepLink();
 
+  const focusControl = document.getElementById("terminal-focus");
+  if (focusControl) {
+    focusControl.addEventListener("click", () => term.focus());
+  }
+
   let resizeState = "idle";
   let resizePending = false;
   const scheduleResize = () => {
