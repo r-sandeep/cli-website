@@ -819,6 +819,14 @@ describe("index.html", () => {
     expect(h1.className).toBe("visually-hidden");
   });
 
+  it("includes one native focus control outside the terminal", () => {
+    const buttons = doc.querySelectorAll("button#terminal-focus");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].type).toBe("button");
+    expect(buttons[0].textContent).toBe("Focus terminal");
+    expect(buttons[0].closest("#terminal")).toBeNull();
+  });
+
   it("lists every company and person in the crawlable index block", () => {
     // This block is now the only place the portfolio and team exist as HTML,
     // so a missing entry is content that has left the web entirely.

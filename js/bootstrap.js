@@ -41,6 +41,12 @@
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
   extend(term);
+
+  const terminalFocusButton = document.getElementById("terminal-focus");
+  if (terminalFocusButton) {
+    terminalFocusButton.addEventListener("click", () => term.focus());
+  }
+
   window.deepLinkAssetPromise = Promise.resolve();
   if (term.deepLink) {
     window.deepLinkAssetPromise = term.preloadCommandAssets(term.deepLink).catch(

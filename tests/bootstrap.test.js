@@ -5,9 +5,19 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    currentLine: "partially typed command",
+    history: ["help", "team"],
+    focus: vi.fn(() => {
+      env.document.querySelector(".xterm-helper-textarea").focus();
+    }),
     loadAddon: vi.fn(),
     open: vi.fn(),
   };
+  term.open.mockImplementation((element) => {
+    const helperTextarea = element.ownerDocument.createElement("textarea");
+    helperTextarea.className = "xterm-helper-textarea";
+    element.appendChild(helperTextarea);
+  });
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
   const preloadCommandAssets = vi.fn(() => Promise.resolve());
@@ -38,6 +48,7 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button id="terminal-focus" type="button">Focus terminal</button>
           <div id="terminal"></div>
         </body>
       </html>
@@ -104,6 +115,28 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the existing terminal input without replacing or changing the terminal", () => {
+    const state = loadBootstrap();
+    const originalTerm = env.window.term;
+    const originalCurrentLine = state.term.currentLine;
+    const originalHistoryReference = state.term.history;
+    const originalHistory = [...state.term.history];
+
+    env.document.getElementById("terminal-focus").click();
+
+    expect(state.term.focus).toHaveBeenCalledTimes(1);
+    expect(env.document.activeElement).toBe(
+      env.document.querySelector(".xterm-helper-textarea")
+    );
+    expect(env.window.term).toBe(originalTerm);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.term.currentLine).toBe(originalCurrentLine);
+    expect(state.term.history).toBe(originalHistoryReference);
+    expect(state.term.history).toEqual(originalHistory);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
