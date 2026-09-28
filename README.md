@@ -20,6 +20,21 @@ the application bundle: `version` comes from `package.json`, and `buildDate` is
 the build date in `YYYY-MM-DD` form. They are fixed for the deployed bundle and
 are not read or recalculated by the command at runtime.
 
+## Terminal tips
+
+Use the **Terminal tips** button to open a compact, nonmodal reference panel.
+Opening the panel moves keyboard focus to its ordinary search field. Filtering
+matches tip titles and descriptions without changing terminal input; the
+current filter remains in place when the panel is closed and reopened during
+the same page session, and resets on reload.
+
+Close the panel with its **Close** button, by pressing Escape while focus is in
+the panel, or by activating **Terminal tips** again. Each method returns focus
+to the opener. The panel is reference-only: it never inserts or executes a
+command, clears terminal output, changes pending input, recreates the terminal,
+or changes persistent terminal preferences. Terminal Tab completion continues
+to work in the terminal as before.
+
 ## Directory bookmarks
 
 The terminal supports persistent named bookmarks for quick directory navigation:
