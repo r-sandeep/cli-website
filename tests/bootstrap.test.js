@@ -5,8 +5,17 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    clear: vi.fn(),
+    currentLine: "echo q",
+    executeCommandLine: vi.fn(),
+    focus: vi.fn(() => {
+      env.document.querySelector(".xterm-helper-textarea").focus();
+    }),
+    history: ["echo z"],
     loadAddon: vi.fn(),
     open: vi.fn(),
+    reset: vi.fn(),
+    write: vi.fn(),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -38,7 +47,8 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
-          <div id="terminal"></div>
+          <button type="button" id="terminal-focus">Focus terminal</button>
+          <div id="terminal"><textarea class="xterm-helper-textarea"></textarea></div>
         </body>
       </html>
     `,
@@ -104,6 +114,38 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the existing terminal without changing pending input or history", () => {
+    const state = loadBootstrap();
+    const button = env.document.getElementById("terminal-focus");
+    const textarea = env.document.querySelector(".xterm-helper-textarea");
+    const originalHistory = state.term.history;
+
+    const activate = (detail) => {
+      button.dispatchEvent(
+        new env.window.MouseEvent("click", { bubbles: true, detail })
+      );
+
+      expect(env.document.activeElement).toBe(textarea);
+      expect(state.term.currentLine).toBe("echo q");
+      expect(state.term.history).toBe(originalHistory);
+      expect(state.term.history).toEqual(["echo z"]);
+      expect(state.term.executeCommandLine).not.toHaveBeenCalled();
+      expect(state.term.clear).not.toHaveBeenCalled();
+      expect(state.term.reset).not.toHaveBeenCalled();
+      expect(state.term.write).not.toHaveBeenCalled();
+    };
+
+    activate(1); // Mouse activation.
+    activate(0); // Native Enter activation dispatches a click with detail 0.
+    activate(0); // Native Space activation dispatches a click with detail 0.
+
+    expect(state.term.focus).toHaveBeenCalledTimes(3);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.term.open).toHaveBeenCalledTimes(1);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {

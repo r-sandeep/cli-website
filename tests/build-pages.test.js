@@ -858,6 +858,15 @@ describe("index.html", () => {
     expect(doc.querySelector("#aa-all")).not.toBeNull();
     expect(doc.querySelector("#files-all")).not.toBeNull();
   });
+
+  it("includes one native focus control outside the terminal", () => {
+    const buttons = doc.querySelectorAll("button#terminal-focus");
+
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].type).toBe("button");
+    expect(buttons[0].textContent.trim()).toBe("Focus terminal");
+    expect(doc.querySelector("#terminal button#terminal-focus")).toBeNull();
+  });
 });
 
 describe("terminal still reads from config/firm.js", () => {
