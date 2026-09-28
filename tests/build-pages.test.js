@@ -272,6 +272,26 @@ describe("script load order", () => {
     );
   });
 
+  it("the app bundle includes the shared tips model before its consumers", () => {
+    const { appBundleSources, createAppBundleSource } = buildAssetsModule;
+    const tipsIndex = appBundleSources.indexOf("js/terminal-tips.js");
+
+    expect(tipsIndex).toBeGreaterThanOrEqual(0);
+    expect(tipsIndex).toBeLessThan(appBundleSources.indexOf("js/bootstrap.js"));
+    expect(createAppBundleSource()).toContain("// js/terminal-tips.js");
+  });
+
+  it("loads the tips controller after its model and before bootstrap", () => {
+    const { appBundleSources, createAppBundleSource } = buildAssetsModule;
+    const modelIndex = appBundleSources.indexOf("js/terminal-tips.js");
+    const uiIndex = appBundleSources.indexOf("js/terminal-tips-ui.js");
+    const bootstrapIndex = appBundleSources.indexOf("js/bootstrap.js");
+
+    expect(uiIndex).toBeGreaterThan(modelIndex);
+    expect(uiIndex).toBeLessThan(bootstrapIndex);
+    expect(createAppBundleSource()).toContain("// js/terminal-tips-ui.js");
+  });
+
   it("the app bundle loads pipeline helpers before terminal integration", () => {
     const { appBundleSources } = buildAssetsModule;
     expect(appBundleSources).toContain("js/pipeline.js");
@@ -798,6 +818,36 @@ describe("index.html", () => {
     // Matters for screen readers (correct pronunciation) and is a small SEO
     // signal; every generated page has it, so the hand-written shell should too.
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
+  });
+
+  it("provides the labelled, initially hidden Terminal tips controls outside the terminal", () => {
+    const terminal = doc.getElementById("terminal");
+    const toggle = doc.getElementById("terminal-tips-toggle");
+    const panel = doc.getElementById("terminal-tips-panel");
+    const search = doc.getElementById("terminal-tips-search");
+    const results = doc.getElementById("terminal-tips-results");
+    const status = doc.getElementById("terminal-tips-status");
+    const close = doc.getElementById("terminal-tips-close");
+
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.textContent.trim()).toBe("Terminal tips");
+    expect(toggle.getAttribute("aria-controls")).toBe(panel.id);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(terminal.contains(toggle)).toBe(false);
+    expect(terminal.contains(panel)).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(panel.getAttribute("role")).toBe("region");
+    expect(panel.getAttribute("aria-labelledby")).toBe(
+      "terminal-tips-heading"
+    );
+    expect(doc.querySelector('label[for="terminal-tips-search"]')).not.toBeNull();
+    expect(search.tagName).toBe("INPUT");
+    expect(search.type).toBe("search");
+    expect(results).not.toBeNull();
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(close.tagName).toBe("BUTTON");
+    expect(close.textContent.trim()).toBe("Close");
   });
 
   it("uses absolute Open Graph image URLs", () => {
