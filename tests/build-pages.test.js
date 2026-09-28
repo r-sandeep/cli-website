@@ -39,6 +39,22 @@ function parse(content) {
   return new JSDOM(content).window.document;
 }
 
+function expectNamedGeoBootstrapImage(content) {
+  const doc = parse(content);
+  const images = [
+    ...doc.querySelectorAll(
+      'a[href="https://github.com/divshot/geo-bootstrap"] img[src="images/geo/geocities.jpg"]'
+    ),
+  ];
+
+  expect(images).toHaveLength(1);
+  expect(images[0].getAttribute("alt")).toBe("Geo Bootstrap");
+  expect(images[0].parentElement?.getAttribute("href")).toBe(
+    "https://github.com/divshot/geo-bootstrap"
+  );
+  expect(images[0].parentElement?.getAttribute("target")).toBe("_blank");
+}
+
 // "portfolio/zed/index.html" -> "/portfolio/zed/"
 function pathnameFor(filePath) {
   return `/${filePath.replace(/index\.html$/, "")}`;
@@ -253,6 +269,20 @@ describe("script load order", () => {
   it("welcome.htm declares a document language", () => {
     const doc = parse(fs.readFileSync(path.join(REPO_ROOT, "welcome.htm"), "utf8"));
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
+  });
+
+  it("names the Geo Bootstrap image link in the source template", () => {
+    const source = fs.readFileSync(path.join(REPO_ROOT, "welcome.htm"), "utf8");
+    expectNamedGeoBootstrapImage(source);
+  });
+
+  it("names the Geo Bootstrap image link in the built page", async () => {
+    await buildAssetsModule.main(new Date("2026-02-03T23:59:58.000Z"));
+    const built = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/welcome.htm"),
+      "utf8"
+    );
+    expectNamedGeoBootstrapImage(built);
   });
 
   it("the app bundle lists config/firm.js before config/commands.js", () => {
