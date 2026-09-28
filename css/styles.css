@@ -17,7 +17,31 @@ body {
 }
 
 #terminal {
-  height: 100%;
+  height: calc(100% - 60px);
+  min-height: 0;
+}
+
+.terminal-controls {
+  box-sizing: border-box;
+  display: flex;
+  height: 60px;
+  align-items: center;
+  padding: 8px 24px 0;
+}
+
+#terminal-focus {
+  border: 2px solid var(--brand-txt-color);
+  border-radius: 4px;
+  background: var(--brand-bg-color);
+  color: var(--brand-txt-color);
+  cursor: pointer;
+  font: 16px "Abel", sans-serif;
+  padding: 8px 12px;
+}
+
+#terminal-focus:focus-visible {
+  outline: 3px solid #ffd54f;
+  outline-offset: 3px;
 }
 
 /* Headings that are present for screen readers and search engines but take up

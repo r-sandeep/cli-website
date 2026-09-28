@@ -51,6 +51,9 @@
   }
   runRootTerminal(term);
 
+  const terminalFocusButton = document.getElementById("terminal-focus");
+  terminalFocusButton.addEventListener("click", () => term.focus());
+
   window.scheduleIdleTask(() => {
     preloadASCIIArt();
     preloadFiles();
