@@ -5,6 +5,11 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    currentLine: "partially typed command",
+    history: ["help", "portfolio"],
+    focus: vi.fn(() => {
+      env.document.querySelector(".xterm-helper-textarea").focus();
+    }),
     loadAddon: vi.fn(),
     open: vi.fn(),
   };
@@ -38,6 +43,7 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button id="terminal-focus" type="button">Focus terminal</button>
           <div id="terminal"></div>
         </body>
       </html>
@@ -137,5 +143,30 @@ describe("bootstrap", () => {
 
     appendedScripts[1].onload();
     await rickrollPromise;
+  });
+
+  it("focuses the existing terminal input without replacing or restarting it", () => {
+    const state = loadBootstrap();
+    const button = env.document.getElementById("terminal-focus");
+    const helper = env.document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    env.document.getElementById("terminal").appendChild(helper);
+    const originalTerm = env.window.term;
+    const originalHistory = [...state.term.history];
+    const originalLine = state.term.currentLine;
+
+    expect(helper).not.toBeNull();
+    expect(env.document.activeElement).not.toBe(helper);
+
+    button.click();
+
+    expect(env.document.activeElement).toBe(helper);
+    expect(state.term.focus).toHaveBeenCalledTimes(1);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(env.window.term).toBe(originalTerm);
+    expect(state.term.open).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.term.currentLine).toBe(originalLine);
+    expect(state.term.history).toEqual(originalHistory);
   });
 });
