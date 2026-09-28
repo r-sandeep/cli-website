@@ -45,6 +45,8 @@ const appBundleSources = [
   "config/commands.js",
   "config/fs.js",
   "config/jobs.js",
+  "config/terminal-tips.js",
+  "js/terminal-tips-panel.js",
   "js/bootstrap.js",
 ];
 
