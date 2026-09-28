@@ -3,8 +3,9 @@ import { createBrowserEnv } from "./helpers/browser-env";
 
 let env;
 
-function loadTerminalExt(globals = {}) {
+function loadTerminalExt(globals = {}, html) {
   env = createBrowserEnv({
+    html,
     globals: {
       LOGO_TYPE: "ROOT",
       colorText: (text) => text,
@@ -104,6 +105,37 @@ afterEach(() => {
 
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
+
+  it("focuses the existing terminal input without changing terminal state", () => {
+    const { extend } = loadTerminalExt(
+      {},
+      `<!doctype html><html><body>
+        <button id="terminal-focus" type="button">Focus terminal</button>
+        <div id="terminal"><textarea class="xterm-helper-textarea"></textarea></div>
+      </body></html>`
+    );
+    const input = env.document.querySelector(".xterm-helper-textarea");
+    const term = createTerm({
+      focus: vi.fn(() => input.focus()),
+    });
+    extend(term);
+    const command = vi.spyOn(term, "command");
+    term.currentLine = "partially typed";
+    term.history.push("help", "whois root");
+    const historyBefore = [...term.history];
+
+    env.document.getElementById("terminal-focus").click();
+
+    expect(term.focus).toHaveBeenCalledTimes(1);
+    expect(env.document.activeElement).toBe(input);
+    expect(term.currentLine).toBe("partially typed");
+    expect(term.history).toEqual(historyBefore);
+    expect(term.open).not.toHaveBeenCalled();
+    expect(term.reset).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
+  });
 
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
