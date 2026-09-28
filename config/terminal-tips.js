@@ -25,6 +25,4 @@ function filterTerminalTips(query) {
 }
 
 // Dual-mode; see the note in config/firm.js. Inert in a browser.
-if (typeof module !== "undefined") {
-  module.exports = { terminalTips, filterTerminalTips };
-}
+if (typeof module !== "undefined") module.exports = { terminalTips, filterTerminalTips };
