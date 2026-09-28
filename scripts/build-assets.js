@@ -45,6 +45,7 @@ const appBundleSources = [
   "config/commands.js",
   "config/fs.js",
   "config/jobs.js",
+  "js/getting-started.js",
   "js/bootstrap.js",
 ];
 
