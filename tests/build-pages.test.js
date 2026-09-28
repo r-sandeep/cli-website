@@ -279,6 +279,25 @@ describe("script load order", () => {
       appBundleSources.indexOf("js/terminal-ext.js")
     );
   });
+
+  it("loads the Terminal tips model before bootstrap", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/terminal-tips-model.js");
+    expect(appBundleSources.indexOf("js/terminal-tips-model.js")).toBeLessThan(
+      appBundleSources.indexOf("js/bootstrap.js")
+    );
+  });
+
+  it("loads the Terminal tips controller after its model and before bootstrap", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/terminal-tips.js");
+    expect(appBundleSources.indexOf("js/terminal-tips-model.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-tips.js")
+    );
+    expect(appBundleSources.indexOf("js/terminal-tips.js")).toBeLessThan(
+      appBundleSources.indexOf("js/bootstrap.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {
@@ -817,6 +836,28 @@ describe("index.html", () => {
     const h1 = doc.querySelector("h1");
     expect(h1.getAttribute("style")).toBeNull();
     expect(h1.className).toBe("visually-hidden");
+  });
+
+  it("includes the accessible Terminal tips controls outside the terminal", () => {
+    const terminal = doc.querySelector("#terminal");
+    const toggle = doc.querySelector("#terminal-tips-toggle");
+    const panel = doc.querySelector("#terminal-tips-panel");
+    const search = doc.querySelector("#terminal-tips-search");
+    const status = doc.querySelector("#terminal-tips-status");
+
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.textContent.trim()).toBe("Terminal tips");
+    expect(toggle.getAttribute("aria-controls")).toBe(panel.id);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(terminal.contains(toggle)).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(panel.getAttribute("role")).toBe("region");
+    expect(panel.getAttribute("aria-labelledby")).toBe("terminal-tips-title");
+    expect(search.getAttribute("type")).toBe("search");
+    expect(doc.querySelector('label[for="terminal-tips-search"]')).not.toBeNull();
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(doc.querySelector("#terminal-tips-results")).not.toBeNull();
+    expect(doc.querySelector("#terminal-tips-close").tagName).toBe("BUTTON");
   });
 
   it("lists every company and person in the crawlable index block", () => {
