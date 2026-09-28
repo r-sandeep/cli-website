@@ -800,6 +800,40 @@ describe("index.html", () => {
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
   });
 
+  it("includes one native terminal focus button outside the terminal", () => {
+    const buttons = doc.querySelectorAll("button#terminal-focus");
+
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].getAttribute("type")).toBe("button");
+    expect(buttons[0].textContent.trim()).toBe("Focus terminal");
+    expect(buttons[0].parentElement).toBe(doc.body);
+    expect(doc.querySelector("#terminal #terminal-focus")).toBeNull();
+  });
+
+  it("keeps the focus button border box and outline inside a narrow viewport", () => {
+    const styles = fs.readFileSync(
+      path.join(REPO_ROOT, "css", "styles.css"),
+      "utf8"
+    );
+    env = createBrowserEnv({
+      html: `<!doctype html><html><head><style>${styles}</style></head><body><button id="terminal-focus">Focus terminal</button></body></html>`,
+    });
+    Object.defineProperty(env.window, "innerWidth", {
+      configurable: true,
+      value: 80,
+    });
+    const button = env.document.getElementById("terminal-focus");
+
+    button.focus();
+
+    const style = env.window.getComputedStyle(button);
+    expect(style.boxSizing).toBe("border-box");
+    expect(style.maxWidth).toBe("calc(100vw - 16px)");
+    expect(style.right).toBe("8px");
+    expect(style.outline).toBe("3px solid #fff");
+    expect(style.outlineOffset).toBe("2px");
+  });
+
   it("uses absolute Open Graph image URLs", () => {
     for (const selector of [
       'meta[property="og:image"]',
