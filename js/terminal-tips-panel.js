@@ -53,7 +53,12 @@ function initializeTerminalTipsPanel() {
   });
   closeButton.addEventListener("click", dismissPanel);
   panel.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") dismissPanel();
+    if (event.key === "Escape") {
+      // Native search inputs clear themselves on Escape unless the default is
+      // cancelled. Preserve the page-session filter before dismissing.
+      event.preventDefault();
+      dismissPanel();
+    }
   });
   search.addEventListener("input", render);
 

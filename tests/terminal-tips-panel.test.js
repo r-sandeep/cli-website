@@ -124,13 +124,17 @@ describe("Terminal tips panel", () => {
     expect(env.document.activeElement).toBe(controls.toggle);
 
     click(controls.toggle);
-    controls.search.dispatchEvent(
-      new env.window.KeyboardEvent("keydown", { bubbles: true, key: "Escape" })
-    );
+    const escape = new env.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+    controls.search.dispatchEvent(escape);
     expect(controls.panel.hidden).toBe(true);
     expect(controls.toggle.getAttribute("aria-expanded")).toBe("false");
     expect(env.document.activeElement).toBe(controls.toggle);
     expect(controls.search.value).toBe("help");
+    expect(escape.defaultPrevented).toBe(true);
   });
 
   it("keeps terminal and preference state untouched through repeated cycles", () => {
