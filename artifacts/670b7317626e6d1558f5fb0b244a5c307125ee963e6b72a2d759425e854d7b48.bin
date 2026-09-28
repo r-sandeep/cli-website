@@ -1,0 +1,19 @@
+
+> rootvc-cli-website@0.1.0 build
+> node scripts/build-assets.js
+
+static assets: 12 paths copied
+css/xterm.css copied
+js/xterm.js: 289255 -> 288555 bytes
+js/addon-fit.js: 1497 -> 1446 bytes
+js/addon-web-links.js: 3090 -> 3042 bytes
+js/aalib.js: 33005 -> 32686 bytes
+js/app.bundle.js: 141645 -> 73199 bytes
+js/rickroll.min.js: 278904 -> 260158 bytes
+crawlable surface: 6 files
+
+npm notice
+npm notice New minor version of npm available! 11.12.1 -> 11.20.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.20.0
+npm notice To update run: npm install -g npm@11.20.0
+npm notice
