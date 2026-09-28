@@ -11,6 +11,7 @@ const shortcuts = {
 
 const help = {
   "%help%": "list all commands (you're looking at it)",
+  "%helpsearch% [query]": "search public commands by name or description",
   "%version% [--json]": "show the terminal version and build date",
   "%alias% [name[=value]]": "define, list, or query command aliases",
   "%unalias% name": "remove a command alias",
@@ -47,3 +48,6 @@ const help = {
   "%upgrade%": "upgrade to the latest version of Root Ventures",
   "%other%": "try your fav commands (e.g. %ls%, %groups%, %su%)",
 };
+
+// Dual-mode; see the note in config/firm.js. Inert in a browser.
+if (typeof module !== "undefined") module.exports = { help, shortcuts };

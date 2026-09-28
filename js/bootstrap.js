@@ -41,6 +41,7 @@
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
   extend(term);
+  initializeCommandExplorer(term);
   window.deepLinkAssetPromise = Promise.resolve();
   if (term.deepLink) {
     window.deepLinkAssetPromise = term.preloadCommandAssets(term.deepLink).catch(

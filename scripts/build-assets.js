@@ -38,6 +38,7 @@ const appBundleSources = [
   "js/terminal-ext.js",
   "js/ascii-art.js",
   "config/help.js",
+  "config/public-commands.js",
   "config/firm.js",
   "config/portfolio.js",
   "config/team.js",
@@ -45,6 +46,7 @@ const appBundleSources = [
   "config/commands.js",
   "config/fs.js",
   "config/jobs.js",
+  "js/command-explorer.js",
   "js/bootstrap.js",
 ];
 

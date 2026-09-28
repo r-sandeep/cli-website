@@ -1,6 +1,13 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Command search
+
+Run `helpsearch [query]` to search public command names and descriptions. Query
+words are joined with spaces and matched case-insensitively as literal text. Run
+`helpsearch` without a query to list every public command alphabetically, or
+`man helpsearch` for the terminal manual.
+
 ## Terminal version
 
 Run `version` to print the human-readable build identity:
@@ -77,6 +84,7 @@ Run `man shortcuts` in the terminal to view the same reference.
 
 ## Basic Commands
   - help: list all commands
+  - helpsearch [query]: search public commands by name or description
   - version [--json]: show the terminal version and build date
   - alias [name[=value]]: define, list, or query command aliases
   - unalias name: remove a command alias

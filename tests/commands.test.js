@@ -3,6 +3,7 @@ import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 const commandSource = readFileSync("config/commands.js", "utf8");
+const publicCommandSource = readFileSync("config/public-commands.js", "utf8");
 const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
@@ -184,6 +185,7 @@ function loadCommands({
     window: { location },
   });
   vm.runInContext(bookmarkSource, context);
+  vm.runInContext(publicCommandSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
   // Redirecting commands preserve their prepared argument arrays when they
@@ -196,6 +198,43 @@ function loadCommands({
   });
   return { commands, location, storage, term };
 }
+
+describe("helpsearch", () => {
+  it("joins query arguments and matches mixed-case command descriptions", () => {
+    const { commands, term } = loadCommands();
+
+    commands.helpsearch(["TeRmInAl", "VeRsIoN"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "version — show the terminal version and build date",
+    ]);
+
+    term.stylePrint.mockClear();
+    commands.helpsearch(["ReAcH", "OuT"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "email — reach out to us",
+    ]);
+  });
+
+  it("lists every public command alphabetically when the query is empty", () => {
+    const { commands, term } = loadCommands();
+
+    commands.helpsearch([]);
+
+    const names = term.stylePrint.mock.calls.map(([line]) => line.split(" — ")[0]);
+    expect(names).toContain("helpsearch");
+    expect(names).toEqual([...names].sort());
+    expect(names).toHaveLength(new Set(names).size);
+  });
+
+  it("prints the exact empty state for an unknown literal query", () => {
+    const { commands, term } = loadCommands();
+
+    commands.helpsearch(["[unknown]*"]);
+
+    expect(term.stylePrint).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith("No matching commands");
+  });
+});
 
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {
@@ -842,6 +881,18 @@ describe("bookmark and go", () => {
 });
 
 describe("man", () => {
+  it("documents helpsearch without delegating", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["helpsearch"]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output).toContain("Usage: helpsearch [query]");
+    expect(output.join("\n")).toContain("name or description");
+    expect(output.join("\n")).toContain("list every public command alphabetically");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
   it("documents both version output forms without delegating", () => {
     const { commands, term } = loadCommands();
 
@@ -918,6 +969,26 @@ describe("help stays in sync with commands", () => {
       (name) => typeof commands[name] !== "function"
     );
     expect(missing).toEqual([]);
+  });
+
+  it("advertises helpsearch while preserving prior help entries", () => {
+    const readme = readFileSync("README.md", "utf8");
+    expect(readme).toContain("Run `helpsearch [query]`");
+    expect(readme).toContain("`man helpsearch`");
+    expect(readme).toContain("helpsearch [query]: search public commands by name or description");
+
+    expect(helpContext.helpEntries).toMatchObject({
+      "%help%": "list all commands (you're looking at it)",
+      "%helpsearch% [query]": "search public commands by name or description",
+      "%version% [--json]": "show the terminal version and build date",
+      "%alias% [name[=value]]": "define, list, or query command aliases",
+    });
+
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help([]);
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain("%helpsearch% [query]");
+    expect(output).toContain("%version% [--json]");
   });
 
   it("advertises alias and unalias with their supported syntax", () => {
