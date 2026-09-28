@@ -40,3 +40,46 @@ body {
   --brand-txt-color: #fff;
   --brand-link-color: #fff;
 }
+
+#getting-started-toggle,
+#getting-started-close {
+  color: var(--brand-txt-color);
+  background: var(--brand-bg-color);
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 3px;
+  font: inherit;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+#getting-started-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+}
+
+#getting-started-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 58px;
+  z-index: 2;
+  box-sizing: border-box;
+  width: min(280px, calc(100% - 32px));
+  padding: 12px;
+  color: var(--brand-txt-color);
+  background: var(--brand-bg-color);
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 3px;
+}
+
+#getting-started-panel h2,
+#getting-started-panel p {
+  margin: 0 0 10px;
+}
+
+#getting-started-toggle:focus-visible,
+#getting-started-close:focus-visible {
+  outline: 3px solid var(--brand-txt-color);
+  outline-offset: 3px;
+}

@@ -789,6 +789,34 @@ describe("index.html", () => {
   const html = fileNamed("index.html");
   const doc = parse(html);
 
+  it("includes the initially collapsed Getting started controls outside the terminal", () => {
+    const terminal = doc.querySelector("#terminal");
+    const toggle = doc.querySelector("#getting-started-toggle");
+    const panel = doc.querySelector("#getting-started-panel");
+    const title = doc.querySelector("#getting-started-title");
+    const close = doc.querySelector("#getting-started-close");
+
+    expect(toggle?.tagName).toBe("BUTTON");
+    expect(toggle?.textContent.trim()).toBe("Getting started");
+    expect(toggle?.getAttribute("type")).toBe("button");
+    expect(toggle?.getAttribute("aria-controls")).toBe("getting-started-panel");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.getAttribute("role")).toBe("dialog");
+    expect(panel?.getAttribute("aria-modal")).toBe("false");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("getting-started-title");
+    expect(title?.textContent).toBe("Getting started");
+    expect(panel?.textContent).toContain("Type help");
+    expect(close?.tagName).toBe("BUTTON");
+    expect(close?.getAttribute("type")).toBe("button");
+    expect(close?.textContent).toBe("Close");
+
+    expect(toggle?.parentElement).toBe(panel?.parentElement);
+    expect(terminal?.contains(toggle)).toBe(false);
+    expect(terminal?.contains(panel)).toBe(false);
+  });
+
   it("declares the apex canonical", () => {
     expect(doc.querySelector('link[rel="canonical"]').href).toBe(`${ORIGIN}/`);
     expect(doc.querySelector('meta[property="og:url"]').content).toBe(`${ORIGIN}/`);
