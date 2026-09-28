@@ -20,6 +20,14 @@ the application bundle: `version` comes from `package.json`, and `buildDate` is
 the build date in `YYYY-MM-DD` form. They are fixed for the deployed bundle and
 are not read or recalculated by the command at runtime.
 
+## Terminal tips
+
+Use the **Terminal tips** button to open a searchable reference for the existing
+`help`, `version`, and `man shortcuts` commands. The panel displays plain text
+only: opening, filtering, and closing it do not run commands, alter pending
+terminal input or output, or change persistent terminal preferences. The current
+filter is kept while the page remains loaded and resets on reload.
+
 ## Directory bookmarks
 
 The terminal supports persistent named bookmarks for quick directory navigation:

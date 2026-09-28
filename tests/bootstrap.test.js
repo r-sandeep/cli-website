@@ -18,6 +18,7 @@ function loadBootstrap(overrides = {}) {
   const runRootTerminal = vi.fn();
   const preloadASCIIArt = vi.fn();
   const preloadFiles = vi.fn();
+  const initializeTerminalTipsPanel = vi.fn();
   const idleCalls = [];
   const requestIdleCallback = vi.fn((task, options) => {
     idleCalls.push({ options, task });
@@ -45,6 +46,7 @@ function loadBootstrap(overrides = {}) {
     url: "https://www.root.vc/#whois-lee",
     globals: {
       FitAddon: { FitAddon: FitAddonCtor },
+      initializeTerminalTipsPanel,
       Terminal,
       WebLinksAddon: { WebLinksAddon: WebLinksAddonCtor },
       extend,
@@ -62,6 +64,7 @@ function loadBootstrap(overrides = {}) {
     extend,
     fitAddon,
     idleCalls,
+    initializeTerminalTipsPanel,
     preloadASCIIArt,
     preloadCommandAssets,
     preloadFiles,
@@ -97,6 +100,7 @@ describe("bootstrap", () => {
     expect(state.extend).toHaveBeenCalledWith(state.term);
     expect(state.preloadCommandAssets).toHaveBeenCalledWith("whois lee");
     expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
+    expect(state.initializeTerminalTipsPanel).toHaveBeenCalledTimes(1);
     expect(state.idleCalls).toHaveLength(1);
     expect(state.idleCalls[0].options).toEqual({ timeout: 1500 });
 

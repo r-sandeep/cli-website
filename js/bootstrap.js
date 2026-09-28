@@ -29,6 +29,8 @@
   window.ensureAALibLoaded = () => loadOptionalScript("js/aalib.js");
   window.ensureRickRollLoaded = () => loadOptionalScript("js/rickroll.min.js");
 
+  initializeTerminalTipsPanel();
+
   const terminalElement = document.getElementById("terminal");
   const term = new Terminal({ cursorBlink: true });
   const fitAddon = new FitAddon.FitAddon();

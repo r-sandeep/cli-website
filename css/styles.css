@@ -20,6 +20,94 @@ body {
   height: 100%;
 }
 
+.terminal-tips-toggle,
+.terminal-tips-panel button,
+.terminal-tips-panel input {
+  color: var(--brand-txt-color);
+  background: var(--brand-bg-color);
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 3px;
+  font: inherit;
+}
+
+.terminal-tips-toggle {
+  position: fixed;
+  z-index: 3;
+  top: 10px;
+  right: 12px;
+  padding: 5px 9px;
+}
+
+.terminal-tips-panel {
+  position: fixed;
+  z-index: 2;
+  top: 48px;
+  right: 12px;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, 55vh);
+  overflow: auto;
+  padding: 12px;
+  color: var(--brand-txt-color);
+  background: var(--brand-bg-color);
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 4px;
+}
+
+.terminal-tips-panel[hidden] {
+  display: none;
+}
+
+.terminal-tips-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terminal-tips-header h2,
+#terminal-tips-status {
+  margin: 0 0 8px;
+}
+
+.terminal-tips-panel label,
+.terminal-tips-panel input {
+  display: block;
+}
+
+.terminal-tips-panel input {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 4px 0 8px;
+  padding: 5px;
+}
+
+.terminal-tips-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.terminal-tips-list li + li {
+  margin-top: 7px;
+}
+
+.terminal-tips-toggle:focus-visible,
+.terminal-tips-panel button:focus-visible,
+.terminal-tips-panel input:focus-visible {
+  outline: 3px solid #ffd54a;
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .terminal {
+    padding: 16px;
+  }
+
+  .terminal-tips-panel {
+    max-height: 50vh;
+  }
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */

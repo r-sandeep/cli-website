@@ -272,6 +272,17 @@ describe("script load order", () => {
     );
   });
 
+  it("loads the tips model and controller in dependency order before bootstrap", () => {
+    const { appBundleSources } = buildAssetsModule;
+    const model = appBundleSources.indexOf("config/terminal-tips.js");
+    const controller = appBundleSources.indexOf("js/terminal-tips-panel.js");
+    const bootstrap = appBundleSources.indexOf("js/bootstrap.js");
+
+    expect(model).toBeGreaterThanOrEqual(0);
+    expect(controller).toBeGreaterThan(model);
+    expect(bootstrap).toBeGreaterThan(controller);
+  });
+
   it("the app bundle loads pipeline helpers before terminal integration", () => {
     const { appBundleSources } = buildAssetsModule;
     expect(appBundleSources).toContain("js/pipeline.js");
@@ -798,6 +809,31 @@ describe("index.html", () => {
     // Matters for screen readers (correct pronunciation) and is a small SEO
     // signal; every generated page has it, so the hand-written shell should too.
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
+  });
+
+  it("contains the labelled, initially hidden Terminal tips controls outside the terminal", () => {
+    const terminal = doc.querySelector("#terminal");
+    const toggle = doc.querySelector("#terminal-tips-toggle");
+    const panel = doc.querySelector("#terminal-tips-panel");
+    const search = doc.querySelector("#terminal-tips-search");
+    const status = doc.querySelector("#terminal-tips-status");
+    const close = doc.querySelector("#terminal-tips-close");
+
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.textContent.trim()).toBe("Terminal tips");
+    expect(toggle.getAttribute("aria-controls")).toBe(panel.id);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(terminal.contains(toggle)).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(panel.getAttribute("role")).toBe("region");
+    expect(panel.getAttribute("aria-labelledby")).toBe("terminal-tips-title");
+    expect(search.tagName).toBe("INPUT");
+    expect(search.type).toBe("search");
+    expect(doc.querySelector('label[for="terminal-tips-search"]')).not.toBeNull();
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(close.tagName).toBe("BUTTON");
+    expect(close.textContent.trim()).toBe("Close");
   });
 
   it("uses absolute Open Graph image URLs", () => {
