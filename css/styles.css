@@ -40,3 +40,115 @@ body {
   --brand-txt-color: #fff;
   --brand-link-color: #fff;
 }
+
+.command-explorer-toggle,
+.command-explorer-panel button,
+.command-explorer-panel input {
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #2c2c2c;
+  color: var(--brand-txt-color);
+  font: 14px "Source Code Pro", monospace;
+}
+
+.command-explorer-toggle {
+  position: fixed;
+  top: 8px;
+  right: 16px;
+  z-index: 3;
+  padding: 5px 8px;
+}
+
+.command-explorer-panel {
+  position: fixed;
+  top: 42px;
+  right: 16px;
+  z-index: 3;
+  box-sizing: border-box;
+  width: min(30rem, calc(100vw - 32px));
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  padding: 10px;
+  background: #2c2c2c;
+  color: var(--brand-txt-color);
+  font: 14px "Source Code Pro", monospace;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 45%);
+}
+
+.command-explorer-panel[hidden] {
+  display: none;
+}
+
+.command-explorer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.command-explorer-heading h2,
+#command-explorer-status {
+  margin: 0;
+  font-size: 14px;
+}
+
+.command-explorer-panel label {
+  display: block;
+  margin-top: 8px;
+}
+
+#command-explorer-search {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 4px;
+  padding: 5px 6px;
+}
+
+#command-explorer-status {
+  min-height: 1.4em;
+  margin-top: 7px;
+}
+
+#command-explorer-results {
+  display: grid;
+  gap: 5px;
+}
+
+.command-explorer-result {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.command-explorer-result-description {
+  color: #ddd;
+}
+
+.command-explorer-toggle:focus-visible,
+.command-explorer-panel button:focus-visible,
+.command-explorer-panel input:focus-visible {
+  outline: 3px solid #ffdf65;
+  outline-offset: 2px;
+}
+
+@media (max-width: 520px) {
+  .command-explorer-toggle {
+    right: 8px;
+  }
+
+  .command-explorer-panel {
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-height: 60vh;
+  }
+
+  .command-explorer-result {
+    grid-template-columns: 1fr;
+  }
+}

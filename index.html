@@ -78,6 +78,34 @@
 
       <div id="aa-all" style="display: none;"></div>
       <div id="files-all" style="display: none;"></div>
+      <button
+        id="command-explorer-toggle"
+        class="command-explorer-toggle"
+        type="button"
+        aria-controls="command-explorer-panel"
+        aria-expanded="false"
+      >Command explorer</button>
+      <section
+        id="command-explorer-panel"
+        class="command-explorer-panel"
+        aria-labelledby="command-explorer-title"
+        hidden
+      >
+        <div class="command-explorer-heading">
+          <h2 id="command-explorer-title">Command explorer</h2>
+          <button id="command-explorer-close" type="button">Close</button>
+        </div>
+        <label for="command-explorer-search">Search commands</label>
+        <input
+          id="command-explorer-search"
+          type="search"
+          autocomplete="off"
+          aria-controls="command-explorer-results"
+          aria-describedby="command-explorer-status"
+        />
+        <p id="command-explorer-status" role="status" aria-live="polite"></p>
+        <div id="command-explorer-results" aria-label="Command results"></div>
+      </section>
       <div id="terminal"></div>
     </body>
   </html>

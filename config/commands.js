@@ -124,6 +124,18 @@ const commands = {
     });
   },
 
+  // Searches the shared catalog derived from help.js.
+  helpsearch: function (args) {
+    const matches = searchPublicCommands(args.join(" "));
+    if (matches.length === 0) {
+      term.stylePrint("No matching commands");
+      return;
+    }
+    matches.forEach(function (command) {
+      term.stylePrint(`${command.name} — ${command.description}`);
+    });
+  },
+
   // Prints the metadata fixed into the application bundle by build-assets.js.
   version: function (args) {
     if (args.length !== 0 && !(args.length === 1 && args[0] === "--json")) {
@@ -1304,6 +1316,13 @@ commands.man = function (args) {
   if (args.length === 1 && topic === "unalias") {
     term.stylePrint("unalias: remove a command alias - usage:");
     term.stylePrint("%unalias% name");
+    return;
+  }
+  if (args.length === 1 && topic === "helpsearch") {
+    term.stylePrint("helpsearch — search public commands by name or description");
+    term.stylePrint("Usage: helpsearch [query]");
+    term.stylePrint("Query words are joined with spaces and matched case-insensitively as literal text.");
+    term.stylePrint("With no query, list every public command alphabetically.");
     return;
   }
   if (args.length === 1 && topic === "version") {
