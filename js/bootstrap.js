@@ -51,6 +51,31 @@
   }
   runRootTerminal(term);
 
+  const gettingStartedToggle = document.getElementById(
+    "getting-started-toggle"
+  );
+  const gettingStartedPanel = document.getElementById("getting-started-panel");
+  const gettingStartedClose = document.getElementById("getting-started-close");
+
+  function setGettingStartedOpen(open) {
+    gettingStartedPanel.hidden = !open;
+    gettingStartedToggle.setAttribute("aria-expanded", String(open));
+    (open ? gettingStartedClose : gettingStartedToggle).focus();
+  }
+
+  gettingStartedToggle.addEventListener("click", () => {
+    setGettingStartedOpen(gettingStartedPanel.hidden);
+  });
+  gettingStartedClose.addEventListener("click", () => {
+    setGettingStartedOpen(false);
+  });
+  gettingStartedPanel.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !gettingStartedPanel.hidden) {
+      event.preventDefault();
+      setGettingStartedOpen(false);
+    }
+  });
+
   window.scheduleIdleTask(() => {
     preloadASCIIArt();
     preloadFiles();
