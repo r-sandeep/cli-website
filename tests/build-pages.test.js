@@ -789,6 +789,47 @@ describe("index.html", () => {
   const html = fileNamed("index.html");
   const doc = parse(html);
 
+  it("includes the static Getting started panel contract", () => {
+    const toggle = doc.querySelector("#getting-started-toggle");
+    const panel = doc.querySelector("#getting-started-panel");
+    const title = doc.querySelector("#getting-started-title");
+    const close = doc.querySelector("#getting-started-close");
+
+    expect(toggle?.tagName).toBe("BUTTON");
+    expect(toggle?.textContent.trim()).toBe("Getting started");
+    expect(toggle?.hidden).toBe(false);
+    expect(toggle?.getAttribute("aria-controls")).toBe(panel?.id);
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    expect(panel?.tagName).toBe("SECTION");
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.getAttribute("role")).toBe("region");
+    expect(panel?.hasAttribute("aria-modal")).toBe(false);
+    expect(panel?.getAttribute("aria-labelledby")).toBe(title?.id);
+    expect(title?.textContent.trim()).toBe("Getting started");
+    expect(panel?.textContent).toContain("Type help");
+    expect(close?.tagName).toBe("BUTTON");
+    expect(close?.textContent.trim()).toBe("Close");
+  });
+
+  it("keeps the panel controls beside rather than inside the terminal", () => {
+    const terminal = doc.querySelector("#terminal");
+    const toggle = doc.querySelector("#getting-started-toggle");
+    const panel = doc.querySelector("#getting-started-panel");
+
+    expect(terminal?.contains(toggle)).toBe(false);
+    expect(terminal?.contains(panel)).toBe(false);
+    expect(toggle?.parentElement).toBe(terminal?.parentElement);
+    expect(panel?.parentElement).toBe(terminal?.parentElement);
+
+    const generatedBlock = html.slice(
+      html.indexOf("BEGIN generated-index"),
+      html.indexOf("END generated-index")
+    );
+    expect(generatedBlock).not.toContain("getting-started-toggle");
+    expect(generatedBlock).not.toContain("getting-started-panel");
+  });
+
   it("declares the apex canonical", () => {
     expect(doc.querySelector('link[rel="canonical"]').href).toBe(`${ORIGIN}/`);
     expect(doc.querySelector('meta[property="og:url"]').content).toBe(`${ORIGIN}/`);
@@ -857,6 +898,33 @@ describe("index.html", () => {
     expect(doc.querySelector("#terminal")).not.toBeNull();
     expect(doc.querySelector("#aa-all")).not.toBeNull();
     expect(doc.querySelector("#files-all")).not.toBeNull();
+  });
+});
+
+describe("Getting started styles", () => {
+  const css = fs.readFileSync(path.join(REPO_ROOT, "css/styles.css"), "utf8");
+  const styleDoc = new JSDOM(`<style>${css}</style>`).window.document;
+  const rules = Array.from(styleDoc.styleSheets[0].cssRules);
+  const ruleFor = (selector) =>
+    rules.find((rule) => rule.selectorText === selector)?.style;
+
+  it("positions the compact controls without changing terminal layout", () => {
+    expect(ruleFor("#getting-started-toggle")?.position).toBe("fixed");
+    expect(ruleFor("#getting-started-panel")?.position).toBe("fixed");
+    expect(ruleFor("#getting-started-panel")?.width).toBe("calc(100vw - 48px)");
+    expect(ruleFor("#getting-started-panel")?.maxWidth).toBe("240px");
+    expect(
+      ruleFor("#getting-started-toggle,\n#getting-started-close")?.padding
+    ).toBe("4px 8px");
+    expect(ruleFor("#terminal")?.height).toBe("100%");
+  });
+
+  it("gives both buttons a visible focus-visible outline", () => {
+    const focusRule = ruleFor(
+      "#getting-started-toggle:focus-visible,\n#getting-started-close:focus-visible"
+    );
+    expect(focusRule?.outline).toBe("3px solid #fff");
+    expect(focusRule?.outlineOffset).toBe("3px");
   });
 });
 
