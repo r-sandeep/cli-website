@@ -39,6 +39,48 @@ function parse(content) {
   return new JSDOM(content).window.document;
 }
 
+function expectGettingStartedMarkup(doc) {
+  const terminal = doc.querySelector("#terminal");
+  const toggle = doc.querySelector("#getting-started-toggle");
+  const panel = doc.querySelector("#getting-started-panel");
+  const title = doc.querySelector("#getting-started-title");
+  const close = doc.querySelector("#getting-started-close");
+
+  expect(doc.querySelectorAll("#getting-started-toggle")).toHaveLength(1);
+  expect(toggle.tagName).toBe("BUTTON");
+  expect(toggle.type).toBe("button");
+  expect(toggle.hidden).toBe(false);
+  expect(toggle.textContent.trim()).toBe("Getting started");
+  expect(toggle.getAttribute("aria-controls")).toBe("getting-started-panel");
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+  expect(doc.querySelectorAll("#getting-started-panel")).toHaveLength(1);
+  expect(doc.querySelectorAll("#getting-started-title")).toHaveLength(1);
+  expect(doc.querySelectorAll("#getting-started-close")).toHaveLength(1);
+  expect(panel.hidden).toBe(true);
+  expect(panel.getAttribute("role")).toBe("dialog");
+  expect(panel.getAttribute("aria-modal")).toBe("false");
+  expect(panel.getAttribute("aria-labelledby")).toBe("getting-started-title");
+  expect(title.textContent.trim()).toBe("Getting started");
+  expect(title.hidden).toBe(false);
+  expect(title.className).toBe("");
+  expect(panel.textContent).toContain("Type help");
+  expect(panel.contains(title)).toBe(true);
+
+  expect(close.tagName).toBe("BUTTON");
+  expect(close.type).toBe("button");
+  expect(close.textContent.trim()).toBe("Close");
+  expect(panel.contains(close)).toBe(true);
+
+  expect(terminal.parentElement).toBe(doc.body);
+  expect(toggle.parentElement).toBe(doc.body);
+  expect(panel.parentElement).toBe(doc.body);
+  expect(terminal.contains(toggle)).toBe(false);
+  expect(terminal.contains(panel)).toBe(false);
+  expect(terminal.nextElementSibling).toBe(toggle);
+  expect(toggle.nextElementSibling).toBe(panel);
+}
+
 // "portfolio/zed/index.html" -> "/portfolio/zed/"
 function pathnameFor(filePath) {
   return `/${filePath.replace(/index\.html$/, "")}`;
@@ -513,6 +555,18 @@ describe("JSON-LD", () => {
     expect(person.worksFor["@id"]).toBe(`${ORIGIN}/#organization`);
     // The node's url is where root.vc actually shows this person.
     expect(person.url).toBe(`${ORIGIN}${deepLink(COMMANDS.person(slug))}`);
+  });
+});
+
+describe("Getting started markup", () => {
+  const template = fs.readFileSync(path.join(REPO_ROOT, "index.html"), "utf8");
+
+  it("has the exact accessible controls in the committed template", () => {
+    expectGettingStartedMarkup(parse(template));
+  });
+
+  it("preserves the exact accessible controls in the emitted homepage", () => {
+    expectGettingStartedMarkup(parse(fileNamed("index.html")));
   });
 });
 
