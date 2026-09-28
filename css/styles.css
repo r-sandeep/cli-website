@@ -20,6 +20,60 @@ body {
   height: 100%;
 }
 
+#getting-started-toggle,
+#getting-started-panel {
+  position: fixed;
+  right: 16px;
+  z-index: 1;
+  box-sizing: border-box;
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 3px;
+  background: var(--brand-bg-color);
+  color: var(--brand-txt-color);
+  font: 14px "Source Code Pro", monospace;
+}
+
+#getting-started-toggle {
+  top: 16px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+#getting-started-panel {
+  top: 52px;
+  width: min(280px, calc(100% - 32px));
+  padding: 12px;
+}
+
+#getting-started-panel[hidden] {
+  display: none;
+}
+
+#getting-started-panel h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+#getting-started-panel p {
+  margin: 0 0 10px;
+}
+
+#getting-started-close {
+  border: 1px solid var(--brand-txt-color);
+  border-radius: 3px;
+  padding: 4px 8px;
+  background: var(--brand-bg-color);
+  color: var(--brand-txt-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+#getting-started-toggle:focus-visible,
+#getting-started-close:focus-visible {
+  outline: 3px solid var(--brand-txt-color);
+  outline-offset: 2px;
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */
