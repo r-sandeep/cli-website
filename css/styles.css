@@ -20,6 +20,107 @@ body {
   height: 100%;
 }
 
+.terminal-settings-toggle,
+.terminal-settings-panel {
+  position: fixed;
+  right: 16px;
+  z-index: 10;
+  color: var(--brand-txt-color);
+  background: #202020;
+  border: 1px solid #777;
+  border-radius: 4px;
+  font: 16px "Abel", sans-serif;
+}
+
+.terminal-settings-toggle {
+  top: 12px;
+  padding: 7px 11px;
+  cursor: pointer;
+}
+
+.terminal-settings-toggle:hover,
+.terminal-settings-toggle:focus-visible,
+.terminal-settings-panel button:focus-visible,
+.terminal-settings-panel input:focus-visible {
+  outline: 2px solid var(--brand-link-color);
+  outline-offset: 2px;
+}
+
+.terminal-settings-panel {
+  top: 54px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(5rem, 1fr);
+  gap: 10px 12px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 70px);
+  padding: 16px;
+  overflow: auto;
+  box-shadow: 0 5px 18px rgb(0 0 0 / 45%);
+}
+
+.terminal-settings-panel[hidden] {
+  display: none;
+}
+
+.terminal-settings-panel h2,
+.terminal-settings-actions,
+.terminal-settings-status,
+.terminal-settings-checkbox {
+  grid-column: 1 / -1;
+}
+
+.terminal-settings-panel h2,
+.terminal-settings-status {
+  margin: 0;
+}
+
+.terminal-settings-panel input[type="number"] {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+
+.terminal-settings-checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.terminal-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.terminal-settings-actions button {
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.terminal-settings-status {
+  min-height: 1.2em;
+}
+
+.terminal-settings-status[data-state="error"] {
+  color: #ffb4b4;
+}
+
+@media (max-width: 480px) {
+  .terminal-settings-toggle,
+  .terminal-settings-panel {
+    right: 8px;
+  }
+
+  .terminal-settings-panel {
+    top: 50px;
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 58px);
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */

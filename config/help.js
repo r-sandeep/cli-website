@@ -43,6 +43,7 @@ const help = {
   "%export% NAME=value": "store a variable; without arguments, list all variables sorted by name",
   "%env%": "list all stored variables as NAME=value sorted by name",
   "%unset% NAME": "remove a stored variable",
+  "%preferences% [set font-size N|set cursor-blink on|off|set screen-reader on|off|reset --confirm]": "show or update persistent terminal preferences",
   "%man% export|env|unset": "command manuals; arguments expand with $NAME or ${NAME}, undefined names become empty, and \\$NAME escapes expansion",
   "%test%": "do not use",
   "%upgrade%": "upgrade to the latest version of Root Ventures",
