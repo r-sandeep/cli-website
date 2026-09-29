@@ -789,6 +789,15 @@ describe("index.html", () => {
   const html = fileNamed("index.html");
   const doc = parse(html);
 
+  it("keeps the native terminal focus control outside the terminal", () => {
+    const buttons = doc.querySelectorAll("#terminal-focus");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].tagName).toBe("BUTTON");
+    expect(buttons[0].type).toBe("button");
+    expect(buttons[0].textContent).toBe("Focus terminal");
+    expect(doc.getElementById("terminal").contains(buttons[0])).toBe(false);
+  });
+
   it("declares the apex canonical", () => {
     expect(doc.querySelector('link[rel="canonical"]').href).toBe(`${ORIGIN}/`);
     expect(doc.querySelector('meta[property="og:url"]').content).toBe(`${ORIGIN}/`);

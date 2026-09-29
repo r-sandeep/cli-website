@@ -39,6 +39,11 @@ const _parseCommandLine = (line) => {
 
 const extend = (term) => {
 
+  const focusButton = document.getElementById("terminal-focus");
+  if (focusButton) {
+    focusButton.addEventListener("click", () => term.focus());
+  }
+
   // ── State ──────────────────────────────────────────────────────────────────
 
   term.VERSION = term.VERSION || 3;  // bumped to 4 by `upgrade`

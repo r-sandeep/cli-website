@@ -94,6 +94,8 @@ describe("bootstrap", () => {
       2,
       state.webLinksAddon
     );
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(env.window.term).toBe(state.term);
     expect(state.extend).toHaveBeenCalledWith(state.term);
     expect(state.preloadCommandAssets).toHaveBeenCalledWith("whois lee");
     expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
