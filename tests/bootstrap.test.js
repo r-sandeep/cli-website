@@ -5,9 +5,15 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    focus: vi.fn(() => env.document.querySelector(".xterm-helper-textarea").focus()),
     loadAddon: vi.fn(),
     open: vi.fn(),
   };
+  term.open.mockImplementation((element) => {
+    const helper = env.document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    element.appendChild(helper);
+  });
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
   const preloadCommandAssets = vi.fn(() => Promise.resolve());
@@ -38,6 +44,7 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button type="button" id="terminal-focus">Focus terminal</button>
           <div id="terminal"></div>
         </body>
       </html>
@@ -104,6 +111,40 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the existing terminal input without restarting or changing terminal state", () => {
+    const state = loadBootstrap();
+    const originalTerm = env.window.term;
+    const button = env.document.getElementById("terminal-focus");
+    const helper = env.document.querySelector(".xterm-helper-textarea");
+
+    state.term.currentLine = "partially typed command";
+    state.term.history = ["help", "portfolio"];
+    helper.value = "partially typed command";
+    button.click();
+
+    expect(env.document.activeElement).toBe(helper);
+    expect(state.term.focus).toHaveBeenCalledTimes(1);
+    expect(env.window.term).toBe(originalTerm);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.term.currentLine).toBe("partially typed command");
+    expect(state.term.history).toEqual(["help", "portfolio"]);
+    expect(helper.value).toBe("partially typed command");
+
+    button.click();
+
+    expect(env.document.activeElement).toBe(helper);
+    expect(state.term.focus).toHaveBeenCalledTimes(2);
+    expect(env.window.term).toBe(originalTerm);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.term.currentLine).toBe("partially typed command");
+    expect(state.term.history).toEqual(["help", "portfolio"]);
+    expect(helper.value).toBe("partially typed command");
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
