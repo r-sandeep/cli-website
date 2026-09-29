@@ -4,9 +4,11 @@ import { createBrowserEnv } from "./helpers/browser-env";
 let env;
 
 function loadBootstrap(overrides = {}) {
+  const terminalStateSentinel = { output: "existing terminal state" };
   const term = {
     loadAddon: vi.fn(),
     open: vi.fn(),
+    terminalStateSentinel,
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -39,6 +41,23 @@ function loadBootstrap(overrides = {}) {
         <head></head>
         <body>
           <div id="terminal"></div>
+          <button
+            id="getting-started-toggle"
+            type="button"
+            aria-controls="getting-started-panel"
+            aria-expanded="false"
+          >Getting started</button>
+          <section
+            id="getting-started-panel"
+            role="dialog"
+            aria-modal="false"
+            aria-labelledby="getting-started-title"
+            hidden
+          >
+            <h2 id="getting-started-title">Getting started</h2>
+            <p>Type help in the terminal to see available commands.</p>
+            <button id="getting-started-close" type="button">Close</button>
+          </section>
         </body>
       </html>
     `,
@@ -68,6 +87,7 @@ function loadBootstrap(overrides = {}) {
     requestIdleCallback,
     runRootTerminal,
     term,
+    terminalStateSentinel,
     Terminal,
     webLinksAddon,
   };
@@ -104,6 +124,123 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens and closes the panel through every route without replacing terminal state", () => {
+    const state = loadBootstrap();
+    const terminalElement = env.document.getElementById("terminal");
+    const toggle = env.document.getElementById("getting-started-toggle");
+    const panel = env.document.getElementById("getting-started-panel");
+    const close = env.document.getElementById("getting-started-close");
+    const expectTerminalPreserved = () => {
+      expect(env.document.getElementById("terminal")).toBe(terminalElement);
+      expect(env.window.term).toBe(state.term);
+      expect(state.term.terminalStateSentinel).toBe(
+        state.terminalStateSentinel
+      );
+      expect(state.Terminal).toHaveBeenCalledTimes(1);
+      expect(state.term.open).toHaveBeenCalledTimes(1);
+      expect(state.term.open).toHaveBeenCalledWith(terminalElement);
+    };
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expectTerminalPreserved();
+
+    const closedOutsideEscape = new env.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+    toggle.dispatchEvent(closedOutsideEscape);
+    expect(closedOutsideEscape.defaultPrevented).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expectTerminalPreserved();
+
+    toggle.click();
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(close);
+    expectTerminalPreserved();
+
+    close.click();
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+    expectTerminalPreserved();
+
+    toggle.click();
+    const openPanelEscape = new env.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+    close.dispatchEvent(openPanelEscape);
+    expect(openPanelEscape.defaultPrevented).toBe(true);
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+    expectTerminalPreserved();
+
+    toggle.click();
+    toggle.focus();
+    const openOutsideEscape = new env.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+    toggle.dispatchEvent(openOutsideEscape);
+    expect(openOutsideEscape.defaultPrevented).toBe(false);
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(toggle);
+    expectTerminalPreserved();
+
+    toggle.click();
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+    expectTerminalPreserved();
+  });
+
+  it("keeps repeated and interleaved panel transitions deterministic", () => {
+    const state = loadBootstrap();
+    const terminalElement = env.document.getElementById("terminal");
+    const toggle = env.document.getElementById("getting-started-toggle");
+    const panel = env.document.getElementById("getting-started-panel");
+    const close = env.document.getElementById("getting-started-close");
+
+    toggle.click();
+    close.click();
+    toggle.click();
+    close.dispatchEvent(
+      new env.window.KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Escape",
+      })
+    );
+    toggle.click();
+    toggle.click();
+    toggle.click();
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(close);
+
+    close.click();
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+    expect(env.document.getElementById("terminal")).toBe(terminalElement);
+    expect(env.window.term).toBe(state.term);
+    expect(state.term.terminalStateSentinel).toBe(
+      state.terminalStateSentinel
+    );
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.term.open).toHaveBeenCalledTimes(1);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
