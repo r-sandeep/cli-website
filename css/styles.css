@@ -20,6 +20,106 @@ body {
   height: 100%;
 }
 
+#terminal-tips-toggle,
+#terminal-tips-panel {
+  position: fixed;
+  right: 16px;
+  z-index: 10;
+  color: #fff;
+  background: #202020;
+  border: 2px solid #fff;
+  font: inherit;
+}
+
+#terminal-tips-toggle {
+  top: 16px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+#terminal-tips-panel {
+  top: 56px;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  padding: 12px;
+}
+
+#terminal-tips-panel[hidden] {
+  display: none;
+}
+
+.terminal-tips-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terminal-tips-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+#terminal-tips-close,
+#terminal-tips-search {
+  color: #fff;
+  background: #2c2c2c;
+  border: 1px solid #fff;
+  font: inherit;
+}
+
+#terminal-tips-close {
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+#terminal-tips-panel label {
+  display: block;
+  margin: 10px 0 4px;
+}
+
+#terminal-tips-search {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px;
+}
+
+#terminal-tips-results ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+#terminal-tips-results li + li {
+  margin-top: 6px;
+}
+
+.terminal-tips-status {
+  margin: 10px 0 0;
+}
+
+#terminal-tips-toggle:focus-visible,
+#terminal-tips-close:focus-visible,
+#terminal-tips-search:focus-visible {
+  outline: 3px solid #ffdf5d;
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  #terminal-tips-toggle {
+    top: 8px;
+    right: 8px;
+  }
+
+  #terminal-tips-panel {
+    top: 48px;
+    right: 8px;
+    width: min(320px, calc(100vw - 16px));
+    max-height: calc(100vh - 56px);
+  }
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */

@@ -16,6 +16,7 @@ function loadBootstrap(overrides = {}) {
     instance.preloadCommandAssets = preloadCommandAssets;
   });
   const runRootTerminal = vi.fn();
+  const initializeTerminalTips = vi.fn();
   const preloadASCIIArt = vi.fn();
   const preloadFiles = vi.fn();
   const idleCalls = [];
@@ -48,6 +49,7 @@ function loadBootstrap(overrides = {}) {
       Terminal,
       WebLinksAddon: { WebLinksAddon: WebLinksAddonCtor },
       extend,
+      initializeTerminalTips,
       preloadASCIIArt,
       preloadFiles,
       requestIdleCallback,
@@ -62,6 +64,7 @@ function loadBootstrap(overrides = {}) {
     extend,
     fitAddon,
     idleCalls,
+    initializeTerminalTips,
     preloadASCIIArt,
     preloadCommandAssets,
     preloadFiles,
@@ -95,6 +98,7 @@ describe("bootstrap", () => {
       state.webLinksAddon
     );
     expect(state.extend).toHaveBeenCalledWith(state.term);
+    expect(state.initializeTerminalTips).toHaveBeenCalledTimes(1);
     expect(state.preloadCommandAssets).toHaveBeenCalledWith("whois lee");
     expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
     expect(state.idleCalls).toHaveLength(1);
