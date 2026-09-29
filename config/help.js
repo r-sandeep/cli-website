@@ -41,7 +41,7 @@ const help = {
   "%www%": "plain-text version of this site",
   "%jobs%": "check out our job openings",
   "%export% NAME=value": "store a variable; without arguments, list all variables sorted by name",
-  "%env%": "list all stored variables as NAME=value sorted by name",
+  "%env% [NAME]": "retrieve one variable; without arguments, list all variables sorted by name",
   "%unset% NAME": "remove a stored variable",
   "%man% export|env|unset": "command manuals; arguments expand with $NAME or ${NAME}, undefined names become empty, and \\$NAME escapes expansion",
   "%test%": "do not use",

@@ -111,7 +111,7 @@ Run `man shortcuts` in the terminal to view the same reference.
  - df
  - echo
  - emacs
- - env: list stored environment variables
+ - env [NAME]: retrieve one environment variable (or use `env` to list all variables sorted by name)
  - exit
  - export NAME=value: store an environment variable (or use `export` to list all)
  - fdisk
@@ -159,7 +159,8 @@ Run `man shortcuts` in the terminal to view the same reference.
 Environment variables persist across page reloads. Command arguments can use
 `$NAME` or `${NAME}`; an undefined variable expands to an empty string. Prefix
 the dollar sign with a backslash, as in `\$NAME`, to pass the reference
-literally without expansion.
+literally without expansion. Use `env NAME` to print one stored variable as
+`NAME=value`; use `env` without arguments to list all variables sorted by name.
 
 Missing a favorite one? Make a PR!
 

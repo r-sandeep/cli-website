@@ -399,6 +399,8 @@ function createEnvironmentDouble(
   const api = {
     snapshot: vi.fn(() => new Map(state)),
     entries: vi.fn(() => [...state.entries()]),
+    isValidName: vi.fn((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)),
+    get: vi.fn((name) => state.get(name)),
     set: vi.fn((name, value) => {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
         return result(
@@ -585,6 +587,95 @@ describe("environment commands", () => {
     expect(term.environment.unset).toHaveBeenLastCalledWith("NOT-VALID");
     expect([...term.environment.snapshot()]).toEqual(absentBefore);
     expect(term.stylePrint).not.toHaveBeenCalled();
+  });
+
+  it("looks up stored environment values literally and distinguishes absence", () => {
+    const { commands, term } = loadEnvironmentCommands([
+      ["EMPTY", ""],
+      ["EQUALS", "left=middle=right"],
+      ["SHELL", "$(echo should-not-run); rm -rf /"],
+      ["FORMAT", "%help%"],
+      ["__proto__", "own-value"],
+    ]);
+
+    for (const [name, value] of [
+      ["EMPTY", ""],
+      ["EQUALS", "left=middle=right"],
+      ["SHELL", "$(echo should-not-run); rm -rf /"],
+      ["FORMAT", "%help%"],
+      ["__proto__", "own-value"],
+    ]) {
+      commands.env([name]);
+      expect(term.writeln).toHaveBeenLastCalledWith(`${name}=${value}`);
+    }
+
+    expect(term.writeln).toHaveBeenCalledTimes(5);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+
+    const beforeFailures = [...term.environment.snapshot()];
+    commands.env(["MISSING"]);
+    expect(term.writeln).toHaveBeenLastCalledWith("env: MISSING: not found");
+    expect(term.writeln).toHaveBeenCalledTimes(6);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.environment.set).not.toHaveBeenCalled();
+    expect(term.environment.unset).not.toHaveBeenCalled();
+    expect([...term.environment.snapshot()]).toEqual(beforeFailures);
+
+    for (const args of [["NOT.VALID"], ["EMPTY", "EXTRA"]]) {
+      const previousLines = term.writeln.mock.calls.length;
+      commands.env(args);
+      expect(term.writeln).toHaveBeenLastCalledWith("Usage: env [NAME]");
+      expect(term.writeln).toHaveBeenCalledTimes(previousLines + 1);
+      expect(term.stylePrint).not.toHaveBeenCalled();
+      expect(term.environment.set).not.toHaveBeenCalled();
+      expect(term.environment.unset).not.toHaveBeenCalled();
+      expect([...term.environment.snapshot()]).toEqual(beforeFailures);
+    }
+  });
+
+  it("keeps repeated lookup read-only and preserves the sorted listing", () => {
+    const entries = [
+      ["ZED", "last"],
+      ["ALPHA", "first"],
+      ["FORMAT", "%help%"],
+    ];
+    const { commands, term } = loadEnvironmentCommands(entries);
+    const before = [...term.environment.snapshot()];
+
+    commands.env(["FORMAT"]);
+    commands.env(["ALPHA"]);
+    commands.env(["FORMAT"]);
+
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "FORMAT=%help%",
+      "ALPHA=first",
+      "FORMAT=%help%",
+    ]);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.environment.set).not.toHaveBeenCalled();
+    expect(term.environment.unset).not.toHaveBeenCalled();
+    expect([...term.environment.snapshot()]).toEqual(before);
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.location.navigate).not.toHaveBeenCalled();
+    expect(term.location.reload).not.toHaveBeenCalled();
+
+    commands.env([]);
+
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "ALPHA=first",
+      "FORMAT=%help%",
+      "ZED=last",
+    ]);
+    expect([...term.environment.snapshot()]).toEqual(before);
+    expect(term.environment.set).not.toHaveBeenCalled();
+    expect(term.environment.unset).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.location.navigate).not.toHaveBeenCalled();
+    expect(term.location.reload).not.toHaveBeenCalled();
   });
 
   it("does not bypass the normal command lifecycle for environment handlers", () => {

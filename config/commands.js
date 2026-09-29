@@ -81,9 +81,10 @@ const _environmentManuals = {
     "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
   ],
   env: [
-    "env — list environment variables",
-    "Usage: env",
-    "Prints the same name-sorted NAME=value listing as export with no arguments.",
+    "env — retrieve or list environment variables",
+    "Usage: env [NAME]",
+    "Use env NAME to print that variable as NAME=value.",
+    "Use env with no arguments to print all variables as NAME=value sorted by name.",
     "Arguments expand $NAME and ${NAME}; undefined names become empty, and \\$NAME keeps the reference literal.",
   ],
   unset: [
@@ -300,9 +301,27 @@ const commands = {
     }
   },
 
-  // Displays the same sorted representation as argument-free `export`.
-  env: function () {
-    _printEnvironment();
+  // Displays the same sorted representation as argument-free `export`, or
+  // reads one validated variable without interpreting its stored value.
+  env: function (args) {
+    if (args.length === 0) {
+      _printEnvironment();
+      return;
+    }
+
+    if (args.length !== 1 || !term.environment.isValidName(args[0])) {
+      term.writeln("Usage: env [NAME]");
+      return;
+    }
+
+    const name = args[0];
+    const value = term.environment.get(name);
+    if (value === undefined) {
+      term.writeln(`env: ${name}: not found`);
+      return;
+    }
+
+    term.writeln(`${name}=${value}`);
   },
 
   // The state API makes absent (including invalid) names a silent no-op and
