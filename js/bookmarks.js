@@ -50,6 +50,69 @@ function createBookmarkStore(storage) {
         : { ok: false, error: "storage" };
     },
 
+    exportBackup() {
+      if (bookmarks === null) return { ok: false, error: "storage" };
+
+      const entries = bookmarks
+        .map(([name, path]) => ({ name, path }))
+        .sort((left, right) =>
+          left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+        );
+      return {
+        ok: true,
+        json: JSON.stringify({ version: 1, bookmarks: entries }),
+      };
+    },
+
+    importBackup(serialized, options = {}) {
+      if (bookmarks === null) return { ok: false, error: "storage" };
+
+      if (options === null || typeof options !== "object" || Array.isArray(options)) {
+        return { ok: false, error: "invalid-options" };
+      }
+      const { mode, dryRun = false } = options;
+      if ((mode !== "merge" && mode !== "replace") || typeof dryRun !== "boolean") {
+        return { ok: false, error: "invalid-options" };
+      }
+
+      let imported;
+      try {
+        imported = _parseBookmarkBackup(serialized);
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+
+      const currentByName = new Map(bookmarks);
+      let nextBookmarks;
+      if (mode === "merge") {
+        nextBookmarks = bookmarks.map(([name, path]) => [name, path]);
+        for (const [name, path] of imported) {
+          if (currentByName.has(name)) {
+            if (currentByName.get(name) !== path) {
+              return { ok: false, error: "conflict" };
+            }
+          } else {
+            nextBookmarks.push([name, path]);
+          }
+        }
+      } else {
+        nextBookmarks = imported;
+      }
+
+      if (nextBookmarks.length > BOOKMARK_LIMIT) {
+        return { ok: false, error: "limit" };
+      }
+
+      const counts = _bookmarkChangeCounts(bookmarks, nextBookmarks);
+      const result = { ok: true, ...counts };
+      const changed = counts.added > 0 || counts.updated > 0 || counts.removed > 0;
+      if (dryRun || !changed) return result;
+
+      return persist(nextBookmarks)
+        ? result
+        : { ok: false, error: "storage" };
+    },
+
     list() {
       if (bookmarks === null) return { ok: false, error: "storage" };
 
@@ -90,6 +153,52 @@ function createBookmarkStore(storage) {
 
 function _validBookmarkName(name) {
   return typeof name === "string" && BOOKMARK_NAME_PATTERN.test(name);
+}
+
+function _bookmarkChangeCounts(currentBookmarks, nextBookmarks) {
+  const currentByName = new Map(currentBookmarks);
+  const nextByName = new Map(nextBookmarks);
+  const counts = { added: 0, updated: 0, removed: 0, unchanged: 0 };
+
+  for (const [name, path] of nextByName) {
+    if (!currentByName.has(name)) counts.added += 1;
+    else if (currentByName.get(name) === path) counts.unchanged += 1;
+    else counts.updated += 1;
+  }
+  for (const [name] of currentByName) {
+    if (!nextByName.has(name)) counts.removed += 1;
+  }
+
+  return counts;
+}
+
+function _parseBookmarkBackup(serialized) {
+  if (typeof serialized !== "string") throw new Error("malformed-json");
+
+  let parsed;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch (_) {
+    throw new Error("malformed-json");
+  }
+
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("invalid-backup");
+  }
+  if (parsed.version !== 1) throw new Error("unsupported-version");
+  if (!Array.isArray(parsed.bookmarks)) throw new Error("invalid-backup");
+
+  const names = new Set();
+  return parsed.bookmarks.map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("invalid-backup");
+    }
+    if (!_validBookmarkName(entry.name)) throw new Error("invalid-name");
+    if (typeof entry.path !== "string") throw new Error("invalid-backup");
+    if (names.has(entry.name)) throw new Error("duplicate");
+    names.add(entry.name);
+    return [entry.name, entry.path];
+  });
 }
 
 function _parseBookmarks(serialized) {

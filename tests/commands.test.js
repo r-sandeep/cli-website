@@ -658,6 +658,116 @@ describe("cd", () => {
 });
 
 describe("bookmark and go", () => {
+  it("writes one literal export document through the raw terminal path", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "/space path/%marker%/https://example.com/雪" });
+    commands.bookmark(["add", "__proto__"]);
+    const persistedBefore = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockClear();
+    term.stylePrint.mockClear();
+    term.writeln.mockClear();
+
+    commands.bookmark(["export"]);
+
+    expect(term.writeln).toHaveBeenCalledTimes(1);
+    expect(term.writeln).toHaveBeenCalledWith(
+      '{"version":1,"bookmarks":[{"name":"__proto__","path":"/space path/%marker%/https://example.com/雪"}]}'
+    );
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(persistedBefore);
+  });
+
+  it("dispatches merge, replace, and dry-run imports with deterministic counts", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "work" });
+    const merge = '{"version":1,"bookmarks":[{"name":"desk","path":"/path with spaces/%raw%/雪"}]}';
+
+    commands.bookmark(["import", "--merge", merge]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=1, updated=0, removed=0, unchanged=0"
+    );
+    expect(term.cwd).toBe("work");
+
+    storage.setItem.mockClear();
+    commands.bookmark(["import", "--dry-run", "--replace", '{"version":1,"bookmarks":[]}']);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import preview: added=0, updated=0, removed=1, unchanged=0"
+    );
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("work");
+
+    commands.bookmark(["import", "--replace", '{"version":1,"bookmarks":[]}']);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=0, updated=0, removed=1, unchanged=0"
+    );
+  });
+
+  it("rejects every invalid import command shape before calling the store", () => {
+    const invalidShapes = [
+      ["import"],
+      ["import", '{}'],
+      ["import", "--merge"],
+      ["import", "--merge", "--replace", '{}'],
+      ["import", "--merge", "--merge", '{}'],
+      ["import", "--dry-run", "--dry-run", "--merge", '{}'],
+      ["import", "--unknown", "--merge", '{}'],
+      ["import", "--merge", '{}', "extra"],
+    ];
+
+    for (const args of invalidShapes) {
+      const { commands, storage, term } = loadCommands({ cwd: "bin" });
+      const before = storage.getItem("rootvc.bookmarks.v1");
+      storage.getItem.mockClear();
+      storage.setItem.mockClear();
+
+      commands.bookmark(args);
+
+      expect(term.stylePrint).toHaveBeenLastCalledWith(
+        "Usage: bookmark import [--dry-run] (--merge | --replace) 'JSON'"
+      );
+      expect(storage.getItem).not.toHaveBeenCalled();
+      expect(storage.setItem).not.toHaveBeenCalled();
+      expect(term.cwd).toBe("bin");
+      expect(term.command).not.toHaveBeenCalled();
+      expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
+    }
+  });
+
+  it("reports import validation and storage errors without exposing JSON as styled output", () => {
+    const { commands, storage, term } = loadCommands();
+
+    commands.bookmark(["import", "--merge", "not-json"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Could not import bookmarks: malformed JSON."
+    );
+    expect(term.writeln).not.toHaveBeenCalled();
+
+    storage.setItem("rootvc.bookmarks.v1", "not json");
+    const corrupt = loadCommands({ storage });
+    corrupt.commands.bookmark([
+      "import",
+      "--dry-run",
+      "--merge",
+      '{"version":1,"bookmarks":[]}',
+    ]);
+    expect(corrupt.term.stylePrint).toHaveBeenLastCalledWith(
+      "Could not import bookmarks: browser storage is unavailable or corrupt."
+    );
+  });
+
+  it("does not emit a backup when bookmark storage is corrupt", () => {
+    const { commands, storage, term } = loadCommands();
+    storage.setItem("rootvc.bookmarks.v1", "not json");
+    const reloaded = loadCommands({ storage });
+
+    reloaded.commands.bookmark(["export"]);
+
+    expect(reloaded.term.writeln).not.toHaveBeenCalled();
+    expect(reloaded.term.stylePrint).toHaveBeenCalledWith(
+      "Could not export bookmarks: browser storage is unavailable or corrupt."
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe("not json");
+  });
+
   it("adds every valid NAME form at the current cwd and rejects an invalid name atomically", () => {
     const { commands, storage, term } = loadCommands({ cwd: "bin" });
 
@@ -860,6 +970,14 @@ describe("man", () => {
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark add NAME"));
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark list"));
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark remove NAME"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark export"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark import --merge 'JSON'"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark import --replace 'JSON'"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark import --dry-run --merge 'JSON'"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark import --dry-run --replace 'JSON'"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("'{\"version\":1,\"bookmarks\""));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("rejects the entire import"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("empty bookmarks array clears it"));
     expect(term.command).not.toHaveBeenCalled();
 
     term.stylePrint.mockClear();
@@ -943,6 +1061,11 @@ describe("help stays in sync with commands", () => {
     expect(helpContext.helpEntries["%bookmark% add NAME"]).toContain("save");
     expect(helpContext.helpEntries["%bookmark% list"]).toContain("list");
     expect(helpContext.helpEntries["%bookmark% remove NAME"]).toContain("remove");
+    expect(helpContext.helpEntries["%bookmark% export"]).toContain("version-1 JSON");
+    expect(helpContext.helpEntries["%bookmark% import --merge 'JSON'"]).toContain("conflicting paths");
+    expect(helpContext.helpEntries["%bookmark% import --replace 'JSON'"]).toContain("empty array clears");
+    expect(helpContext.helpEntries["%bookmark% import --dry-run --merge 'JSON'"]).toContain("without changes");
+    expect(helpContext.helpEntries["%bookmark% import --dry-run --replace 'JSON'"]).toContain("without changes");
     expect(helpContext.helpEntries["%go% NAME"]).toContain("NAME");
 
     const { commands, term } = loadCommands({ help: helpContext.helpEntries });
@@ -951,6 +1074,11 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%bookmark% add NAME"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% export"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% import --merge 'JSON'"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% import --replace 'JSON'"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% import --dry-run --merge 'JSON'"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% import --dry-run --replace 'JSON'"))).toBe(true);
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
   });
 

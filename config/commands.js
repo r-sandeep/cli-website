@@ -462,6 +462,67 @@ const commands = {
     const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME";
     const subcommand = args[0];
 
+    if (subcommand === "export" && args.length === 1) {
+      const result = bookmarkStore.exportBackup();
+      if (result.ok) {
+        term.writeln(result.json);
+      } else {
+        term.stylePrint("Could not export bookmarks: browser storage is unavailable or corrupt.");
+      }
+      return;
+    }
+
+    if (subcommand === "import") {
+      const importUsage =
+        "Usage: bookmark import [--dry-run] (--merge | --replace) 'JSON'";
+      let mode = null;
+      let dryRun = false;
+      let serialized = null;
+      let invalid = false;
+
+      for (const argument of args.slice(1)) {
+        if (argument === "--merge" || argument === "--replace") {
+          if (mode !== null) invalid = true;
+          else mode = argument.slice(2);
+        } else if (argument === "--dry-run") {
+          if (dryRun) invalid = true;
+          else dryRun = true;
+        } else if (argument.startsWith("-") || serialized !== null) {
+          invalid = true;
+        } else {
+          serialized = argument;
+        }
+      }
+
+      if (invalid || mode === null || serialized === null) {
+        term.stylePrint(importUsage);
+        return;
+      }
+
+      const result = bookmarkStore.importBackup(serialized, { mode, dryRun });
+      if (result.ok) {
+        const counts =
+          `added=${result.added}, updated=${result.updated}, ` +
+          `removed=${result.removed}, unchanged=${result.unchanged}`;
+        term.stylePrint(
+          `${dryRun ? "Bookmark import preview" : "Bookmark import complete"}: ${counts}`
+        );
+      } else {
+        const errors = {
+          "malformed-json": "malformed JSON",
+          "invalid-backup": "backup fields have invalid or missing types",
+          "unsupported-version": "backup version must be numeric 1",
+          "invalid-name": "a bookmark name is invalid",
+          duplicate: "bookmark names must be unique",
+          conflict: "a bookmark name conflicts with a different stored path",
+          limit: "result would exceed the 25-bookmark limit",
+          storage: "browser storage is unavailable or corrupt",
+        };
+        term.stylePrint(`Could not import bookmarks: ${errors[result.error] || "invalid backup"}.`);
+      }
+      return;
+    }
+
     if (subcommand === "add" && args.length === 2) {
       const name = args[1];
       const result = bookmarkStore.add(name, term.cwd);
@@ -1320,9 +1381,19 @@ commands.man = function (args) {
     term.stylePrint(
       "bookmark - save and manage directory bookmarks\r\n" +
       "Usage:\r\n" +
-      "  bookmark add NAME      Save the current directory\r\n" +
-      "  bookmark list          List saved bookmarks\r\n" +
-      "  bookmark remove NAME   Remove a bookmark\r\n" +
+      "  bookmark add NAME                              Save the current directory\r\n" +
+      "  bookmark list                                  List saved bookmarks\r\n" +
+      "  bookmark remove NAME                           Remove a bookmark\r\n" +
+      "  bookmark export                                Print a compact version-1 JSON backup\r\n" +
+      "  bookmark import --merge 'JSON'                 Add new names; identical entries are unchanged\r\n" +
+      "  bookmark import --replace 'JSON'               Atomically replace all bookmarks\r\n" +
+      "  bookmark import --dry-run --merge 'JSON'       Preview a merge without changes\r\n" +
+      "  bookmark import --dry-run --replace 'JSON'     Preview a replacement without changes\r\n" +
+      "Example:\r\n" +
+      "  bookmark import --merge '{\"version\":1,\"bookmarks\":[{\"name\":\"work\",\"path\":\"/home/work\"}]}'\r\n" +
+      "JSON is one single-quoted argument and remains literal terminal data.\r\n" +
+      "Merge rejects the entire import when an existing name has a different path.\r\n" +
+      "Replace makes the saved set exactly match the backup; an empty bookmarks array clears it.\r\n" +
       "NAME must match [A-Za-z0-9_-]+. Up to 25 bookmarks persist across reloads."
     );
     return;

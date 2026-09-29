@@ -202,6 +202,127 @@ describe("bookmark terminal integration", () => {
     expect(beforeUnload).not.toHaveBeenCalled();
   });
 
+  it("keeps quoted backup JSON literal through preview, import, and export", async () => {
+    const storage = createSharedStorage();
+    const terminal = createTerminalEnvironment(storage, "work");
+    environments.push(terminal);
+    const backup = JSON.stringify({
+      version: 1,
+      bookmarks: [
+        {
+          name: "literal",
+          path: '/missing path/quote"/back\\slash/雪/%bookmark%/$HOME',
+        },
+      ],
+    });
+    const quotedBackup = backup.replace("$HOME", "\\$HOME");
+    const commandLine = `bookmark import --dry-run --merge '${quotedBackup}'`;
+    const originalDispatch = terminal.term.dispatchCommand;
+    terminal.term.dispatchCommand = vi.fn(originalDispatch);
+    storage.setItem.mockClear();
+
+    await submit(terminal.term, commandLine);
+
+    expect(terminal.term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(terminal.term.dispatchCommand.mock.calls[0][0]).toBe("bookmark");
+    expect(terminal.term.dispatchCommand.mock.calls[0][1]).toEqual([
+      "import",
+      "--dry-run",
+      "--merge",
+      backup,
+    ]);
+    expect(terminal.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import preview: added=1, updated=0, removed=0, unchanged=0"
+    );
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(terminal.term.cwd).toBe("work");
+
+    terminal.term.dispatchCommand.mockClear();
+    terminal.term.stylePrint.mockClear();
+    await submit(terminal.term, `bookmark import --merge '${quotedBackup}'`);
+    expect(terminal.term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(terminal.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=1, updated=0, removed=0, unchanged=0"
+    );
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(terminal.term.cwd).toBe("work");
+
+    terminal.term.writeln.mockClear();
+    terminal.term.stylePrint.mockClear();
+    terminal.term.dispatchCommand.mockClear();
+    await submit(terminal.term, "bookmark export");
+    expect(terminal.term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(terminal.term.writeln).toHaveBeenCalledWith(backup);
+    expect(terminal.term.stylePrint).not.toHaveBeenCalled();
+    expect(terminal.term.cwd).toBe("work");
+  });
+
+  it("does not dispatch JSON text as a command or expand it a second time", async () => {
+    const storage = createSharedStorage();
+    const terminal = createTerminalEnvironment(storage, "home");
+    environments.push(terminal);
+    terminal.term.environment.set("HOME", "expanded");
+    const backup = JSON.stringify({
+      version: 1,
+      bookmarks: [{ name: "opaque", path: "eval whois $HOME %help%" }],
+    });
+    const originalDispatch = terminal.term.dispatchCommand;
+    terminal.term.dispatchCommand = vi.fn(originalDispatch);
+
+    await submit(terminal.term, `bookmark import --merge '${backup.replace("$HOME", "\\$HOME")}'`);
+
+    expect(terminal.term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(terminal.term.dispatchCommand.mock.calls[0][0]).toBe("bookmark");
+    await submit(terminal.term, "bookmark export");
+    expect(terminal.term.writeln).toHaveBeenLastCalledWith(backup);
+    expect(terminal.term.cwd).toBe("home");
+  });
+
+  it("copy/pastes exported prototype-like bookmarks through replace and reload", async () => {
+    const storage = createSharedStorage();
+    const first = createTerminalEnvironment(storage, "work");
+    environments.push(first);
+    const backup = JSON.stringify({
+      version: 1,
+      bookmarks: [
+        {
+          name: "__proto__",
+          path: '/not present/quote"/back\\slash/雪/%bookmark%/spaces',
+        },
+        { name: "constructor", path: "/also missing" },
+      ],
+    });
+
+    await submit(first.term, `bookmark import --merge '${backup}'`);
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=2, updated=0, removed=0, unchanged=0"
+    );
+    expect(first.term.cwd).toBe("work");
+
+    first.term.writeln.mockClear();
+    await submit(first.term, "bookmark export");
+    expect(first.term.writeln).toHaveBeenCalledWith(backup);
+    const exported = first.term.writeln.mock.calls.find(([line]) => line === backup)[0];
+
+    await submit(first.term, "bookmark import --replace '{\"version\":1,\"bookmarks\":[]}'");
+    expect(first.term.cwd).toBe("work");
+    await submit(first.term, `bookmark import --replace '${exported}'`);
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark import complete: added=2, updated=0, removed=0, unchanged=0"
+    );
+    expect(first.term.cwd).toBe("work");
+
+    first.env.cleanup();
+    environments = [];
+    const reloaded = createTerminalEnvironment(storage, "home");
+    environments.push(reloaded);
+    await submit(reloaded.term, "bookmark export");
+    expect(reloaded.term.writeln).toHaveBeenCalledWith(backup);
+
+    await submit(reloaded.term, "go __proto__");
+    expect(reloaded.term.cwd).toBe('/not present/quote"/back\\slash/雪/%bookmark%/spaces');
+  });
+
   it("recreates the browser environment with persisted bookmarks available to list and go", async () => {
     const storage = createSharedStorage();
     const first = createTerminalEnvironment(storage, "work");
