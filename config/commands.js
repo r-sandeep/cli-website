@@ -346,8 +346,14 @@ const commands = {
     term.stylePrint(_filesHere().join("   "));
   },
 
-  date: function () {
-    term.stylePrint(new Date().toString());
+  date: function (args) {
+    if (args.length !== 0 && !(args.length === 1 && args[0] === "--iso")) {
+      term.stylePrint("Usage: date [--iso]");
+      return;
+    }
+
+    const now = new Date();
+    term.stylePrint(args.length === 1 ? now.toISOString() : now.toString());
   },
 
   // Simulates a minimal Unix directory tree:
@@ -1314,6 +1320,13 @@ commands.man = function (args) {
     term.stylePrint("Usage: version [--json]");
     term.stylePrint("With no option, print the human-readable version line.");
     term.stylePrint("With --json, print a compact object with version and buildDate.");
+    return;
+  }
+  if (args.length === 1 && topic === "date") {
+    term.stylePrint("date — show the local date and time or a UTC ISO timestamp");
+    term.stylePrint("Usage: date [--iso]");
+    term.stylePrint("With no option, print the local date and time.");
+    term.stylePrint("With --iso, print UTC ISO-8601 with milliseconds and Z.");
     return;
   }
   if (args.length === 1 && topic === "bookmark") {

@@ -13,6 +13,7 @@ const help = {
   "%tui%": "open the keyboard-driven directory (q to return)",
   "%help%": "list all commands (you're looking at it)",
   "%version% [--json]": "show the terminal version and build date",
+  "%date% [--iso]": "show local date and time, or UTC ISO-8601 with --iso",
   "%alias% [name[=value]]": "define, list, or query command aliases",
   "%unalias% name": "remove a command alias",
   "%bookmark% add NAME": "save the current directory as NAME",
