@@ -39,6 +39,20 @@ function parse(content) {
   return new JSDOM(content).window.document;
 }
 
+function expectGeoBootstrapImage(content) {
+  const doc = parse(content);
+  const anchors = doc.querySelectorAll(
+    'a[href="https://github.com/divshot/geo-bootstrap"]'
+  );
+  expect(anchors).toHaveLength(1);
+  expect(anchors[0].getAttribute("target")).toBe("_blank");
+
+  const images = anchors[0].querySelectorAll('img[src="images/geo/geocities.jpg"]');
+  expect(images).toHaveLength(1);
+  expect(images[0].getAttribute("src")).toBe("images/geo/geocities.jpg");
+  expect(images[0].getAttribute("alt")).toBe("Geo Bootstrap");
+}
+
 // "portfolio/zed/index.html" -> "/portfolio/zed/"
 function pathnameFor(filePath) {
   return `/${filePath.replace(/index\.html$/, "")}`;
@@ -50,6 +64,22 @@ afterEach(() => {
     env.cleanup();
     env = null;
   }
+});
+
+describe("Geo Bootstrap image attribution", () => {
+  it("names the linked image in the welcome page template", () => {
+    const source = fs.readFileSync(path.join(REPO_ROOT, "welcome.htm"), "utf8");
+    expectGeoBootstrapImage(source);
+  });
+
+  it("names the linked image in a fresh built welcome page", async () => {
+    await buildAssetsModule.main(new Date("2026-02-03T23:59:58.000Z"));
+    const built = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/welcome.htm"),
+      "utf8"
+    );
+    expectGeoBootstrapImage(built);
+  });
 });
 
 describe("loadConfig", () => {
