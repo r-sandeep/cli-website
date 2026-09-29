@@ -339,6 +339,10 @@ const commands = {
 
   // Expands ~ to /home/<user> to mimic a real shell.
   pwd: function () {
+    if (term.cwd === "/") {
+      term.stylePrint("/");
+      return;
+    }
     term.stylePrint("/" + term.cwd.replaceAll("~", `home/${term.user}`));
   },
 

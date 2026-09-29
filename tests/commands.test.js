@@ -657,6 +657,36 @@ describe("cd", () => {
   });
 });
 
+describe("pwd", () => {
+  it.each([
+    ["/", "guest", "/"],
+    ["bin", "guest", "/bin"],
+    ["home", "root", "/home"],
+    ["~", "guest", "/home/guest"],
+    ["~", "root", "/home/root"],
+  ])("prints cwd %s for user %s as exactly %s without changing terminal state", (cwd, user, expected) => {
+    const { commands, location, term } = loadCommands({ cwd, user });
+    term.dispatchCommand = vi.fn();
+
+    commands.pwd([]);
+
+    expect(term.stylePrint.mock.calls).toEqual([[expected]]);
+    expect(term.cwd).toBe(cwd);
+    expect(term.user).toBe(user);
+    expect(term.dispatchCommand).not.toHaveBeenCalled();
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+    expect(term.openURL).not.toHaveBeenCalled();
+    expect(term.displayURL).not.toHaveBeenCalled();
+    expect(location.assign).not.toHaveBeenCalled();
+    expect(location.replace).not.toHaveBeenCalled();
+    expect(location.reload).not.toHaveBeenCalled();
+  });
+});
+
 describe("bookmark and go", () => {
   it("adds every valid NAME form at the current cwd and rejects an invalid name atomically", () => {
     const { commands, storage, term } = loadCommands({ cwd: "bin" });
