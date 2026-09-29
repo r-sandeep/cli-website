@@ -29,6 +29,44 @@
   window.ensureAALibLoaded = () => loadOptionalScript("js/aalib.js");
   window.ensureRickRollLoaded = () => loadOptionalScript("js/rickroll.min.js");
 
+  function setupGettingStartedPanel() {
+    const toggle = document.getElementById("getting-started-toggle");
+    const panel = document.getElementById("getting-started-panel");
+    const closeButton = document.getElementById("getting-started-close");
+
+    if (!toggle || !panel || !closeButton) {
+      return;
+    }
+
+    function openPanel() {
+      panel.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      closeButton.focus();
+    }
+
+    function closePanel() {
+      panel.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+    }
+
+    toggle.addEventListener("click", () => {
+      if (panel.hidden) {
+        openPanel();
+      } else {
+        closePanel();
+      }
+    });
+    closeButton.addEventListener("click", closePanel);
+    panel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closePanel();
+      }
+    });
+  }
+
+  setupGettingStartedPanel();
+
   const terminalElement = document.getElementById("terminal");
   const term = new Terminal({ cursorBlink: true });
   const fitAddon = new FitAddon.FitAddon();

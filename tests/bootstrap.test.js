@@ -38,6 +38,22 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button
+            id="getting-started-toggle"
+            type="button"
+            aria-controls="getting-started-panel"
+            aria-expanded="false"
+          >Getting started</button>
+          <section
+            id="getting-started-panel"
+            role="region"
+            aria-labelledby="getting-started-title"
+            hidden
+          >
+            <h2 id="getting-started-title">Getting started</h2>
+            <p>Type help in the terminal to see available commands.</p>
+            <button id="getting-started-close" type="button">Close</button>
+          </section>
           <div id="terminal"></div>
         </body>
       </html>
@@ -89,6 +105,7 @@ describe("bootstrap", () => {
     expect(state.term.open).toHaveBeenCalledWith(
       env.document.getElementById("terminal")
     );
+    expect(state.term.open).toHaveBeenCalledTimes(1);
     expect(state.term.loadAddon).toHaveBeenNthCalledWith(1, state.fitAddon);
     expect(state.term.loadAddon).toHaveBeenNthCalledWith(
       2,
@@ -104,6 +121,77 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens and closes the Getting started panel with scoped focus behavior", () => {
+    const state = loadBootstrap();
+    const toggle = env.document.getElementById("getting-started-toggle");
+    const panel = env.document.getElementById("getting-started-panel");
+    const closeButton = env.document.getElementById("getting-started-close");
+    const terminalElement = env.document.getElementById("terminal");
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    toggle.dispatchEvent(
+      new env.window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "Escape",
+      })
+    );
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(closeButton);
+
+    closeButton.dispatchEvent(
+      new env.window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "Enter",
+      })
+    );
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(closeButton);
+
+    closeButton.click();
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+
+    toggle.click();
+    closeButton.dispatchEvent(
+      new env.window.KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "Escape",
+      })
+    );
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(env.document.activeElement).toBe(closeButton);
+
+    toggle.click();
+
+    expect(panel.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(env.document.activeElement).toBe(toggle);
+    expect(env.document.getElementById("terminal")).toBe(terminalElement);
+    expect(state.term.open).toHaveBeenCalledTimes(1);
+    expect(state.term.open).toHaveBeenCalledWith(terminalElement);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
