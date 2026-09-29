@@ -800,6 +800,18 @@ describe("index.html", () => {
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
   });
 
+  it("provides one native body-level control for focusing the terminal", () => {
+    const buttons = doc.querySelectorAll("button#terminal-focus");
+    const button = buttons[0];
+
+    expect(buttons).toHaveLength(1);
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.type).toBe("button");
+    expect(button.textContent).toBe("Focus terminal");
+    expect(button.parentElement).toBe(doc.body);
+    expect(doc.querySelector("#terminal #terminal-focus")).toBeNull();
+  });
+
   it("uses absolute Open Graph image URLs", () => {
     for (const selector of [
       'meta[property="og:image"]',

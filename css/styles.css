@@ -7,17 +7,40 @@ body, html {
 
 body {
   background-color: #2c2c2c;
+  display: flex;
+  flex-direction: column;
   font-family: "Abel";
   margin: 0;
 }
 
 .terminal {
+  box-sizing: border-box;
   height: 100%;
   padding: 24px;
 }
 
 #terminal {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#terminal-focus {
+  align-self: flex-start;
+  background: transparent;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 1rem;
+  margin: 16px 24px 0;
+  padding: 6px 12px;
+}
+
+#terminal-focus:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
 }
 
 /* Headings that are present for screen readers and search engines but take up
