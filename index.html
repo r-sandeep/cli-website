@@ -78,6 +78,32 @@
 
       <div id="aa-all" style="display: none;"></div>
       <div id="files-all" style="display: none;"></div>
-      <div id="terminal"></div>
+      <main class="terminal-app">
+        <div class="terminal-tips-controls">
+          <button
+            id="terminal-tips-toggle"
+            type="button"
+            aria-controls="terminal-tips-panel"
+            aria-expanded="false"
+          >Terminal tips</button>
+        </div>
+        <section
+          id="terminal-tips-panel"
+          class="terminal-tips-panel"
+          role="region"
+          aria-labelledby="terminal-tips-heading"
+          hidden
+        >
+          <div class="terminal-tips-header">
+            <h2 id="terminal-tips-heading">Terminal tips</h2>
+            <button id="terminal-tips-close" type="button">Close</button>
+          </div>
+          <label for="terminal-tips-search">Search terminal tips</label>
+          <input id="terminal-tips-search" type="search" autocomplete="off" />
+          <p id="terminal-tips-status" role="status" aria-live="polite"></p>
+          <div id="terminal-tips-results"></div>
+        </section>
+        <div id="terminal"></div>
+      </main>
     </body>
   </html>

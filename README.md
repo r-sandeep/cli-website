@@ -1,6 +1,20 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Terminal tips
+
+Use the **Terminal tips** button to open a compact, nonmodal reference panel.
+The search field filters tip titles and descriptions with a literal,
+case-insensitive match. Activate **Close**, press Escape anywhere in the panel,
+or activate **Terminal tips** again to dismiss it; every method returns focus to
+the Terminal tips button.
+
+The raw search text remains available when the panel is closed and reopened in
+the same page session. Reloading the page starts with the panel hidden and the
+search empty. Tips are reference information only: opening, filtering, and
+closing the panel never inserts or executes terminal commands, changes pending
+input or output, recreates the terminal, or changes persistent preferences.
+
 ## Terminal version
 
 Run `version` to print the human-readable build identity:

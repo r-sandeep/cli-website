@@ -11,13 +11,118 @@ body {
   margin: 0;
 }
 
-.terminal {
+.terminal,
+.terminal-app {
   height: 100%;
   padding: 24px;
 }
 
+.terminal-app {
+  box-sizing: border-box;
+  position: relative;
+}
+
 #terminal {
   height: 100%;
+}
+
+.terminal-tips-controls {
+  position: absolute;
+  right: 24px;
+  top: 16px;
+  z-index: 2;
+}
+
+.terminal-tips-controls button,
+.terminal-tips-panel button,
+.terminal-tips-panel input {
+  font: inherit;
+}
+
+.terminal-tips-controls button,
+.terminal-tips-panel button {
+  background: #2c2c2c;
+  border: 1px solid #fff;
+  color: #fff;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.terminal-tips-controls button:focus-visible,
+.terminal-tips-panel button:focus-visible,
+.terminal-tips-panel input:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+.terminal-tips-panel {
+  background: #2c2c2c;
+  border: 1px solid #fff;
+  color: #fff;
+  max-height: calc(100% - 72px);
+  max-width: 340px;
+  overflow: auto;
+  padding: 12px;
+  position: absolute;
+  right: 24px;
+  top: 52px;
+  width: calc(100% - 48px);
+  z-index: 3;
+}
+
+.terminal-tips-panel[hidden] {
+  display: none;
+}
+
+.terminal-tips-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.terminal-tips-header h2,
+.terminal-tips-panel p {
+  margin: 0 0 8px;
+}
+
+.terminal-tips-panel label,
+.terminal-tips-panel input {
+  box-sizing: border-box;
+  display: block;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.terminal-tips-panel input {
+  border: 1px solid #fff;
+  padding: 5px;
+}
+
+.terminal-tip {
+  margin-bottom: 8px;
+}
+
+.terminal-tip-title {
+  font-weight: bold;
+}
+
+@media (max-width: 480px) {
+  .terminal,
+  .terminal-app {
+    padding: 12px;
+  }
+
+  .terminal-tips-controls {
+    right: 12px;
+    top: 8px;
+  }
+
+  .terminal-tips-panel {
+    max-height: calc(100% - 56px);
+    right: 12px;
+    top: 44px;
+    width: calc(100% - 24px);
+  }
 }
 
 /* Headings that are present for screen readers and search engines but take up
