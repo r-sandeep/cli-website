@@ -1,0 +1,11 @@
+
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /css/xterm.css HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /images/logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /js/xterm.js HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /js/addon-fit.js HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /js/addon-web-links.js HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /js/app.bundle.js HTTP/1.1" 200 -
+127.0.0.1 - - [29/Sep/2026 12:37:27] "GET /js/aalib.js HTTP/1.1" 200 -
