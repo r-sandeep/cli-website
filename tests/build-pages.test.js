@@ -279,6 +279,18 @@ describe("script load order", () => {
       appBundleSources.indexOf("js/terminal-ext.js")
     );
   });
+
+  it("bundles the terminal tips model and controller before bootstrap", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/terminal-tips-model.js");
+    expect(appBundleSources).toContain("js/terminal-tips.js");
+    expect(appBundleSources.indexOf("js/terminal-tips-model.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-tips.js")
+    );
+    expect(appBundleSources.indexOf("js/terminal-tips.js")).toBeLessThan(
+      appBundleSources.indexOf("js/bootstrap.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {
@@ -857,6 +869,33 @@ describe("index.html", () => {
     expect(doc.querySelector("#terminal")).not.toBeNull();
     expect(doc.querySelector("#aa-all")).not.toBeNull();
     expect(doc.querySelector("#files-all")).not.toBeNull();
+  });
+
+  it("includes the accessible terminal tips controls outside the terminal", () => {
+    const toggle = doc.querySelector("#terminal-tips-toggle");
+    const panel = doc.querySelector("#terminal-tips-panel");
+    const terminal = doc.querySelector("#terminal");
+
+    expect(toggle?.tagName).toBe("BUTTON");
+    expect(toggle?.textContent.trim()).toBe("Terminal tips");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.getAttribute("aria-controls")).toBe("terminal-tips-panel");
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.getAttribute("role")).toBe("region");
+    expect(panel?.getAttribute("aria-labelledby")).toBe(
+      "terminal-tips-heading"
+    );
+    expect(panel?.querySelector("#terminal-tips-search")?.tagName).toBe(
+      "INPUT"
+    );
+    expect(panel?.querySelector('label[for="terminal-tips-search"]')).not.toBeNull();
+    expect(panel?.querySelector("#terminal-tips-results")).not.toBeNull();
+    expect(panel?.querySelector("#terminal-tips-status")?.getAttribute("aria-live")).toBe(
+      "polite"
+    );
+    expect(panel?.querySelector("#terminal-tips-close")?.tagName).toBe("BUTTON");
+    expect(terminal?.contains(toggle)).toBe(false);
+    expect(terminal?.contains(panel)).toBe(false);
   });
 });
 

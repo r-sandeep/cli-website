@@ -1,6 +1,19 @@
 # cli-website
 Who needs a website when you have a terminal.
 
+## Terminal tips
+
+Use the **Terminal tips** button to open a compact reference panel. Search is a
+literal, case-insensitive match across tip names and descriptions. Closing and
+reopening the panel preserves the current search for the page session; reloading
+the page resets it.
+
+The panel is reference information only. Opening, filtering, and closing it do
+not insert or run commands, alter pending terminal input or output, replace the
+terminal, or change terminal preferences. Close it with its **Close** button,
+Escape from within the panel, or the **Terminal tips** button; focus returns to
+the opener each time.
+
 ## Terminal version
 
 Run `version` to print the human-readable build identity:

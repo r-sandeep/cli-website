@@ -20,6 +20,118 @@ body {
   height: 100%;
 }
 
+.terminal-tips {
+  position: fixed;
+  z-index: 10;
+  top: 12px;
+  right: 12px;
+  width: min(320px, calc(100vw - 24px));
+  color: var(--brand-txt-color);
+}
+
+#terminal-tips-toggle,
+#terminal-tips-close,
+#terminal-tips-search {
+  box-sizing: border-box;
+  border: 1px solid #bdbdbd;
+  border-radius: 3px;
+  background: #2c2c2c;
+  color: #fff;
+  font: inherit;
+}
+
+#terminal-tips-toggle,
+#terminal-tips-close {
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+#terminal-tips-toggle {
+  float: right;
+}
+
+#terminal-tips-panel {
+  clear: both;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #8d8d8d;
+  border-radius: 4px;
+  background: #202020;
+  box-shadow: 0 3px 12px rgb(0 0 0 / 45%);
+}
+
+#terminal-tips-panel[hidden] {
+  display: none;
+}
+
+.terminal-tips-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#terminal-tips-heading,
+.terminal-tip h3,
+.terminal-tip p,
+#terminal-tips-status {
+  margin: 0;
+}
+
+#terminal-tips-heading {
+  font-size: 1rem;
+}
+
+#terminal-tips-panel label {
+  display: block;
+  margin-top: 8px;
+}
+
+#terminal-tips-search {
+  width: 100%;
+  margin-top: 4px;
+  padding: 5px 7px;
+}
+
+#terminal-tips-status {
+  margin-top: 7px;
+  color: #d7d7d7;
+  font-size: 0.85rem;
+}
+
+.terminal-tip {
+  margin-top: 7px;
+}
+
+.terminal-tip h3 {
+  font-size: 0.95rem;
+}
+
+.terminal-tip p {
+  color: #e2e2e2;
+  font-size: 0.85rem;
+}
+
+#terminal-tips-toggle:focus-visible,
+#terminal-tips-close:focus-visible,
+#terminal-tips-search:focus-visible {
+  outline: 3px solid #ffdc7a;
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .terminal-tips {
+    top: 6px;
+    right: 6px;
+    width: min(290px, calc(100vw - 12px));
+  }
+
+  #terminal-tips-panel {
+    max-height: calc(100vh - 54px);
+    overflow-y: auto;
+  }
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */
