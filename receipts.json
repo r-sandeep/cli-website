@@ -1,0 +1,399 @@
+[
+  {
+    "version": 1,
+    "source": "tool_result",
+    "workflowRunId": "workflow_run_7c399f38f2264e529893c6eaff69cb8e",
+    "workflowNodeId": "critic",
+    "toolName": "run_clean_checkout",
+    "toolCallId": "call_3kxxgpklcaip1N1CESaXczHo",
+    "idempotencyKey": "tool_call_a4fa97e356ef45e150a37e0773de7a06",
+    "ok": true,
+    "outputSha256": "44110e7496152b929affb33b100c5596e314a79a4ac95003bbd7e2edcec80383",
+    "artifactIds": [],
+    "recordedAt": "2026-09-29T01:53:45.221Z",
+    "command": "npm test",
+    "commands": [
+      "npm test"
+    ],
+    "passedValidationProofIds": [
+      "project-validation/d97ddac5c090e75dcad92ed5/v1"
+    ],
+    "exitCode": 0,
+    "repositoryRunId": "repository_run_93076cdc18b1eab9696f",
+    "workspaceStateSha256": "e1fdf113a19fa519d0574b53a848347defb4deeb1434888bedd04287b1c12790",
+    "workspaceContentSha256": "ed749bf8d9b83c78b7279a0a2c99aa4fc98e9bd196ec3690163cb180b6c9cf8d",
+    "headRevisions": {
+      "repos/github_1330417154": "cc87d58f00f93a9a82c0c0f2df73a2e22e033ea3"
+    },
+    "runtimeEnvironmentRef": {
+      "id": "runtime_local_process_default",
+      "version": "v1"
+    },
+    "runtimeExecutionMode": "local_process",
+    "runtimeContractVersion": "1",
+    "runtimeCapabilities": [
+      "code:edit",
+      "code:read",
+      "test:run"
+    ],
+    "outputBytes": 9515,
+    "validationCommandContractSha256": "91f917a3d12e10d321e252a475e82d38690d19123039708cb4b62cabb80622fa",
+    "validationCommandId": "validation_command_ed44d4fb3c15f986b330e131fe48f4304643e1615ae8cf485d215e476ab3feb0",
+    "validationCommandIds": [
+      "validation_command_ed44d4fb3c15f986b330e131fe48f4304643e1615ae8cf485d215e476ab3feb0"
+    ],
+    "validationWorkingDirectory": null,
+    "id": "evidence_tool_d2a822be8f78d7eaafaa2141686452296ab5e4f1337f403e06ff296682c1ad45"
+  },
+  {
+    "version": 1,
+    "source": "tool_result",
+    "workflowRunId": "workflow_run_7c399f38f2264e529893c6eaff69cb8e",
+    "workflowNodeId": "critic",
+    "toolName": "run_clean_checkout",
+    "toolCallId": "call_RwZwRPfYjTNiQ7xpm4VlAI8K",
+    "idempotencyKey": "tool_call_0423966d54d80da9283a74a500cf52c2",
+    "ok": true,
+    "outputSha256": "f86e31ed5ef7e33bbf10b78f7fa0526a1a9fd09b258f5a5f3068f0af706cbc87",
+    "artifactIds": [],
+    "recordedAt": "2026-09-29T01:54:58.374Z",
+    "command": "npm run build",
+    "commands": [
+      "npm run build"
+    ],
+    "passedValidationProofIds": [
+      "project-validation/170377a6985ff56125b38918/v1"
+    ],
+    "exitCode": 0,
+    "repositoryRunId": "repository_run_93076cdc18b1eab9696f",
+    "workspaceStateSha256": "e1fdf113a19fa519d0574b53a848347defb4deeb1434888bedd04287b1c12790",
+    "workspaceContentSha256": "ed749bf8d9b83c78b7279a0a2c99aa4fc98e9bd196ec3690163cb180b6c9cf8d",
+    "headRevisions": {
+      "repos/github_1330417154": "cc87d58f00f93a9a82c0c0f2df73a2e22e033ea3"
+    },
+    "runtimeEnvironmentRef": {
+      "id": "runtime_local_process_default",
+      "version": "v1"
+    },
+    "runtimeExecutionMode": "local_process",
+    "runtimeContractVersion": "1",
+    "runtimeCapabilities": [
+      "code:edit",
+      "code:read",
+      "test:run"
+    ],
+    "outputBytes": 1806,
+    "validationCommandContractSha256": "91f917a3d12e10d321e252a475e82d38690d19123039708cb4b62cabb80622fa",
+    "validationCommandId": "validation_command_ceec5cf6e860d4ffba1a074083a06d420aac391c89de3dd3c425b5369e19eeac",
+    "validationCommandIds": [
+      "validation_command_ceec5cf6e860d4ffba1a074083a06d420aac391c89de3dd3c425b5369e19eeac"
+    ],
+    "validationWorkingDirectory": null,
+    "id": "evidence_tool_b809623d0b4dc2da405caae2c6277d76b90cd61ddbd05568a7508a548223a526"
+  },
+  {
+    "version": 1,
+    "source": "tool_result",
+    "workflowRunId": "workflow_run_7c399f38f2264e529893c6eaff69cb8e",
+    "workflowNodeId": "critic",
+    "toolName": "run_application_validation",
+    "applicationValidation": {
+      "phase": "scenarios",
+      "runId": "f7544fdcaed506268f171552bb31722447f0bed44196277977dd9e6a0cffb2ce",
+      "status": "passed",
+      "attempt": 1,
+      "recipeId": "recipe_cli_application_v1",
+      "profileId": "cli_website",
+      "scenarios": [
+        {
+          "id": "baseline_narrow",
+          "status": "passed",
+          "assertions": 5,
+          "durationMs": 563,
+          "artifactIds": [
+            "artifact_354af434-32b4-48e3-a701-804f523569cc_ca",
+            "artifact_d6365ce7-8b93-4815-bfc7-4a793655ef97_cb",
+            "artifact_171e92ab-b72d-491d-ad9e-5cc5b521cf44_cc"
+          ],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "baseline_wide",
+          "status": "passed",
+          "assertions": 5,
+          "durationMs": 454,
+          "artifactIds": [
+            "artifact_05fca335-15c9-4983-bb8e-5c8a7a8c8f4c_cf",
+            "artifact_42923605-8ae0-4f88-9fdf-484d1d6eb27a_cg",
+            "artifact_5558a6c9-e0f1-405f-8015-4703b87ff6ae_ch"
+          ],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "baseline_http",
+          "status": "passed",
+          "assertions": 4,
+          "durationMs": 2,
+          "artifactIds": [],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "acceptance_narrow",
+          "status": "passed",
+          "assertions": 9,
+          "durationMs": 490,
+          "artifactIds": [
+            "artifact_c7dae6e7-c6e3-4ee5-ae7b-4f8378cc4615_cm",
+            "artifact_b10ab944-3fc9-432d-b695-5100638d8228_cn",
+            "artifact_c18f1099-4b5e-41d6-bd5f-524f5b5190e1_co"
+          ],
+          "requirementRefs": [
+            "requirement_01_ec76e8235789",
+            "requirement_03_8950d5bc28f7",
+            "requirement_04_f325920c1d85",
+            "requirement_05_79fd71e0c45c",
+            "requirement_06_9d0b275e4323",
+            "requirement_08_403ccc8cd1e1",
+            "requirement_09_9577a0c8b3fa",
+            "requirement_10_e359d2b080d7",
+            "requirement_11_b286d7d6f4f4",
+            "requirement_12_c1a7d2d1ad4e",
+            "requirement_13_311d73c97ce1",
+            "requirement_14_9e182d007933",
+            "requirement_15_bd249ff5813d",
+            "requirement_16_f0a303a67372",
+            "requirement_17_db0b467f4cbe",
+            "requirement_18_92657403b35a",
+            "requirement_19_c94780e588cb",
+            "requirement_20_184a085684eb",
+            "requirement_21_d7b67babddba",
+            "requirement_22_1d30201675c8",
+            "requirement_23_9b9cdf0bd474",
+            "requirement_25_9ea035081176",
+            "requirement_26_62065efa5e10",
+            "requirement_28_f74439ff1c95",
+            "requirement_29_4d3cd7369056",
+            "requirement_30_ddc50ebc32c9",
+            "requirement_31_c1108746491e",
+            "requirement_32_849d66e8f25f"
+          ]
+        },
+        {
+          "id": "acceptance_wide",
+          "status": "passed",
+          "assertions": 9,
+          "durationMs": 1127,
+          "artifactIds": [
+            "artifact_c3117e7f-53c0-402c-850d-269471e7756c_cr",
+            "artifact_df14787f-4ffa-4814-8db5-7006a5aeff4d_cs",
+            "artifact_004f00d2-7fd5-4f27-97f0-e815e1aaab75_ct"
+          ],
+          "requirementRefs": [
+            "requirement_01_ec76e8235789",
+            "requirement_03_8950d5bc28f7",
+            "requirement_04_f325920c1d85",
+            "requirement_05_79fd71e0c45c",
+            "requirement_06_9d0b275e4323",
+            "requirement_08_403ccc8cd1e1",
+            "requirement_09_9577a0c8b3fa",
+            "requirement_10_e359d2b080d7",
+            "requirement_11_b286d7d6f4f4",
+            "requirement_12_c1a7d2d1ad4e",
+            "requirement_13_311d73c97ce1",
+            "requirement_14_9e182d007933",
+            "requirement_15_bd249ff5813d",
+            "requirement_16_f0a303a67372",
+            "requirement_17_db0b467f4cbe",
+            "requirement_18_92657403b35a",
+            "requirement_19_c94780e588cb",
+            "requirement_20_184a085684eb",
+            "requirement_21_d7b67babddba",
+            "requirement_22_1d30201675c8",
+            "requirement_23_9b9cdf0bd474",
+            "requirement_25_9ea035081176",
+            "requirement_26_62065efa5e10",
+            "requirement_28_f74439ff1c95",
+            "requirement_29_4d3cd7369056",
+            "requirement_30_ddc50ebc32c9",
+            "requirement_31_c1108746491e",
+            "requirement_32_849d66e8f25f"
+          ]
+        },
+        {
+          "id": "tips_lifecycle",
+          "status": "passed",
+          "assertions": 23,
+          "durationMs": 494,
+          "artifactIds": [
+            "artifact_da856ad2-2bd6-4bf7-a72b-e7475bb970b0_cw",
+            "artifact_21fa110c-ee85-4a67-81c8-b04fd1a17aa0_cx",
+            "artifact_97d9ad15-ac22-42ce-b6c3-cc1175e0d521_cy"
+          ],
+          "requirementRefs": [
+            "requirement_01_ec76e8235789",
+            "requirement_03_8950d5bc28f7",
+            "requirement_04_f325920c1d85",
+            "requirement_05_79fd71e0c45c",
+            "requirement_06_9d0b275e4323",
+            "requirement_08_403ccc8cd1e1",
+            "requirement_09_9577a0c8b3fa",
+            "requirement_10_e359d2b080d7",
+            "requirement_11_b286d7d6f4f4",
+            "requirement_12_c1a7d2d1ad4e",
+            "requirement_13_311d73c97ce1",
+            "requirement_14_9e182d007933",
+            "requirement_15_bd249ff5813d",
+            "requirement_16_f0a303a67372",
+            "requirement_17_db0b467f4cbe",
+            "requirement_18_92657403b35a",
+            "requirement_20_184a085684eb",
+            "requirement_21_d7b67babddba",
+            "requirement_22_1d30201675c8",
+            "requirement_23_9b9cdf0bd474",
+            "requirement_25_9ea035081176",
+            "requirement_26_62065efa5e10",
+            "requirement_29_4d3cd7369056",
+            "requirement_31_c1108746491e"
+          ]
+        },
+        {
+          "id": "terminal_tab_preserved",
+          "status": "passed",
+          "assertions": 2,
+          "durationMs": 413,
+          "artifactIds": [
+            "artifact_6b528e7d-537e-40cc-9f79-4b321902e7b1_d1",
+            "artifact_6347d711-29c1-4fb3-a358-23be00fe270a_d2",
+            "artifact_acf8ba38-3b04-4302-86ad-93eb8adee927_d3"
+          ],
+          "requirementRefs": [
+            "requirement_03_8950d5bc28f7",
+            "requirement_15_bd249ff5813d",
+            "requirement_17_db0b467f4cbe",
+            "requirement_20_184a085684eb",
+            "requirement_25_9ea035081176",
+            "requirement_26_62065efa5e10",
+            "requirement_30_ddc50ebc32c9",
+            "requirement_31_c1108746491e",
+            "requirement_32_849d66e8f25f"
+          ]
+        }
+      ],
+      "startedAt": "2026-09-29T01:53:54.951Z",
+      "finishedAt": "2026-09-29T01:54:40.147Z",
+      "artifactIds": [
+        "artifact_11cf7838-f3b6-4aff-bdb4-372e9f0659c5_c9",
+        "artifact_354af434-32b4-48e3-a701-804f523569cc_ca",
+        "artifact_d6365ce7-8b93-4815-bfc7-4a793655ef97_cb",
+        "artifact_171e92ab-b72d-491d-ad9e-5cc5b521cf44_cc",
+        "artifact_5657cec8-1351-4638-8fca-722238510ce2_cd",
+        "artifact_b17335c4-0a16-4d12-8b0c-60771437a0ed_ce",
+        "artifact_05fca335-15c9-4983-bb8e-5c8a7a8c8f4c_cf",
+        "artifact_42923605-8ae0-4f88-9fdf-484d1d6eb27a_cg",
+        "artifact_5558a6c9-e0f1-405f-8015-4703b87ff6ae_ch",
+        "artifact_000abd36-acb7-409d-ad19-a921530b76a6_ci",
+        "artifact_d7f7427f-ed3f-4931-9d4a-55428814857c_cj",
+        "artifact_58d5fa8b-eff1-4a47-9624-b8cdb04a69ef_ck",
+        "artifact_be6c9581-cb3c-44c7-8475-ad101e29fb73_cl",
+        "artifact_c7dae6e7-c6e3-4ee5-ae7b-4f8378cc4615_cm",
+        "artifact_b10ab944-3fc9-432d-b695-5100638d8228_cn",
+        "artifact_c18f1099-4b5e-41d6-bd5f-524f5b5190e1_co",
+        "artifact_5a8d92f3-2883-4504-9839-55996afc8dd7_cp",
+        "artifact_1b50f040-9b23-40ab-ad37-98b4cb2e1884_cq",
+        "artifact_c3117e7f-53c0-402c-850d-269471e7756c_cr",
+        "artifact_df14787f-4ffa-4814-8db5-7006a5aeff4d_cs",
+        "artifact_004f00d2-7fd5-4f27-97f0-e815e1aaab75_ct",
+        "artifact_b21648bc-c766-4296-86e9-0849f60ce976_cu",
+        "artifact_758ddf9b-52c1-4cf3-9505-a88aa3c7b9c1_cv",
+        "artifact_da856ad2-2bd6-4bf7-a72b-e7475bb970b0_cw",
+        "artifact_21fa110c-ee85-4a67-81c8-b04fd1a17aa0_cx",
+        "artifact_97d9ad15-ac22-42ce-b6c3-cc1175e0d521_cy",
+        "artifact_48dc1be5-bdde-4562-8e50-1aff3e31ce22_cz",
+        "artifact_60538bce-1365-4dcf-8235-d36a4d19eff9_d0",
+        "artifact_6b528e7d-537e-40cc-9f79-4b321902e7b1_d1",
+        "artifact_6347d711-29c1-4fb3-a358-23be00fe270a_d2",
+        "artifact_acf8ba38-3b04-4302-86ad-93eb8adee927_d3",
+        "artifact_87a2736e-5bc7-4e02-a9ce-2e5e8db74a51_d4"
+      ],
+      "scenarioIds": [
+        "baseline_narrow",
+        "baseline_wide",
+        "baseline_http",
+        "acceptance_narrow",
+        "acceptance_wide",
+        "tips_lifecycle",
+        "terminal_tab_preserved"
+      ],
+      "candidateTree": "a88365ba4fb1852da2bf3d0477c7964125ade064f7c66ff3a2be00f1d3920478",
+      "profileSha256": "d8e03e75057d56226214191b0dbf785fe479ef1bc8689ab2319cf9c47f9074cc",
+      "recipeVersion": "1.0.3",
+      "cleanupComplete": true,
+      "contractVersion": "application_validation_v1",
+      "environmentIdentity": "{\"runner\":\"application-validation:2026-09-28.1\",\"environment\":\"runtime_local_process_default\",\"version\":\"v1\",\"image\":null,\"node\":\"25.9.0\",\"platform\":\"darwin\",\"architecture\":\"arm64\",\"browserExecutable\":\"/Users/sandeep/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\",\"suite\":\"2026-09-25.1\"}"
+    },
+    "toolCallId": "call_qEw0XoIHuxeezDJTUAJKu04p",
+    "idempotencyKey": "tool_call_6e37be8cefe4398eb5e8843938b01878",
+    "ok": true,
+    "outputSha256": "d29ef777b7a50496c984e2f23f5b4fe36db44d341ee62adbd11e5046208a2d98",
+    "artifactIds": [
+      "artifact_000abd36-acb7-409d-ad19-a921530b76a6_ci",
+      "artifact_004f00d2-7fd5-4f27-97f0-e815e1aaab75_ct",
+      "artifact_05fca335-15c9-4983-bb8e-5c8a7a8c8f4c_cf",
+      "artifact_11cf7838-f3b6-4aff-bdb4-372e9f0659c5_c9",
+      "artifact_171e92ab-b72d-491d-ad9e-5cc5b521cf44_cc",
+      "artifact_1b50f040-9b23-40ab-ad37-98b4cb2e1884_cq",
+      "artifact_21fa110c-ee85-4a67-81c8-b04fd1a17aa0_cx",
+      "artifact_354af434-32b4-48e3-a701-804f523569cc_ca",
+      "artifact_42923605-8ae0-4f88-9fdf-484d1d6eb27a_cg",
+      "artifact_48dc1be5-bdde-4562-8e50-1aff3e31ce22_cz",
+      "artifact_5558a6c9-e0f1-405f-8015-4703b87ff6ae_ch",
+      "artifact_5657cec8-1351-4638-8fca-722238510ce2_cd",
+      "artifact_58d5fa8b-eff1-4a47-9624-b8cdb04a69ef_ck",
+      "artifact_5a8d92f3-2883-4504-9839-55996afc8dd7_cp",
+      "artifact_60538bce-1365-4dcf-8235-d36a4d19eff9_d0",
+      "artifact_6347d711-29c1-4fb3-a358-23be00fe270a_d2",
+      "artifact_6b528e7d-537e-40cc-9f79-4b321902e7b1_d1",
+      "artifact_758ddf9b-52c1-4cf3-9505-a88aa3c7b9c1_cv",
+      "artifact_87a2736e-5bc7-4e02-a9ce-2e5e8db74a51_d4",
+      "artifact_97d9ad15-ac22-42ce-b6c3-cc1175e0d521_cy",
+      "artifact_acf8ba38-3b04-4302-86ad-93eb8adee927_d3",
+      "artifact_b10ab944-3fc9-432d-b695-5100638d8228_cn",
+      "artifact_b17335c4-0a16-4d12-8b0c-60771437a0ed_ce",
+      "artifact_b21648bc-c766-4296-86e9-0849f60ce976_cu",
+      "artifact_be6c9581-cb3c-44c7-8475-ad101e29fb73_cl",
+      "artifact_c18f1099-4b5e-41d6-bd5f-524f5b5190e1_co",
+      "artifact_c3117e7f-53c0-402c-850d-269471e7756c_cr",
+      "artifact_c7dae6e7-c6e3-4ee5-ae7b-4f8378cc4615_cm",
+      "artifact_d6365ce7-8b93-4815-bfc7-4a793655ef97_cb",
+      "artifact_d7f7427f-ed3f-4931-9d4a-55428814857c_cj",
+      "artifact_da856ad2-2bd6-4bf7-a72b-e7475bb970b0_cw",
+      "artifact_df14787f-4ffa-4814-8db5-7006a5aeff4d_cs"
+    ],
+    "recordedAt": "2026-09-29T01:54:40.811Z",
+    "repositoryRunId": "repository_run_93076cdc18b1eab9696f",
+    "workspaceStateSha256": "e1fdf113a19fa519d0574b53a848347defb4deeb1434888bedd04287b1c12790",
+    "workspaceContentSha256": "ed749bf8d9b83c78b7279a0a2c99aa4fc98e9bd196ec3690163cb180b6c9cf8d",
+    "headRevisions": {
+      "repos/github_1330417154": "cc87d58f00f93a9a82c0c0f2df73a2e22e033ea3"
+    },
+    "runtimeEnvironmentRef": {
+      "id": "runtime_local_process_default",
+      "version": "v1"
+    },
+    "runtimeExecutionMode": "local_process",
+    "runtimeContractVersion": "1",
+    "runtimeCapabilities": [
+      "code:edit",
+      "code:read",
+      "test:run"
+    ],
+    "outputBytes": 7232,
+    "id": "evidence_tool_5c5262ef67542aae3e6c4fd0077b863c8af7e6e60f92fe1c6a49c14de6930b80"
+  }
+]

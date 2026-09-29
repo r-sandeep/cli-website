@@ -1,0 +1,406 @@
+{
+  "version": 1,
+  "acceptance": {
+    "sha256": "b83f64c12883015434ba3154d211835e2f216161a46b808492b7ffc965bbd5f5",
+    "version": 1,
+    "acceptedAt": "2026-09-29T01:57:58.942Z",
+    "agentRunId": "agent_run_94236948e3564d6c8e7308a8bb6d97fd",
+    "reviseRound": 0,
+    "headRevisions": {
+      "repos/github_1330417154": "cc87d58f00f93a9a82c0c0f2df73a2e22e033ea3"
+    },
+    "workflowRunId": "workflow_run_7c399f38f2264e529893c6eaff69cb8e",
+    "workflowNodeId": "critic",
+    "repositoryRunId": "repository_run_93076cdc18b1eab9696f",
+    "evidenceReceiptId": "evidence_tool_beeea3dfe995e5d685a27259a8ce8f5eabd9b8fba1d499e8804f0cc2adf78959",
+    "workspaceStateSha256": "e1fdf113a19fa519d0574b53a848347defb4deeb1434888bedd04287b1c12790",
+    "workspaceContentSha256": "ed749bf8d9b83c78b7279a0a2c99aa4fc98e9bd196ec3690163cb180b6c9cf8d"
+  },
+  "publishedRevision": "dd16b3a73d98ac3f9f66efa74b34cb273a9f5ff6",
+  "commands": [
+    "npm test",
+    "npm run build"
+  ],
+  "scenarios": [
+    {
+      "profileId": "cli_website",
+      "id": "baseline_narrow",
+      "status": "passed",
+      "assertions": 5,
+      "durationMs": 563,
+      "artifactIds": [
+        "artifact_354af434-32b4-48e3-a701-804f523569cc_ca",
+        "artifact_d6365ce7-8b93-4815-bfc7-4a793655ef97_cb",
+        "artifact_171e92ab-b72d-491d-ad9e-5cc5b521cf44_cc"
+      ],
+      "requirementRefs": [
+        "baseline"
+      ]
+    },
+    {
+      "profileId": "cli_website",
+      "id": "baseline_wide",
+      "status": "passed",
+      "assertions": 5,
+      "durationMs": 454,
+      "artifactIds": [
+        "artifact_05fca335-15c9-4983-bb8e-5c8a7a8c8f4c_cf",
+        "artifact_42923605-8ae0-4f88-9fdf-484d1d6eb27a_cg",
+        "artifact_5558a6c9-e0f1-405f-8015-4703b87ff6ae_ch"
+      ],
+      "requirementRefs": [
+        "baseline"
+      ]
+    },
+    {
+      "profileId": "cli_website",
+      "id": "baseline_http",
+      "status": "passed",
+      "assertions": 4,
+      "durationMs": 2,
+      "artifactIds": [],
+      "requirementRefs": [
+        "baseline"
+      ]
+    },
+    {
+      "profileId": "cli_website",
+      "id": "acceptance_narrow",
+      "status": "passed",
+      "assertions": 9,
+      "durationMs": 490,
+      "artifactIds": [
+        "artifact_c7dae6e7-c6e3-4ee5-ae7b-4f8378cc4615_cm",
+        "artifact_b10ab944-3fc9-432d-b695-5100638d8228_cn",
+        "artifact_c18f1099-4b5e-41d6-bd5f-524f5b5190e1_co"
+      ],
+      "requirementRefs": [
+        "requirement_01_ec76e8235789",
+        "requirement_03_8950d5bc28f7",
+        "requirement_04_f325920c1d85",
+        "requirement_05_79fd71e0c45c",
+        "requirement_06_9d0b275e4323",
+        "requirement_08_403ccc8cd1e1",
+        "requirement_09_9577a0c8b3fa",
+        "requirement_10_e359d2b080d7",
+        "requirement_11_b286d7d6f4f4",
+        "requirement_12_c1a7d2d1ad4e",
+        "requirement_13_311d73c97ce1",
+        "requirement_14_9e182d007933",
+        "requirement_15_bd249ff5813d",
+        "requirement_16_f0a303a67372",
+        "requirement_17_db0b467f4cbe",
+        "requirement_18_92657403b35a",
+        "requirement_19_c94780e588cb",
+        "requirement_20_184a085684eb",
+        "requirement_21_d7b67babddba",
+        "requirement_22_1d30201675c8",
+        "requirement_23_9b9cdf0bd474",
+        "requirement_25_9ea035081176",
+        "requirement_26_62065efa5e10",
+        "requirement_28_f74439ff1c95",
+        "requirement_29_4d3cd7369056",
+        "requirement_30_ddc50ebc32c9",
+        "requirement_31_c1108746491e",
+        "requirement_32_849d66e8f25f"
+      ]
+    },
+    {
+      "profileId": "cli_website",
+      "id": "acceptance_wide",
+      "status": "passed",
+      "assertions": 9,
+      "durationMs": 1127,
+      "artifactIds": [
+        "artifact_c3117e7f-53c0-402c-850d-269471e7756c_cr",
+        "artifact_df14787f-4ffa-4814-8db5-7006a5aeff4d_cs",
+        "artifact_004f00d2-7fd5-4f27-97f0-e815e1aaab75_ct"
+      ],
+      "requirementRefs": [
+        "requirement_01_ec76e8235789",
+        "requirement_03_8950d5bc28f7",
+        "requirement_04_f325920c1d85",
+        "requirement_05_79fd71e0c45c",
+        "requirement_06_9d0b275e4323",
+        "requirement_08_403ccc8cd1e1",
+        "requirement_09_9577a0c8b3fa",
+        "requirement_10_e359d2b080d7",
+        "requirement_11_b286d7d6f4f4",
+        "requirement_12_c1a7d2d1ad4e",
+        "requirement_13_311d73c97ce1",
+        "requirement_14_9e182d007933",
+        "requirement_15_bd249ff5813d",
+        "requirement_16_f0a303a67372",
+        "requirement_17_db0b467f4cbe",
+        "requirement_18_92657403b35a",
+        "requirement_19_c94780e588cb",
+        "requirement_20_184a085684eb",
+        "requirement_21_d7b67babddba",
+        "requirement_22_1d30201675c8",
+        "requirement_23_9b9cdf0bd474",
+        "requirement_25_9ea035081176",
+        "requirement_26_62065efa5e10",
+        "requirement_28_f74439ff1c95",
+        "requirement_29_4d3cd7369056",
+        "requirement_30_ddc50ebc32c9",
+        "requirement_31_c1108746491e",
+        "requirement_32_849d66e8f25f"
+      ]
+    },
+    {
+      "profileId": "cli_website",
+      "id": "tips_lifecycle",
+      "status": "passed",
+      "assertions": 23,
+      "durationMs": 494,
+      "artifactIds": [
+        "artifact_da856ad2-2bd6-4bf7-a72b-e7475bb970b0_cw",
+        "artifact_21fa110c-ee85-4a67-81c8-b04fd1a17aa0_cx",
+        "artifact_97d9ad15-ac22-42ce-b6c3-cc1175e0d521_cy"
+      ],
+      "requirementRefs": [
+        "requirement_01_ec76e8235789",
+        "requirement_03_8950d5bc28f7",
+        "requirement_04_f325920c1d85",
+        "requirement_05_79fd71e0c45c",
+        "requirement_06_9d0b275e4323",
+        "requirement_08_403ccc8cd1e1",
+        "requirement_09_9577a0c8b3fa",
+        "requirement_10_e359d2b080d7",
+        "requirement_11_b286d7d6f4f4",
+        "requirement_12_c1a7d2d1ad4e",
+        "requirement_13_311d73c97ce1",
+        "requirement_14_9e182d007933",
+        "requirement_15_bd249ff5813d",
+        "requirement_16_f0a303a67372",
+        "requirement_17_db0b467f4cbe",
+        "requirement_18_92657403b35a",
+        "requirement_20_184a085684eb",
+        "requirement_21_d7b67babddba",
+        "requirement_22_1d30201675c8",
+        "requirement_23_9b9cdf0bd474",
+        "requirement_25_9ea035081176",
+        "requirement_26_62065efa5e10",
+        "requirement_29_4d3cd7369056",
+        "requirement_31_c1108746491e"
+      ]
+    },
+    {
+      "profileId": "cli_website",
+      "id": "terminal_tab_preserved",
+      "status": "passed",
+      "assertions": 2,
+      "durationMs": 413,
+      "artifactIds": [
+        "artifact_6b528e7d-537e-40cc-9f79-4b321902e7b1_d1",
+        "artifact_6347d711-29c1-4fb3-a358-23be00fe270a_d2",
+        "artifact_acf8ba38-3b04-4302-86ad-93eb8adee927_d3"
+      ],
+      "requirementRefs": [
+        "requirement_03_8950d5bc28f7",
+        "requirement_15_bd249ff5813d",
+        "requirement_17_db0b467f4cbe",
+        "requirement_20_184a085684eb",
+        "requirement_25_9ea035081176",
+        "requirement_26_62065efa5e10",
+        "requirement_30_ddc50ebc32c9",
+        "requirement_31_c1108746491e",
+        "requirement_32_849d66e8f25f"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact_000abd36-acb7-409d-ad19-a921530b76a6_ci",
+      "path": "artifacts/2bbf3f2ad1e3a23a1183fae84d9a5650c1b56320da48241ac307555e32ef765b.bin",
+      "bytes": 2442,
+      "sha256": "2bbf3f2ad1e3a23a1183fae84d9a5650c1b56320da48241ac307555e32ef765b"
+    },
+    {
+      "id": "artifact_004f00d2-7fd5-4f27-97f0-e815e1aaab75_ct",
+      "path": "artifacts/944c126cb2d8cb76705da4074f2c684fc99e5068d5a2f6bb838b13ec47621519.bin",
+      "bytes": 306,
+      "sha256": "944c126cb2d8cb76705da4074f2c684fc99e5068d5a2f6bb838b13ec47621519"
+    },
+    {
+      "id": "artifact_05fca335-15c9-4983-bb8e-5c8a7a8c8f4c_cf",
+      "path": "artifacts/dace864d264dc498f69f95bee28deb7b16afa1151c85177f84e481160b1b58b8.png",
+      "bytes": 28371,
+      "sha256": "dace864d264dc498f69f95bee28deb7b16afa1151c85177f84e481160b1b58b8"
+    },
+    {
+      "id": "artifact_11cf7838-f3b6-4aff-bdb4-372e9f0659c5_c9",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_171e92ab-b72d-491d-ad9e-5cc5b521cf44_cc",
+      "path": "artifacts/13d1f6d3e2580cbcd086282df8a3fb62d851abadd00eeb195e713e0f74a5dba5.bin",
+      "bytes": 305,
+      "sha256": "13d1f6d3e2580cbcd086282df8a3fb62d851abadd00eeb195e713e0f74a5dba5"
+    },
+    {
+      "id": "artifact_1b50f040-9b23-40ab-ad37-98b4cb2e1884_cq",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_21fa110c-ee85-4a67-81c8-b04fd1a17aa0_cx",
+      "path": "artifacts/e672e91ad698034c1bf0a9135ab383e2a41a1f5e32e35e1bd8dda8526050917f.zip",
+      "bytes": 999210,
+      "sha256": "e672e91ad698034c1bf0a9135ab383e2a41a1f5e32e35e1bd8dda8526050917f"
+    },
+    {
+      "id": "artifact_354af434-32b4-48e3-a701-804f523569cc_ca",
+      "path": "artifacts/bd30c905375e63f218ce8dce07e9651bd812d9fd0225fa573cd57df34ee3f5b5.png",
+      "bytes": 23207,
+      "sha256": "bd30c905375e63f218ce8dce07e9651bd812d9fd0225fa573cd57df34ee3f5b5"
+    },
+    {
+      "id": "artifact_42923605-8ae0-4f88-9fdf-484d1d6eb27a_cg",
+      "path": "artifacts/95090d07adac380f766e208a073cae835325db5f07dc2c86c94767dd38f36baf.zip",
+      "bytes": 683572,
+      "sha256": "95090d07adac380f766e208a073cae835325db5f07dc2c86c94767dd38f36baf"
+    },
+    {
+      "id": "artifact_48dc1be5-bdde-4562-8e50-1aff3e31ce22_cz",
+      "path": "artifacts/30bd543388e137520b2f4e82a7222ed4b9bef9a76ecbc2ca69f1c313b1226f64.bin",
+      "bytes": 4504,
+      "sha256": "30bd543388e137520b2f4e82a7222ed4b9bef9a76ecbc2ca69f1c313b1226f64"
+    },
+    {
+      "id": "artifact_5558a6c9-e0f1-405f-8015-4703b87ff6ae_ch",
+      "path": "artifacts/20453f2fb822e5fa4f2c99069601ae3a20f20d52b5eb02c9567376b1557a961e.bin",
+      "bytes": 304,
+      "sha256": "20453f2fb822e5fa4f2c99069601ae3a20f20d52b5eb02c9567376b1557a961e"
+    },
+    {
+      "id": "artifact_5657cec8-1351-4638-8fca-722238510ce2_cd",
+      "path": "artifacts/ea0f9b65e8c27de08980452022411b7f61d592cb4fced99e45aa14b204d97ed0.bin",
+      "bytes": 717,
+      "sha256": "ea0f9b65e8c27de08980452022411b7f61d592cb4fced99e45aa14b204d97ed0"
+    },
+    {
+      "id": "artifact_58d5fa8b-eff1-4a47-9624-b8cdb04a69ef_ck",
+      "path": "artifacts/eb05ada1b4a55f3a7cc473799b2830e1593a143306a6bf3608cf28414f3061b1.bin",
+      "bytes": 197,
+      "sha256": "eb05ada1b4a55f3a7cc473799b2830e1593a143306a6bf3608cf28414f3061b1"
+    },
+    {
+      "id": "artifact_5a8d92f3-2883-4504-9839-55996afc8dd7_cp",
+      "path": "artifacts/fc8e5531991334cd1b947da95b3dcf96e86ebfdd36f437ad03d8374e324d71b6.bin",
+      "bytes": 717,
+      "sha256": "fc8e5531991334cd1b947da95b3dcf96e86ebfdd36f437ad03d8374e324d71b6"
+    },
+    {
+      "id": "artifact_60538bce-1365-4dcf-8235-d36a4d19eff9_d0",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_6347d711-29c1-4fb3-a358-23be00fe270a_d2",
+      "path": "artifacts/1184e2fa956db4692101017bb19899adb7fc0da99eab083e02aad55253ad4d09.zip",
+      "bytes": 866228,
+      "sha256": "1184e2fa956db4692101017bb19899adb7fc0da99eab083e02aad55253ad4d09"
+    },
+    {
+      "id": "artifact_6b528e7d-537e-40cc-9f79-4b321902e7b1_d1",
+      "path": "artifacts/eee96e32689e6c0c1c730617e66793d81994b83ae1cac6b02d27282cbf5b79f3.png",
+      "bytes": 30840,
+      "sha256": "eee96e32689e6c0c1c730617e66793d81994b83ae1cac6b02d27282cbf5b79f3"
+    },
+    {
+      "id": "artifact_758ddf9b-52c1-4cf3-9505-a88aa3c7b9c1_cv",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_87a2736e-5bc7-4e02-a9ce-2e5e8db74a51_d4",
+      "path": "artifacts/c4565582b52c2d18ccdd109a017fd54e55bc6c3efb8f284ee357022a59869a72.bin",
+      "bytes": 2442,
+      "sha256": "c4565582b52c2d18ccdd109a017fd54e55bc6c3efb8f284ee357022a59869a72"
+    },
+    {
+      "id": "artifact_97d9ad15-ac22-42ce-b6c3-cc1175e0d521_cy",
+      "path": "artifacts/f3978dab32156446c25cbbc78e982311f4032d0263420ab391def392bdfceaf4.bin",
+      "bytes": 305,
+      "sha256": "f3978dab32156446c25cbbc78e982311f4032d0263420ab391def392bdfceaf4"
+    },
+    {
+      "id": "artifact_acf8ba38-3b04-4302-86ad-93eb8adee927_d3",
+      "path": "artifacts/ec7273af5a8706ac62ce32d84af02ba5db56d47de65caf36b879d566bf544ed0.bin",
+      "bytes": 312,
+      "sha256": "ec7273af5a8706ac62ce32d84af02ba5db56d47de65caf36b879d566bf544ed0"
+    },
+    {
+      "id": "artifact_b10ab944-3fc9-432d-b695-5100638d8228_cn",
+      "path": "artifacts/98cad0b220070786f61ffd1acecb5fcb4e041002a0dd040b3b2262ec3e1f36f4.zip",
+      "bytes": 349583,
+      "sha256": "98cad0b220070786f61ffd1acecb5fcb4e041002a0dd040b3b2262ec3e1f36f4"
+    },
+    {
+      "id": "artifact_b17335c4-0a16-4d12-8b0c-60771437a0ed_ce",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_b21648bc-c766-4296-86e9-0849f60ce976_cu",
+      "path": "artifacts/40c11cf8707f7e2eeff0ed011888c8e403915217ff4c84471a2a1a130ffba6b9.bin",
+      "bytes": 4627,
+      "sha256": "40c11cf8707f7e2eeff0ed011888c8e403915217ff4c84471a2a1a130ffba6b9"
+    },
+    {
+      "id": "artifact_be6c9581-cb3c-44c7-8475-ad101e29fb73_cl",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_c18f1099-4b5e-41d6-bd5f-524f5b5190e1_co",
+      "path": "artifacts/65dbf9002ecf323144091178c1b944ad193d93d03491eaf348427deeddd866c2.bin",
+      "bytes": 307,
+      "sha256": "65dbf9002ecf323144091178c1b944ad193d93d03491eaf348427deeddd866c2"
+    },
+    {
+      "id": "artifact_c3117e7f-53c0-402c-850d-269471e7756c_cr",
+      "path": "artifacts/840bd62bb0292d3e040ad4c387129da0ba1513c8eec7bd180961b833728b641b.png",
+      "bytes": 34388,
+      "sha256": "840bd62bb0292d3e040ad4c387129da0ba1513c8eec7bd180961b833728b641b"
+    },
+    {
+      "id": "artifact_c7dae6e7-c6e3-4ee5-ae7b-4f8378cc4615_cm",
+      "path": "artifacts/118287bddca227ac32353558004ab42bde436ee892fea4ecb3e750d68259ae39.png",
+      "bytes": 26207,
+      "sha256": "118287bddca227ac32353558004ab42bde436ee892fea4ecb3e750d68259ae39"
+    },
+    {
+      "id": "artifact_d6365ce7-8b93-4815-bfc7-4a793655ef97_cb",
+      "path": "artifacts/061f835adadb2c1f9aff6cbca8dc11f9495807b06d950ba83bbb2c95bca47032.zip",
+      "bytes": 195278,
+      "sha256": "061f835adadb2c1f9aff6cbca8dc11f9495807b06d950ba83bbb2c95bca47032"
+    },
+    {
+      "id": "artifact_d7f7427f-ed3f-4931-9d4a-55428814857c_cj",
+      "path": "artifacts/d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518.bin",
+      "bytes": 589,
+      "sha256": "d0159ec59e4fe992d257a69ccddac05d5e47d79d13e21919b39936b51d481518"
+    },
+    {
+      "id": "artifact_da856ad2-2bd6-4bf7-a72b-e7475bb970b0_cw",
+      "path": "artifacts/a320874ce48de5d2109f987a59459858f1d23fc09ea25cf958bd4c5d95f89ab9.png",
+      "bytes": 24075,
+      "sha256": "a320874ce48de5d2109f987a59459858f1d23fc09ea25cf958bd4c5d95f89ab9"
+    },
+    {
+      "id": "artifact_df14787f-4ffa-4814-8db5-7006a5aeff4d_cs",
+      "path": "artifacts/9cdd47b3d96d73f4717c96eedad04e0b0007fa590863539bcbc4047a6ba487da.zip",
+      "bytes": 1845273,
+      "sha256": "9cdd47b3d96d73f4717c96eedad04e0b0007fa590863539bcbc4047a6ba487da"
+    }
+  ]
+}
