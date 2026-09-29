@@ -7,17 +7,46 @@ body, html {
 
 body {
   background-color: #2c2c2c;
+  display: flex;
+  flex-direction: column;
   font-family: "Abel";
   margin: 0;
 }
 
 .terminal {
+  box-sizing: border-box;
   height: 100%;
   padding: 24px;
 }
 
 #terminal {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.terminal-controls {
+  flex: 0 0 auto;
+  padding: 12px 24px 0;
+}
+
+#terminal-focus {
+  background: #2c2c2c;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 12px;
+}
+
+#terminal-focus:hover {
+  background: #fff;
+  color: #2c2c2c;
+}
+
+#terminal-focus:focus-visible {
+  outline: 3px solid #ffd54f;
+  outline-offset: 3px;
 }
 
 /* Headings that are present for screen readers and search engines but take up
