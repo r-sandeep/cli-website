@@ -456,10 +456,10 @@ const commands = {
     }
   },
 
-  // Saves, lists, and removes named locations without taking ownership of the
-  // terminal's input or prompt lifecycle.
+  // Saves, lists, renames, and removes named locations without taking ownership
+  // of the terminal's input or prompt lifecycle.
   bookmark: function (args) {
-    const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME";
+    const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME | bookmark rename OLD NEW";
     const subcommand = args[0];
 
     if (subcommand === "add" && args.length === 2) {
@@ -504,6 +504,24 @@ const commands = {
         term.stylePrint(`Bookmark "${name}" not found.`);
       } else {
         term.stylePrint(`Could not remove bookmark "${name}": browser storage is unavailable.`);
+      }
+      return;
+    }
+
+    if (subcommand === "rename" && args.length === 3) {
+      const oldName = args[1];
+      const newName = args[2];
+      const result = bookmarkStore.rename(oldName, newName);
+      if (result.ok) {
+        term.stylePrint(`Bookmark "${oldName}" renamed to "${newName}".`);
+      } else if (result.error === "invalid-name") {
+        term.stylePrint("Invalid bookmark name. OLD and NEW must match [A-Za-z0-9_-]+.");
+      } else if (result.error === "not-found") {
+        term.stylePrint(`Bookmark "${oldName}" not found.`);
+      } else if (result.error === "duplicate") {
+        term.stylePrint(`Bookmark "${newName}" already exists.`);
+      } else {
+        term.stylePrint(`Could not rename bookmark "${oldName}": browser storage is unavailable.`);
       }
       return;
     }
@@ -1323,7 +1341,8 @@ commands.man = function (args) {
       "  bookmark add NAME      Save the current directory\r\n" +
       "  bookmark list          List saved bookmarks\r\n" +
       "  bookmark remove NAME   Remove a bookmark\r\n" +
-      "NAME must match [A-Za-z0-9_-]+. Up to 25 bookmarks persist across reloads."
+      "  bookmark rename OLD NEW Rename a bookmark without changing its path\r\n" +
+      "NAME, OLD, and NEW must match [A-Za-z0-9_-]+. Up to 25 bookmarks persist across reloads."
     );
     return;
   }

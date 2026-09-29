@@ -709,6 +709,137 @@ describe("bookmark and go", () => {
     ]);
   });
 
+  it("renames a bookmark through the public command while preserving path, cwd, and lifecycle", () => {
+    const { commands, location, storage, term } = loadCommands({ cwd: "bin" });
+    commands.bookmark(["add", "zeta"]);
+    term.cwd = "home";
+    commands.bookmark(["add", "Alpha"]);
+    storage.setItem.mockClear();
+    term.stylePrint.mockClear();
+    term.command.mockClear();
+
+    commands.bookmark(["rename", "zeta", "beta"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith('Bookmark "zeta" renamed to "beta".');
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(storage.getItem("rootvc.bookmarks.v1"))).toEqual([
+      ["beta", "bin"],
+      ["Alpha", "home"],
+    ]);
+    expect(term.cwd).toBe("home");
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+    expect(location.assign).not.toHaveBeenCalled();
+    expect(location.replace).not.toHaveBeenCalled();
+    expect(location.reload).not.toHaveBeenCalled();
+
+    term.stylePrint.mockClear();
+    commands.bookmark(["list"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "Alpha -> home",
+      "beta -> bin",
+    ]);
+    commands.go(["beta"]);
+    expect(term.cwd).toBe("bin");
+    commands.go(["zeta"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith('Bookmark "zeta" not found.');
+    expect(term.cwd).toBe("bin");
+  });
+
+  it.each([
+    [["rename", "bad.name", "new"], "Invalid bookmark name. OLD and NEW must match [A-Za-z0-9_-]+."],
+    [["rename", "old", "bad.name"], "Invalid bookmark name. OLD and NEW must match [A-Za-z0-9_-]+."],
+    [["rename", "missing", "new"], 'Bookmark "missing" not found.'],
+    [["rename", "old", "taken"], 'Bookmark "taken" already exists.'],
+  ])("rejects rename %j without mutation or lifecycle calls", (args, message) => {
+    const { commands, storage, term } = loadCommands({ cwd: "bin" });
+    commands.bookmark(["add", "old"]);
+    commands.bookmark(["add", "taken"]);
+    const before = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockClear();
+    term.stylePrint.mockClear();
+    term.command.mockClear();
+
+    commands.bookmark(args);
+
+    expect(term.stylePrint).toHaveBeenCalledWith(message);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
+    expect(term.cwd).toBe("bin");
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+  });
+
+  it("treats a same-name rename as a successful no-op", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "home" });
+    commands.bookmark(["add", "desk"]);
+    const before = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockClear();
+    term.stylePrint.mockClear();
+
+    commands.bookmark(["rename", "desk", "desk"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith('Bookmark "desk" renamed to "desk".');
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
+    expect(term.cwd).toBe("home");
+  });
+
+  it("renames at full capacity while retaining count, paths, order, and cwd", () => {
+    const { commands, storage, term } = loadCommands({ cwd: "start" });
+    for (let index = 0; index < 25; index++) {
+      term.cwd = `path-${index}`;
+      commands.bookmark(["add", `name-${String(index).padStart(2, "0")}`]);
+    }
+    term.cwd = "current";
+    storage.setItem.mockClear();
+    term.stylePrint.mockClear();
+
+    commands.bookmark(["rename", "name-24", "aardvark"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith('Bookmark "name-24" renamed to "aardvark".');
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(storage.getItem("rootvc.bookmarks.v1"))).toHaveLength(25);
+    expect(term.cwd).toBe("current");
+    term.stylePrint.mockClear();
+    commands.bookmark(["list"]);
+    const lines = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(lines).toHaveLength(25);
+    expect(lines[0]).toBe("aardvark -> path-24");
+    expect(lines).not.toContain("name-24 -> path-24");
+  });
+
+  it("reports a rename write failure while retaining original persisted and command-visible state", () => {
+    const storage = createMemoryStorage();
+    const { commands, term } = loadCommands({ cwd: "home", storage });
+    commands.bookmark(["add", "old"]);
+    term.cwd = "bin";
+    commands.bookmark(["add", "kept"]);
+    const before = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockImplementation(() => { throw new Error("full"); });
+    term.stylePrint.mockClear();
+
+    commands.bookmark(["rename", "old", "new"]);
+
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      'Could not rename bookmark "old": browser storage is unavailable.'
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
+    expect(term.cwd).toBe("bin");
+    term.stylePrint.mockClear();
+    commands.bookmark(["list"]);
+    expect(term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> bin",
+      "old -> home",
+    ]);
+  });
+
   it("removes a present bookmark and rejects an absent name without changing state", () => {
     const { commands, storage, term } = loadCommands();
     commands.bookmark(["add", "kept"]);
@@ -748,12 +879,12 @@ describe("bookmark and go", () => {
   });
 
   it("rejects malformed command shapes with usage and no mutation or dispatch", () => {
-    for (const args of [[], ["add"], ["add", "name", "extra"], ["list", "extra"], ["remove"], ["unknown"]]) {
+    for (const args of [[], ["add"], ["add", "name", "extra"], ["list", "extra"], ["remove"], ["rename"], ["rename", "old"], ["rename", "old", "new", "extra"], ["unknown"]]) {
       const { commands, storage, term } = loadCommands({ cwd: "bin" });
       const before = storage.getItem("rootvc.bookmarks.v1");
       commands.bookmark(args);
       expect(term.stylePrint).toHaveBeenLastCalledWith(
-        "Usage: bookmark add NAME | bookmark list | bookmark remove NAME"
+        "Usage: bookmark add NAME | bookmark list | bookmark remove NAME | bookmark rename OLD NEW"
       );
       expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
       expect(term.cwd).toBe("bin");
@@ -860,6 +991,7 @@ describe("man", () => {
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark add NAME"));
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark list"));
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark remove NAME"));
+    expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("bookmark rename OLD NEW"));
     expect(term.command).not.toHaveBeenCalled();
 
     term.stylePrint.mockClear();
@@ -943,6 +1075,7 @@ describe("help stays in sync with commands", () => {
     expect(helpContext.helpEntries["%bookmark% add NAME"]).toContain("save");
     expect(helpContext.helpEntries["%bookmark% list"]).toContain("list");
     expect(helpContext.helpEntries["%bookmark% remove NAME"]).toContain("remove");
+    expect(helpContext.helpEntries["%bookmark% rename OLD NEW"]).toContain("rename");
     expect(helpContext.helpEntries["%go% NAME"]).toContain("NAME");
 
     const { commands, term } = loadCommands({ help: helpContext.helpEntries });
@@ -951,7 +1084,9 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%bookmark% add NAME"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
+    expect(output.some((line) => line.includes("%bookmark% rename OLD NEW"))).toBe(true);
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
+    expect(term.command).not.toHaveBeenCalled();
   });
 
   it("renders the environment commands and complete expansion grammar", () => {

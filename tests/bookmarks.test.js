@@ -124,6 +124,163 @@ describe("bookmark store", () => {
     });
   });
 
+  it("renames one entry with one complete write and composes with lookup, list, and remove", () => {
+    const { storage, store } = loadStore();
+
+    expect(store.add("middle", "/exact/path?value=1#part")).toEqual({ ok: true });
+    expect(store.add("other", "/other")).toEqual({ ok: true });
+    const before = storage.value();
+    storage.setItem.mockClear();
+
+    expect(store.rename("middle", "z-last")).toEqual({ ok: true });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.setItem).toHaveBeenCalledWith(
+      STORAGE_KEY,
+      JSON.stringify([
+        ["z-last", "/exact/path?value=1#part"],
+        ["other", "/other"],
+      ])
+    );
+    expect(storage.value()).not.toBe(before);
+    expect(store.lookup("middle")).toEqual({ ok: false, error: "not-found" });
+    expect(store.lookup("z-last")).toEqual({
+      ok: true,
+      path: "/exact/path?value=1#part",
+    });
+    expect(store.lookup("other")).toEqual({ ok: true, path: "/other" });
+    expect(store.list()).toEqual({
+      ok: true,
+      entries: [
+        { name: "other", path: "/other" },
+        { name: "z-last", path: "/exact/path?value=1#part" },
+      ],
+    });
+
+    expect(store.remove("z-last")).toEqual({ ok: true });
+    expect(store.lookup("z-last")).toEqual({ ok: false, error: "not-found" });
+    expect(store.lookup("other")).toEqual({ ok: true, path: "/other" });
+  });
+
+  it("rejects invalid, absent, and occupied rename targets without writing", () => {
+    const { storage, store } = loadStore();
+
+    expect(store.add("source", "/source")).toEqual({ ok: true });
+    expect(store.add("occupied", "/occupied")).toEqual({ ok: true });
+    const committed = storage.value();
+    const committedList = store.list();
+    storage.setItem.mockClear();
+
+    for (const [oldName, newName] of [
+      ["bad old", "valid"],
+      ["source", "bad/new"],
+      ["", "valid"],
+      ["source", ""],
+      [undefined, "valid"],
+      ["source", undefined],
+    ]) {
+      expect(store.rename(oldName, newName)).toEqual({
+        ok: false,
+        error: "invalid-name",
+      });
+      expect(storage.setItem).not.toHaveBeenCalled();
+      expect(storage.value()).toBe(committed);
+      expect(store.list()).toEqual(committedList);
+    }
+
+    expect(store.rename("absent", "new-name")).toEqual({
+      ok: false,
+      error: "not-found",
+    });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(committed);
+    expect(store.list()).toEqual(committedList);
+
+    expect(store.rename("source", "occupied")).toEqual({
+      ok: false,
+      error: "duplicate",
+    });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(committed);
+    expect(store.lookup("source")).toEqual({ ok: true, path: "/source" });
+    expect(store.lookup("occupied")).toEqual({ ok: true, path: "/occupied" });
+    expect(store.list()).toEqual(committedList);
+  });
+
+  it("treats a present same-name rename as a no-write success", () => {
+    const { storage, store } = loadStore();
+
+    expect(store.add("same", "/same")).toEqual({ ok: true });
+    const committed = storage.value();
+    const committedList = store.list();
+    storage.setItem.mockClear();
+
+    expect(store.rename("same", "same")).toEqual({ ok: true });
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.value()).toBe(committed);
+    expect(store.lookup("same")).toEqual({ ok: true, path: "/same" });
+    expect(store.list()).toEqual(committedList);
+  });
+
+  it("renames at full capacity without changing count or relaxing the limit", () => {
+    const { storage, store } = loadStore();
+
+    for (let index = 0; index < 25; index++) {
+      expect(store.add(`place-${index}`, `/path/${index}`)).toEqual({ ok: true });
+    }
+    storage.setItem.mockClear();
+
+    expect(store.rename("place-5", "renamed-place")).toEqual({ ok: true });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(store.list().entries).toHaveLength(25);
+    expect(store.lookup("place-5")).toEqual({ ok: false, error: "not-found" });
+    expect(store.lookup("renamed-place")).toEqual({ ok: true, path: "/path/5" });
+
+    const renamed = storage.value();
+    expect(store.add("twenty-sixth", "/path/26")).toEqual({
+      ok: false,
+      error: "limit",
+    });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.value()).toBe(renamed);
+    expect(store.list().entries).toHaveLength(25);
+  });
+
+  it("keeps the original rename state when its only candidate write throws", () => {
+    const serialized = JSON.stringify([
+      ["source", "/source"],
+      ["other", "/other"],
+    ]);
+    const storage = memoryStorage({ [STORAGE_KEY]: serialized });
+    storage.setItem.mockImplementation(() => {
+      throw new Error("write denied");
+    });
+    const { store } = loadStore(storage);
+
+    expect(store.rename("source", "renamed")).toEqual({
+      ok: false,
+      error: "storage",
+    });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.setItem).toHaveBeenCalledWith(
+      STORAGE_KEY,
+      JSON.stringify([
+        ["renamed", "/source"],
+        ["other", "/other"],
+      ])
+    );
+    expect(storage.value()).toBe(serialized);
+    expect(store.lookup("source")).toEqual({ ok: true, path: "/source" });
+    expect(store.lookup("renamed")).toEqual({ ok: false, error: "not-found" });
+    expect(store.lookup("other")).toEqual({ ok: true, path: "/other" });
+    expect(store.list()).toEqual({
+      ok: true,
+      entries: [
+        { name: "other", path: "/other" },
+        { name: "source", path: "/source" },
+      ],
+    });
+  });
+
   it("reconstructs all committed entries from the same storage", () => {
     const { createBookmarkStore, storage, store } = loadStore();
 
@@ -158,6 +315,7 @@ describe("bookmark store", () => {
     expect(store.list()).toEqual({ ok: false, error: "storage" });
     expect(store.lookup("home")).toEqual({ ok: false, error: "storage" });
     expect(store.add("valid", "/valid")).toEqual({ ok: false, error: "storage" });
+    expect(store.rename("home", "renamed")).toEqual({ ok: false, error: "storage" });
     expect(storage.value()).toBe(serialized);
     expect(storage.setItem).not.toHaveBeenCalled();
   });
@@ -173,6 +331,7 @@ describe("bookmark store", () => {
 
     expect(store.list()).toEqual({ ok: false, error: "storage" });
     expect(store.add("home", "/home")).toEqual({ ok: false, error: "storage" });
+    expect(store.rename("home", "renamed")).toEqual({ ok: false, error: "storage" });
     expect(storage.setItem).not.toHaveBeenCalled();
   });
 

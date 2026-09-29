@@ -140,6 +140,7 @@ describe("bookmark terminal integration", () => {
       ["bookmark add desk", 'Could not save bookmark "desk": browser storage is unavailable.'],
       ["bookmark list", "Could not list bookmarks: browser storage is unavailable or corrupt."],
       ["bookmark remove desk", 'Could not remove bookmark "desk": browser storage is unavailable.'],
+      ["bookmark rename desk office", 'Could not rename bookmark "desk": browser storage is unavailable.'],
       ["go desk", 'Could not open bookmark "desk": browser storage is unavailable.'],
     ]) {
       broken.term.stylePrint.mockClear();
@@ -199,6 +200,144 @@ describe("bookmark terminal integration", () => {
     expect(first.term.currentLine).toBe("");
     expect(first.term.locked).toBe(false);
     expect(first.env.window.location.href).toBe(initialURL);
+    expect(beforeUnload).not.toHaveBeenCalled();
+  });
+
+  it("renames through terminal input, preserves the prompt lifecycle, and survives recreation", async () => {
+    const storage = createSharedStorage();
+    const first = createTerminalEnvironment(storage, "home");
+    environments.push(first);
+    const initialURL = first.env.window.location.href;
+    const beforeUnload = vi.fn();
+    first.env.window.addEventListener("beforeunload", beforeUnload);
+
+    await submit(first.term, "bookmark add old-place");
+    first.term.stylePrint.mockClear();
+    first.term.prompt.mockClear();
+    first.term.clearCurrentLine.mockClear();
+
+    await submit(first.term, "bookmark rename old-place new-place");
+
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith(
+      'Bookmark "old-place" renamed to "new-place".'
+    );
+    expect(first.term.cwd).toBe("home");
+    expect(first.term.prompt).toHaveBeenCalledTimes(1);
+    expect(first.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(first.term.currentLine).toBe("");
+    expect(first.term.locked).toBe(false);
+    expect(first.term.busy).toBe(false);
+    expect(first.env.window.location.href).toBe(initialURL);
+    expect(beforeUnload).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(
+      JSON.stringify([["new-place", "home"]])
+    );
+
+    first.env.cleanup();
+    environments = [];
+
+    const reloaded = createTerminalEnvironment(storage, "~");
+    environments.push(reloaded);
+    const reloadedURL = reloaded.env.window.location.href;
+    reloaded.term.stylePrint.mockClear();
+
+    await submit(reloaded.term, "bookmark list");
+    expect(reloaded.term.stylePrint).toHaveBeenCalledWith("new-place -> home");
+    expect(reloaded.term.stylePrint).not.toHaveBeenCalledWith("old-place -> home");
+    expect(reloaded.term.cwd).toBe("~");
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(
+      JSON.stringify([["new-place", "home"]])
+    );
+
+    reloaded.term.stylePrint.mockClear();
+    reloaded.term.prompt.mockClear();
+    reloaded.term.clearCurrentLine.mockClear();
+    await submit(reloaded.term, "go old-place");
+    expect(reloaded.term.stylePrint).toHaveBeenLastCalledWith(
+      'Bookmark "old-place" not found.'
+    );
+    expect(reloaded.term.cwd).toBe("~");
+    expect(reloaded.term.prompt).toHaveBeenCalledTimes(1);
+    expect(reloaded.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+
+    reloaded.term.prompt.mockClear();
+    reloaded.term.clearCurrentLine.mockClear();
+    await submit(reloaded.term, "go new-place");
+    expect(reloaded.term.cwd).toBe("home");
+    expect(reloaded.term.prompt).toHaveBeenCalledTimes(1);
+    expect(reloaded.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(reloaded.term.currentLine).toBe("");
+    expect(reloaded.term.locked).toBe(false);
+    expect(reloaded.term.busy).toBe(false);
+    expect(reloaded.env.window.location.href).toBe(reloadedURL);
+  });
+
+  it("keeps browser and bookmark state unchanged when rename persistence throws", async () => {
+    const storage = createSharedStorage();
+    const serialized = JSON.stringify([
+      ["source", "home"],
+      ["other", "work"],
+    ]);
+    storage.setItem("rootvc.bookmarks.v1", serialized);
+    storage.setItem.mockImplementation(() => {
+      throw new Error("write denied");
+    });
+
+    const broken = createTerminalEnvironment(storage, "work");
+    environments.push(broken);
+    const initialURL = broken.env.window.location.href;
+    const beforeUnload = vi.fn();
+    broken.env.window.addEventListener("beforeunload", beforeUnload);
+    storage.setItem.mockClear();
+
+    await submit(broken.term, "bookmark rename source renamed");
+
+    expect(broken.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not rename bookmark "source": browser storage is unavailable.'
+    );
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(serialized);
+    expect(broken.term.cwd).toBe("work");
+    expect(broken.term.prompt).toHaveBeenCalledTimes(1);
+    expect(broken.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(broken.term.currentLine).toBe("");
+    expect(broken.term.locked).toBe(false);
+    expect(broken.term.busy).toBe(false);
+    expect(broken.env.window.location.href).toBe(initialURL);
+    expect(beforeUnload).not.toHaveBeenCalled();
+
+    broken.term.stylePrint.mockClear();
+    await submit(broken.term, "bookmark list");
+    expect(broken.term.stylePrint).toHaveBeenCalledWith("source -> home");
+    expect(broken.term.stylePrint).toHaveBeenCalledWith("other -> work");
+    expect(broken.term.stylePrint).not.toHaveBeenCalledWith("renamed -> home");
+  });
+
+  it("fails rename closed on corrupt persisted bookmarks without changing browser state", async () => {
+    const storage = createSharedStorage();
+    const malformed = "{";
+    storage.setItem("rootvc.bookmarks.v1", malformed);
+    storage.setItem.mockClear();
+    const broken = createTerminalEnvironment(storage, "work");
+    environments.push(broken);
+    const initialURL = broken.env.window.location.href;
+    const beforeUnload = vi.fn();
+    broken.env.window.addEventListener("beforeunload", beforeUnload);
+
+    await submit(broken.term, "bookmark rename source renamed");
+
+    expect(broken.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not rename bookmark "source": browser storage is unavailable.'
+    );
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(malformed);
+    expect(broken.term.cwd).toBe("work");
+    expect(broken.term.prompt).toHaveBeenCalledTimes(1);
+    expect(broken.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(broken.term.currentLine).toBe("");
+    expect(broken.term.locked).toBe(false);
+    expect(broken.term.busy).toBe(false);
+    expect(broken.env.window.location.href).toBe(initialURL);
     expect(beforeUnload).not.toHaveBeenCalled();
   });
 
