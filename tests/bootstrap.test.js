@@ -4,9 +4,25 @@ import { createBrowserEnv } from "./helpers/browser-env";
 let env;
 
 function loadBootstrap(overrides = {}) {
+  let bufferLines = [""];
+  const activeBuffer = {
+    get length() {
+      return bufferLines.length;
+    },
+    getLine: vi.fn((index) => ({
+      isWrapped: false,
+      translateToString: vi.fn(() => bufferLines[index]),
+    })),
+  };
   const term = {
+    buffer: { active: activeBuffer },
     loadAddon: vi.fn(),
-    open: vi.fn(),
+    onWriteParsed: vi.fn(),
+    open: vi.fn((element) => {
+      const screen = element.ownerDocument.createElement("div");
+      screen.className = "xterm-screen";
+      element.appendChild(screen);
+    }),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -62,6 +78,9 @@ function loadBootstrap(overrides = {}) {
     extend,
     fitAddon,
     idleCalls,
+    setBufferLines(lines) {
+      bufferLines = lines;
+    },
     preloadASCIIArt,
     preloadCommandAssets,
     preloadFiles,
@@ -104,6 +123,21 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes canvas output as a line-delimited semantic transcript", () => {
+    const state = loadBootstrap();
+    const updateTranscript = state.term.onWriteParsed.mock.calls[0][0];
+
+    state.setBufferLines(["guest:rootpc / $ pwd", "/", "guest:rootpc / $ "]);
+    updateTranscript();
+
+    const transcript = env.document.querySelector(
+      ".xterm-screen .terminal-transcript"
+    );
+    expect(transcript).not.toBeNull();
+    expect(transcript.getAttribute("role")).toBe("log");
+    expect(transcript.textContent).toContain("pwd\n/\n");
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {

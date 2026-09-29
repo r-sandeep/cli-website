@@ -334,9 +334,10 @@ const commands = {
     lines.forEach((line) => term.writeln(line));
   },
 
-  // Expands ~ to /home/<user> to mimic a real shell.
+  // Expands ~ to /home/<user> and preserves the canonical root slash.
   pwd: function () {
-    term.stylePrint("/" + term.cwd.replaceAll("~", `home/${term.user}`));
+    const cwd = term.cwd.replaceAll("~", `home/${term.user}`);
+    term.stylePrint(cwd === "/" ? cwd : "/" + cwd);
   },
 
   ls: function () {

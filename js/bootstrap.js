@@ -38,6 +38,39 @@
   window.fitAddon = fitAddon;
 
   term.open(terminalElement);
+
+  // Canvas-rendered xterm output is not exposed as line-delimited DOM text.
+  // Keep a semantic transcript in the screen so assistive technology can read
+  // the same logical lines that are visible on the canvas.
+  const screen = terminalElement.querySelector(".xterm-screen");
+  if (screen && term.buffer && typeof term.onWriteParsed === "function") {
+    const transcript = document.createElement("pre");
+    transcript.className = "terminal-transcript visually-hidden";
+    transcript.setAttribute("role", "log");
+    transcript.setAttribute("aria-label", "Terminal transcript");
+    screen.appendChild(transcript);
+
+    const updateTranscript = () => {
+      const buffer = term.buffer.active;
+      const lines = [];
+      let logicalLine = "";
+      for (let index = 0; index < buffer.length; index++) {
+        const line = buffer.getLine(index);
+        if (!line) continue;
+        if (!line.isWrapped && logicalLine !== "") {
+          lines.push(logicalLine);
+          logicalLine = "";
+        }
+        logicalLine += line.translateToString(true);
+      }
+      lines.push(logicalLine);
+      transcript.textContent = `${lines.join("\n")}\n`;
+    };
+
+    term.onWriteParsed(updateTranscript);
+    updateTranscript();
+  }
+
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
   extend(term);

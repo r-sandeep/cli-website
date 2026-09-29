@@ -601,6 +601,51 @@ describe("environment commands", () => {
   });
 });
 
+describe("pwd", () => {
+  it.each([
+    ["/", "guest", "/"],
+    ["bin", "guest", "/bin"],
+    ["home", "guest", "/home"],
+    ["~", "guest", "/home/guest"],
+    ["~", "root", "/home/root"],
+    ["~", "ada", "/home/ada"],
+  ])("prints cwd %s for user %s as exactly %s without changing terminal state", (cwd, user, expected) => {
+    const { commands, term } = loadCommands({ cwd, user });
+    term.currentLine = "echo pending";
+
+    commands.pwd([]);
+
+    expect(term.stylePrint.mock.calls).toEqual([[expected]]);
+    expect(term.cwd).toBe(cwd);
+    expect(term.user).toBe(user);
+    expect(term.currentLine).toBe("echo pending");
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+    expect(term.openURL).not.toHaveBeenCalled();
+    expect(term.displayURL).not.toHaveBeenCalled();
+  });
+
+  it("reads the live cwd and user on every call without mutating either", () => {
+    const { commands, term } = loadCommands({ cwd: "/", user: "guest" });
+
+    commands.pwd([]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("/");
+    expect(term.cwd).toBe("/");
+    expect(term.user).toBe("guest");
+
+    term.cwd = "~";
+    term.user = "ada";
+    commands.pwd([]);
+
+    expect(term.stylePrint.mock.calls).toEqual([["/"], ["/home/ada"]]);
+    expect(term.cwd).toBe("~");
+    expect(term.user).toBe("ada");
+  });
+});
+
 describe("cd", () => {
   // Table ported from #51 (@astonm, 2021), which never landed. The cases still
   // describe the intended behaviour; only the harness has changed.
