@@ -39,6 +39,22 @@ function parse(content) {
   return new JSDOM(content).window.document;
 }
 
+function expectGeoBootstrapImage(document) {
+  const link = document.querySelector(
+    'a[href="https://github.com/divshot/geo-bootstrap"]'
+  );
+  expect(link).not.toBeNull();
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/divshot/geo-bootstrap"
+  );
+  expect(link.getAttribute("target")).toBe("_blank");
+
+  const image = link.querySelector("img");
+  expect(image).not.toBeNull();
+  expect(image.getAttribute("src")).toBe("images/geo/geocities.jpg");
+  expect(image.getAttribute("alt")).toBe("Geo Bootstrap");
+}
+
 // "portfolio/zed/index.html" -> "/portfolio/zed/"
 function pathnameFor(filePath) {
   return `/${filePath.replace(/index\.html$/, "")}`;
@@ -50,6 +66,24 @@ afterEach(() => {
     env.cleanup();
     env = null;
   }
+});
+
+describe("Geo Bootstrap image link", () => {
+  it("has an accessible name in the welcome.htm source template", () => {
+    const source = fs.readFileSync(path.join(REPO_ROOT, "welcome.htm"), "utf8");
+
+    expectGeoBootstrapImage(parse(source));
+  });
+
+  it("has an accessible name in the built welcome.htm", async () => {
+    await buildAssetsModule.main(new Date("2026-02-03T23:59:58.000Z"));
+    const built = fs.readFileSync(
+      path.join(REPO_ROOT, "dist/welcome.htm"),
+      "utf8"
+    );
+
+    expectGeoBootstrapImage(parse(built));
+  });
 });
 
 describe("loadConfig", () => {
