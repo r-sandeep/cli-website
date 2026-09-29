@@ -788,6 +788,35 @@ describe("terminal-ext", () => {
     ]);
   });
 
+  it("counts formatted multiline visible text after an existing filter", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+
+    extend(term);
+    const producer = vi.fn((line) => {
+      expect(line).toBe("fake source");
+      term.writeln("\x1b[31mAlpha beta\x1b[0m");
+      term.writeln("alpha\tgamma");
+      term.writeln("excluded words");
+      return 0;
+    });
+    term.command = producer;
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("fake source | grep -i alpha | wc -w", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.preloadCommandAssets).toHaveBeenCalledOnce();
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("fake source");
+    expect(producer).toHaveBeenCalledOnce();
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual(["4"]);
+    expect(term.history).toEqual(["fake source | grep -i alpha | wc -w"]);
+    expect(term.busy).toBe(false);
+  });
+
   it("runs the registered version producer through a pipeline and restores output ownership", async () => {
     const { commands, term } = loadAliasTerminal();
     const originalWrite = term.write;
@@ -938,6 +967,12 @@ describe("terminal-ext", () => {
   });
 
   it.each([
+    ["fake | wc", "wc: supported flags are -l and -w"],
+    ["fake | wc -x", "wc: supported flags are -l and -w"],
+    ["fake | wc -lw", "wc: supported flags are -l and -w"],
+    ["fake | wc -l -w", "wc: supported flags are -l and -w"],
+    ["fake | wc words", "wc: supported flags are -l and -w"],
+    ["fake | wc -w extra", "wc: supported flags are -l and -w"],
     ["fake | head nope", "head: count must be a positive base-10 integer"],
     ["fake | tail 0", "tail: count must be a positive base-10 integer"],
     ["fake | sort -x", "sort: supported flags are -r, -n, -u"],

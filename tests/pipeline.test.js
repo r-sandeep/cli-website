@@ -136,6 +136,73 @@ describe("wc, empty input, and composition", () => {
     expect(compile("cmd | wc").error.type).toBe("pre-dispatch");
   });
 
+  it("compiles exact line and word count modes", () => {
+    expect(compile("cmd | wc -l").filters).toEqual([
+      { type: "wc", name: "wc", mode: "l" },
+    ]);
+    expect(compile("cmd | wc -w").filters).toEqual([
+      { type: "wc", name: "wc", mode: "w" },
+    ]);
+  });
+
+  it("counts maximal non-whitespace sequences on each input line", () => {
+    expect(run("cmd | wc -w", [
+      "alpha beta",
+      "gamma\tdelta",
+      "epsilon\u00a0zeta\u2003eta",
+      "",
+      " \t\u00a0 ",
+      "theta",
+      "iota",
+    ])).toEqual({ lines: ["9"], error: null });
+  });
+
+  it("counts empty output and whitespace-only lines as zero words", () => {
+    expect(run("cmd | wc -w", [])).toEqual({ lines: ["0"], error: null });
+    expect(run("cmd | wc -w", ["", "   ", "\t", "\u00a0\u2003"])).toEqual({
+      lines: ["0"],
+      error: null,
+    });
+  });
+
+  it("keeps adjacent text on separate lines as separate words", () => {
+    expect(run("cmd | wc -w", ["joined", "word"])).toEqual({
+      lines: ["2"],
+      error: null,
+    });
+  });
+
+  it("counts projected visible text instead of formatting data", () => {
+    const input = [{ rendered: "\u001b[31mvisible\u001b[0m", text: "visible" }];
+    expect(run("cmd | wc -w", input, { getText: (line) => line.text })).toEqual({
+      lines: ["1"],
+      error: null,
+    });
+  });
+
+  it("counts the output of a preceding filter", () => {
+    expect(run("cmd | grep keep | wc -w", [
+      "keep two words",
+      "drop these words",
+      "also keep three words",
+    ])).toEqual({ lines: ["7"], error: null });
+  });
+
+  it.each(["", "-x", "-lw", "-l -w", "value", "-w extra"])(
+    "rejects invalid wc arguments %j during compilation",
+    (argumentsSource) => {
+      const result = compile(`cmd | wc${argumentsSource ? ` ${argumentsSource}` : ""}`);
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          type: "pre-dispatch",
+          stageName: "wc",
+          message: "wc: supported flags are -l and -w",
+        },
+      });
+    }
+  );
+
   it.each(["grep value", "head 3", "tail 3"])(
     "%s emits nothing for empty input",
     (filter) => {
