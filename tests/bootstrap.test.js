@@ -5,8 +5,14 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    clear: vi.fn(),
+    currentLine: "echo q",
+    executeCommandLine: vi.fn(),
+    focus: vi.fn(),
+    history: ["echo z"],
     loadAddon: vi.fn(),
     open: vi.fn(),
+    write: vi.fn(),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -38,6 +44,7 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button type="button" id="terminal-focus">Focus terminal</button>
           <div id="terminal"></div>
         </body>
       </html>
@@ -104,6 +111,36 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the existing terminal without changing its input or output state", () => {
+    const state = loadBootstrap();
+    const button = env.document.getElementById("terminal-focus");
+    const originalHistory = [...state.term.history];
+
+    const expectPreservedState = (focusCalls) => {
+      expect(state.term.focus).toHaveBeenCalledTimes(focusCalls);
+      expect(state.Terminal).toHaveBeenCalledTimes(1);
+      expect(state.term.currentLine).toBe("echo q");
+      expect(state.term.history).toEqual(originalHistory);
+      expect(state.term.executeCommandLine).not.toHaveBeenCalled();
+      expect(state.term.clear).not.toHaveBeenCalled();
+      expect(state.term.write).not.toHaveBeenCalled();
+      expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    };
+
+    button.dispatchEvent(new env.window.MouseEvent("click", { bubbles: true, detail: 1 }));
+    expectPreservedState(1);
+
+    button.dispatchEvent(new env.window.KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+    expectPreservedState(1);
+    button.dispatchEvent(new env.window.MouseEvent("click", { bubbles: true, detail: 0 }));
+    expectPreservedState(2);
+
+    button.dispatchEvent(new env.window.KeyboardEvent("keydown", { bubbles: true, key: " " }));
+    expectPreservedState(2);
+    button.dispatchEvent(new env.window.MouseEvent("click", { bubbles: true, detail: 0 }));
+    expectPreservedState(3);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
