@@ -10,6 +10,7 @@ const shortcuts = {
 };
 
 const help = {
+  "%tui%": "open the keyboard-driven directory (q to return)",
   "%help%": "list all commands (you're looking at it)",
   "%version% [--json]": "show the terminal version and build date",
   "%alias% [name[=value]]": "define, list, or query command aliases",

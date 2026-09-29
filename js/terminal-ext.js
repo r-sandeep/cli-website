@@ -782,6 +782,10 @@ const extend = (term) => {
   // reinitialize the terminal and replay the entire command history to restore
   // the visible output, then re-render the prompt at the bottom.
   term.resizeListener = async () => {
+    if (window.rootTui?.active) {
+      window.fitAddon.fit();
+      return;
+    }
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
@@ -794,7 +798,7 @@ const extend = (term) => {
     await replayWithoutEnvironmentSideEffects(async () => {
       for (const c of term.history) {
         term.prompt("\r\n", ` ${c}\r\n`);
-        await term.executeCommandLine(c, {
+        if (expandUserAlias(parseCommandLine(c)).cmd !== "tui") await term.executeCommandLine(c, {
           addToHistory: false,
           manageBusy: false,
           promptAfter: false,
@@ -861,6 +865,7 @@ const extend = (term) => {
   // not be counted again. History replay uses the same execution boundary with
   // its user-visible submission side effects disabled for the same reason.
   term.runDeepLink = ({ replay = false } = {}) => {
+    if (replay && expandUserAlias(parseCommandLine(term.deepLink)).cmd === "tui") return;
     if (term.deepLink != "") {
       return term.executeCommandLine(term.deepLink, {
         addToHistory: false,

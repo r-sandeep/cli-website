@@ -494,6 +494,27 @@ describe("terminal-ext", () => {
     expect(term.getAlias("kept")).toBe("echo safe");
   });
 
+
+  it.each(["tui", "launch", "launch | head 1"])("does not reopen the TUI when resizing replays %s", async (line) => {
+    const launch = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { tui: launch } });
+    const term = createTerm(); extend(term);
+    term.defineAlias("launch", "tui");
+    term.history = [line];
+    term.deepLink = line;
+    term.init = vi.fn(); term.prompt = vi.fn();
+    await term.resizeListener();
+    expect(launch).not.toHaveBeenCalled();
+    expect(term.prompt).toHaveBeenCalled();
+  });
+  it("fits without resetting the retained CLI while the TUI is active", () => {
+    const { extend } = loadTerminalExt({rootTui:{active:true}});
+    const term = createTerm(); extend(term);
+    term.init = vi.fn();
+    term.resizeListener();
+    expect(env.window.fitAddon.fit).toHaveBeenCalledOnce();
+    expect(term.init).not.toHaveBeenCalled();
+  });
   it("normalizes preload-only aliases before resolving assets", async () => {
     const { extend } = loadTerminalExt({
       getASCIIArtIdForCommand: vi.fn(() => "lee"),
