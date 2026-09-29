@@ -5,8 +5,13 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    currentLine: "echo q",
+    executeCommandLine: vi.fn(),
+    focus: vi.fn(),
+    history: ["echo z"],
     loadAddon: vi.fn(),
     open: vi.fn(),
+    write: vi.fn(),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -38,6 +43,7 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button id="terminal-focus" type="button">Focus terminal</button>
           <div id="terminal"></div>
         </body>
       </html>
@@ -104,6 +110,54 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the existing terminal for mouse and native keyboard clicks without changing its state", () => {
+    const state = loadBootstrap();
+    const button = env.document.getElementById("terminal-focus");
+    const originalHistory = state.term.history;
+
+    button.dispatchEvent(
+      new env.window.MouseEvent("click", { bubbles: true, detail: 1 })
+    );
+
+    expect(state.term.focus).toHaveBeenCalledTimes(1);
+    expect(state.term.currentLine).toBe("echo q");
+    expect(state.term.history).toBe(originalHistory);
+    expect(state.term.history).toEqual(["echo z"]);
+    expect(state.term.executeCommandLine).not.toHaveBeenCalled();
+    expect(state.term.write).not.toHaveBeenCalled();
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+
+    button.dispatchEvent(
+      new env.window.MouseEvent("click", { bubbles: true, detail: 0 })
+    );
+
+    expect(state.term.focus).toHaveBeenCalledTimes(2);
+    expect(state.term.currentLine).toBe("echo q");
+    expect(state.term.history).toBe(originalHistory);
+    expect(state.term.history).toEqual(["echo z"]);
+    expect(state.term.executeCommandLine).not.toHaveBeenCalled();
+    expect(state.term.write).not.toHaveBeenCalled();
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+
+    button.dispatchEvent(
+      new env.window.MouseEvent("click", { bubbles: true, detail: 0 })
+    );
+
+    expect(state.term.focus).toHaveBeenCalledTimes(3);
+    expect(state.term.currentLine).toBe("echo q");
+    expect(state.term.history).toBe(originalHistory);
+    expect(state.term.history).toEqual(["echo z"]);
+    expect(state.term.executeCommandLine).not.toHaveBeenCalled();
+    expect(state.term.write).not.toHaveBeenCalled();
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
