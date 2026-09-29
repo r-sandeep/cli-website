@@ -272,6 +272,43 @@ describe("script load order", () => {
     );
   });
 
+  it("loads the terminal tips model before later application consumers", () => {
+    const { appBundleSources, createAppBundleSource } = buildAssetsModule;
+
+    expect(appBundleSources).toContain("js/terminal-tips.js");
+    expect(appBundleSources.indexOf("js/terminal-tips.js")).toBeLessThan(
+      appBundleSources.indexOf("js/bootstrap.js")
+    );
+
+    const source = createAppBundleSource(
+      Object.freeze({ version: "test", buildDate: "2030-01-01" })
+    );
+    expect(source.indexOf("// js/terminal-tips.js")).toBeLessThan(
+      source.indexOf("// js/bootstrap.js")
+    );
+  });
+
+  it("loads the terminal tips controller after its model and before bootstrap", () => {
+    const { appBundleSources, createAppBundleSource } = buildAssetsModule;
+    const modelIndex = appBundleSources.indexOf("js/terminal-tips.js");
+    const panelIndex = appBundleSources.indexOf("js/terminal-tips-panel.js");
+    const bootstrapIndex = appBundleSources.indexOf("js/bootstrap.js");
+
+    expect(panelIndex).toBeGreaterThan(modelIndex);
+    expect(panelIndex).toBeLessThan(bootstrapIndex);
+
+    const source = createAppBundleSource(
+      Object.freeze({ version: "test", buildDate: "2030-01-01" })
+    );
+    expect(source.indexOf("// js/terminal-tips.js")).toBeLessThan(
+      source.indexOf("// js/terminal-tips-panel.js")
+    );
+    expect(source.indexOf("// js/terminal-tips-panel.js")).toBeLessThan(
+      source.indexOf("// js/bootstrap.js")
+    );
+    expect(source.match(/new Terminal\(/g)).toHaveLength(1);
+  });
+
   it("the app bundle loads pipeline helpers before terminal integration", () => {
     const { appBundleSources } = buildAssetsModule;
     expect(appBundleSources).toContain("js/pipeline.js");
@@ -851,6 +888,35 @@ describe("index.html", () => {
     const textVersion = doc.querySelector("#text-version");
     expect(textVersion).not.toBeNull();
     expect(textVersion.className).toBe("visually-hidden");
+  });
+
+  it("includes the accessible nonmodal terminal tips controls outside the CLI", () => {
+    const terminal = doc.querySelector("#terminal");
+    const toggle = doc.querySelector("#terminal-tips-toggle");
+    const panel = doc.querySelector("#terminal-tips-panel");
+    const search = doc.querySelector("#terminal-tips-search");
+    const results = doc.querySelector("#terminal-tips-results");
+    const status = doc.querySelector("#terminal-tips-status");
+    const close = doc.querySelector("#terminal-tips-close");
+
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.textContent.trim()).toBe("Terminal tips");
+    expect(toggle.getAttribute("aria-controls")).toBe(panel.id);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(terminal.contains(toggle)).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(panel.getAttribute("role")).toBe("region");
+    expect(doc.getElementById(panel.getAttribute("aria-labelledby")).textContent).toBe(
+      "Terminal tips"
+    );
+    expect(search.tagName).toBe("INPUT");
+    expect(search.type).toBe("search");
+    expect(doc.querySelector(`label[for="${search.id}"]`)).not.toBeNull();
+    expect(results).not.toBeNull();
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(close.tagName).toBe("BUTTON");
+    expect(close.textContent.trim()).toBe("Close");
   });
 
   it("keeps the CLI as the homepage", () => {
