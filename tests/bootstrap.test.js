@@ -5,8 +5,12 @@ let env;
 
 function loadBootstrap(overrides = {}) {
   const term = {
+    focus: vi.fn(),
+    history: ["echo z"],
     loadAddon: vi.fn(),
     open: vi.fn(),
+    currentLine: "echo q",
+    write: vi.fn(),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -38,6 +42,7 @@ function loadBootstrap(overrides = {}) {
       <html>
         <head></head>
         <body>
+          <button id="terminal-focus" type="button">Focus terminal</button>
           <div id="terminal"></div>
         </body>
       </html>
@@ -104,6 +109,25 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the existing terminal without changing its input, history, or output", () => {
+    const state = loadBootstrap();
+    const focusButton = env.document.getElementById("terminal-focus");
+    const currentLine = state.term.currentLine;
+    const history = [...state.term.history];
+    const outputCalls = [...state.term.write.mock.calls];
+
+    focusButton.click();
+
+    expect(state.term.focus).toHaveBeenCalledTimes(1);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
+    expect(state.term.open).toHaveBeenCalledTimes(1);
+    expect(state.extend).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.term.currentLine).toBe(currentLine);
+    expect(state.term.history).toEqual(history);
+    expect(state.term.write.mock.calls).toEqual(outputCalls);
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
