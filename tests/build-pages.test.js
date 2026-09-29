@@ -255,6 +255,29 @@ describe("script load order", () => {
     expect(doc.documentElement.getAttribute("lang")).toBe("en");
   });
 
+  it("gives the Geo Bootstrap image link an accessible name in source and built pages", async () => {
+    const selector =
+      'a[href="https://github.com/divshot/geo-bootstrap"] img[src="images/geo/geocities.jpg"]';
+    const sourceDoc = parse(
+      fs.readFileSync(path.join(REPO_ROOT, "welcome.htm"), "utf8")
+    );
+
+    expect(sourceDoc.querySelectorAll(selector)).toHaveLength(1);
+    expect(sourceDoc.querySelector(selector)?.getAttribute("alt")).toBe(
+      "Geo Bootstrap"
+    );
+
+    await buildAssetsModule.main(new Date("2026-02-03T23:59:58.000Z"));
+    const builtDoc = parse(
+      fs.readFileSync(path.join(REPO_ROOT, "dist/welcome.htm"), "utf8")
+    );
+
+    expect(builtDoc.querySelectorAll(selector)).toHaveLength(1);
+    expect(builtDoc.querySelector(selector)?.getAttribute("alt")).toBe(
+      "Geo Bootstrap"
+    );
+  });
+
   it("the app bundle lists config/firm.js before config/commands.js", () => {
     // Same constraint, enforced on the concatenation order in build-assets.js.
     const { appBundleSources } = buildAssetsModule;
