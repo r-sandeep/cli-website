@@ -30,6 +30,7 @@
   window.ensureRickRollLoaded = () => loadOptionalScript("js/rickroll.min.js");
 
   const terminalElement = document.getElementById("terminal");
+  const terminalFocusButton = document.getElementById("terminal-focus");
   const term = new Terminal({ cursorBlink: true });
   const fitAddon = new FitAddon.FitAddon();
   const webLinksAddon = new WebLinksAddon.WebLinksAddon();
@@ -41,6 +42,7 @@
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
   extend(term);
+  terminalFocusButton.addEventListener("click", () => term.focus());
   window.deepLinkAssetPromise = Promise.resolve();
   if (term.deepLink) {
     window.deepLinkAssetPromise = term.preloadCommandAssets(term.deepLink).catch(
