@@ -16,6 +16,7 @@ function loadBootstrap(overrides = {}) {
     instance.preloadCommandAssets = preloadCommandAssets;
   });
   const runRootTerminal = vi.fn();
+  const setupTerminalTipsPanel = vi.fn();
   const preloadASCIIArt = vi.fn();
   const preloadFiles = vi.fn();
   const idleCalls = [];
@@ -52,6 +53,7 @@ function loadBootstrap(overrides = {}) {
       preloadFiles,
       requestIdleCallback,
       runRootTerminal,
+      setupTerminalTipsPanel,
       ...overrides,
     },
   });
@@ -67,6 +69,7 @@ function loadBootstrap(overrides = {}) {
     preloadFiles,
     requestIdleCallback,
     runRootTerminal,
+    setupTerminalTipsPanel,
     term,
     Terminal,
     webLinksAddon,
@@ -96,6 +99,8 @@ describe("bootstrap", () => {
     );
     expect(state.extend).toHaveBeenCalledWith(state.term);
     expect(state.preloadCommandAssets).toHaveBeenCalledWith("whois lee");
+    expect(state.setupTerminalTipsPanel).toHaveBeenCalledTimes(1);
+    expect(state.Terminal).toHaveBeenCalledTimes(1);
     expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
     expect(state.idleCalls).toHaveLength(1);
     expect(state.idleCalls[0].options).toEqual({ timeout: 1500 });

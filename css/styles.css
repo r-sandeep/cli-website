@@ -20,6 +20,90 @@ body {
   height: 100%;
 }
 
+.terminal-tips {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  color: var(--brand-txt-color);
+  font: 16px/1.35 "Abel", sans-serif;
+}
+
+#terminal-tips-toggle,
+#terminal-tips-close,
+#terminal-tips-search {
+  box-sizing: border-box;
+  border: 1px solid #c8c8c8;
+  border-radius: 3px;
+  background: var(--brand-bg-color);
+  color: var(--brand-txt-color);
+  font: inherit;
+}
+
+#terminal-tips-toggle,
+#terminal-tips-close {
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+#terminal-tips-panel {
+  width: min(330px, calc(100vw - 24px));
+  max-height: calc(100dvh - 60px);
+  margin-top: 8px;
+  padding: 12px;
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid #c8c8c8;
+  border-radius: 4px;
+  background: #2c2c2c;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 45%);
+}
+
+#terminal-tips-panel[hidden] {
+  display: none;
+}
+
+.terminal-tips-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+#terminal-tips-heading {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+#terminal-tips-panel label,
+#terminal-tips-search {
+  display: block;
+  width: 100%;
+}
+
+#terminal-tips-search {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+}
+
+#terminal-tips-results p,
+#terminal-tips-status {
+  margin: 6px 0 0;
+}
+
+#terminal-tips-status {
+  color: #d7d7d7;
+  font-size: 0.9rem;
+}
+
+#terminal-tips-toggle:focus-visible,
+#terminal-tips-close:focus-visible,
+#terminal-tips-search:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
 /* Headings that are present for screen readers and search engines but take up
    no visual space. Preferred over display:none, which assistive tech skips and
    search engines discount. */
