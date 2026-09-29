@@ -657,6 +657,49 @@ describe("cd", () => {
   });
 });
 
+describe("pwd", () => {
+  it.each([
+    ["/", "guest", "/"],
+    ["bin", "guest", "/bin"],
+    ["home", "guest", "/home"],
+    ["~", "guest", "/home/guest"],
+    ["~", "root", "/home/root"],
+  ])("prints cwd %s for user %s as %s without changing terminal state", (cwd, user, expected) => {
+    const storage = createMemoryStorage({ untouched: "value" });
+    const { commands, location, term } = loadCommands({ cwd, user, storage });
+    const history = ["echo z"];
+    term.currentLine = "echo q";
+    term.history = history;
+    term.dispatchCommand = vi.fn();
+    storage.getItem.mockClear();
+    storage.setItem.mockClear();
+    storage.removeItem.mockClear();
+
+    commands.pwd([]);
+
+    expect(term.stylePrint).toHaveBeenCalledOnce();
+    expect(term.stylePrint).toHaveBeenCalledWith(expected);
+    expect(term.cwd).toBe(cwd);
+    expect(term.user).toBe(user);
+    expect(term.currentLine).toBe("echo q");
+    expect(term.history).toBe(history);
+    expect(term.dispatchCommand).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.collectInput).not.toHaveBeenCalled();
+    expect(term.openURL).not.toHaveBeenCalled();
+    expect(term.displayURL).not.toHaveBeenCalled();
+    expect(location.assign).not.toHaveBeenCalled();
+    expect(location.replace).not.toHaveBeenCalled();
+    expect(location.reload).not.toHaveBeenCalled();
+    expect(storage.getItem).not.toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.removeItem).not.toHaveBeenCalled();
+  });
+});
+
 describe("bookmark and go", () => {
   it("adds every valid NAME form at the current cwd and rejects an invalid name atomically", () => {
     const { commands, storage, term } = loadCommands({ cwd: "bin" });
