@@ -859,6 +859,17 @@ describe("index.html", () => {
     expect(doc.querySelector("#aa-all")).not.toBeNull();
     expect(doc.querySelector("#files-all")).not.toBeNull();
   });
+
+  it("keeps a native labelled focus control outside the terminal", () => {
+    const focusControl = doc.querySelector("#terminal-focus");
+    const terminal = doc.querySelector("#terminal");
+
+    expect(focusControl).not.toBeNull();
+    expect(focusControl.tagName).toBe("BUTTON");
+    expect(focusControl.getAttribute("type")).toBe("button");
+    expect(focusControl.textContent.trim()).toBe("Focus terminal");
+    expect(terminal.contains(focusControl)).toBe(false);
+  });
 });
 
 describe("terminal still reads from config/firm.js", () => {

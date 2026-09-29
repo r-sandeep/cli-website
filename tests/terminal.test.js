@@ -29,6 +29,7 @@ function createTerm(overrides = {}) {
     clearCurrentLine: vi.fn(),
     currentLine: "",
     executeCommandLine: vi.fn(),
+    focus: vi.fn(),
     history: [],
     historyCursor: -1,
     init: vi.fn(),
@@ -139,6 +140,42 @@ describe("runRootTerminal", () => {
     expect(term.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1);
     expect(term.onData).toHaveBeenCalledTimes(1);
     expect(term._initialized).toBe(true);
+  });
+
+  it("focuses the supplied terminal without changing its input or session state", () => {
+    const Terminal = vi.fn();
+    const { runRootTerminal } = loadTerminalScript({ Terminal });
+    env.document.body.innerHTML =
+      '<button id="terminal-focus" type="button">Focus terminal</button><div id="terminal"></div>';
+    const term = createTerm({
+      currentLine: "echo q",
+      history: ["echo z"],
+    });
+    term.write("earlier output");
+    runRootTerminal(term);
+
+    const stateBeforeActivation = {
+      currentLine: term.currentLine,
+      history: [...term.history],
+      initCalls: term.init.mock.calls.length,
+      promptCalls: term.prompt.mock.calls.length,
+      deepLinkCalls: term.runDeepLink.mock.calls.length,
+      writeCalls: [...term.write.mock.calls],
+    };
+
+    // Calling the startup seam again must not add a second click listener.
+    runRootTerminal(term);
+    env.document.getElementById("terminal-focus").click();
+
+    expect(term.focus).toHaveBeenCalledTimes(1);
+    expect(Terminal).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe(stateBeforeActivation.currentLine);
+    expect(term.history).toEqual(stateBeforeActivation.history);
+    expect(term.init).toHaveBeenCalledTimes(stateBeforeActivation.initCalls);
+    expect(term.prompt).toHaveBeenCalledTimes(stateBeforeActivation.promptCalls);
+    expect(term.runDeepLink).toHaveBeenCalledTimes(stateBeforeActivation.deepLinkCalls);
+    expect(term.write.mock.calls).toEqual(stateBeforeActivation.writeCalls);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
   it("completes a unique command case-insensitively with canonical spelling", () => {
