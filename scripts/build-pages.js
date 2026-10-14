@@ -19,6 +19,7 @@
 //                   that shows the same thing
 //   llms.txt        the same content as prose, for LLM crawlers
 //   sitemap.xml     one URL, because there is now genuinely one page
+//   security.txt    RFC 9116 security contact data under /.well-known/
 //
 // Content is addressed by URL fragment: /#tldr-chargelab tells the terminal to
 // run `tldr chargelab` on load. Fragments never reach the server and Google
@@ -40,6 +41,8 @@ const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "dist");
 
 const ORIGIN = "https://root.vc";
+const SECURITY_TXT_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+const DEFAULT_GENERATED_AT = new Date();
 
 // Sentinel comment pairs in index.html; everything between each pair is
 // regenerated from config/*.js on every build.
@@ -260,6 +263,16 @@ function renderSitemap(urls) {
 ${entries}
 </urlset>
 `;
+}
+
+function renderSecurityTxt(firm, generatedAt) {
+  const generatedAtMs = new Date(generatedAt).getTime();
+  if (!Number.isFinite(generatedAtMs)) {
+    throw new RangeError("security.txt generation time must be a valid date");
+  }
+
+  const expires = new Date(generatedAtMs + SECURITY_TXT_MAX_AGE_MS).toISOString();
+  return `Contact: mailto:${firm.email}\nExpires: ${expires}\n`;
 }
 
 // ── Redirects ─────────────────────────────────────────────────────────────────
@@ -504,13 +517,17 @@ function renderIndexHtml(config) {
 
 // ── Orchestration ─────────────────────────────────────────────────────────────
 
-function buildPages(config = loadConfig()) {
+function buildPages(config = loadConfig(), generatedAt = DEFAULT_GENERATED_AT) {
   return [
     // One URL, so one entry. No <lastmod>: every deploy rebuilds every file, so
     // a build timestamp would claim a change on each deploy and teach crawlers
     // to ignore it.
     { path: "sitemap.xml", content: renderSitemap([`${ORIGIN}/`]) },
     { path: "robots.txt", content: renderRobots() },
+    {
+      path: ".well-known/security.txt",
+      content: renderSecurityTxt(config.firm, generatedAt),
+    },
     { path: "_redirects", content: renderRedirects() },
     { path: "llms.txt", content: renderLlmsTxt(config) },
     { path: "llms-full.txt", content: renderLlmsFull(config) },

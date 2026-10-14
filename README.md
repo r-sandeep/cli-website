@@ -218,9 +218,11 @@ that do not run JavaScript need a static content surface. `scripts/build-pages.j
 gap from a single URL:
 
 ```
-index.html     an offscreen block naming every company and person
-_redirects     the old mirror URLs, 301'd into the terminal
-llms.txt  llms-full.txt  robots.txt  sitemap.xml
+index.html                an offscreen block naming every company and person
+_redirects                the old mirror URLs, 301'd into the terminal
+llms.txt  llms-full.txt    crawler-readable content
+robots.txt  sitemap.xml    crawler discovery
+.well-known/security.txt  security contact and expiration
 ```
 
 Content is addressed by URL fragment: `/#tldr-chargelab` runs the company command
