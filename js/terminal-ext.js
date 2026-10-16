@@ -274,9 +274,22 @@ const extend = (term) => {
   term.tabOptions = [];
   term.tabBase = "";
 
-  // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // Cursor position relative to the start of the user's logical input. Count
+  // only wrapped continuation rows in the current xterm buffer line; cursorY
+  // also includes unrelated output rows, while cursorX may equal cols at the
+  // pending right margin and must remain unmodified.
+  term.pos = () => {
+    const buffer = term.buffer.active;
+    let row = buffer.baseY + buffer.cursorY;
+    let wrappedRows = 0;
+    let line = buffer.getLine(row);
+    while (row > 0 && line && line.isWrapped) {
+      wrappedRows++;
+      row--;
+      line = buffer.getLine(row);
+    }
+    return buffer.cursorX + wrappedRows * term.cols - term._promptRawText().length - 1;
+  };
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
