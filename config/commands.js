@@ -456,10 +456,10 @@ const commands = {
     }
   },
 
-  // Saves, lists, and removes named locations without taking ownership of the
-  // terminal's input or prompt lifecycle.
+  // Saves, lists, renames, and removes named locations without taking ownership
+  // of the terminal's input or prompt lifecycle.
   bookmark: function (args) {
-    const usage = "Usage: bookmark add NAME | bookmark list | bookmark remove NAME";
+    const usage = "Usage: bookmark add NAME | bookmark list | bookmark rename OLD NEW | bookmark remove NAME";
     const subcommand = args[0];
 
     if (subcommand === "add" && args.length === 2) {
@@ -489,6 +489,28 @@ const commands = {
         result.entries.forEach(({ name, path }) => {
           term.stylePrint(`${name} -> ${path}`);
         });
+      }
+      return;
+    }
+
+    if (subcommand === "rename" && args.length === 3) {
+      const oldName = args[1];
+      const newName = args[2];
+      const result = bookmarkStore.rename(oldName, newName);
+      if (result.ok) {
+        term.stylePrint(`Bookmark ${oldName} renamed to ${newName}.`);
+      } else if (result.error === "invalid-name") {
+        term.stylePrint(
+          `Invalid bookmark rename "${oldName}" to "${newName}". OLD and NEW must match [A-Za-z0-9_-]+.`
+        );
+      } else if (result.error === "not-found") {
+        term.stylePrint(`Bookmark "${oldName}" not found.`);
+      } else if (result.error === "duplicate") {
+        term.stylePrint(`Bookmark "${newName}" already exists.`);
+      } else {
+        term.stylePrint(
+          `Could not rename bookmark "${oldName}" to "${newName}": browser storage is unavailable.`
+        );
       }
       return;
     }
@@ -1320,10 +1342,11 @@ commands.man = function (args) {
     term.stylePrint(
       "bookmark - save and manage directory bookmarks\r\n" +
       "Usage:\r\n" +
-      "  bookmark add NAME      Save the current directory\r\n" +
-      "  bookmark list          List saved bookmarks\r\n" +
-      "  bookmark remove NAME   Remove a bookmark\r\n" +
-      "NAME must match [A-Za-z0-9_-]+. Up to 25 bookmarks persist across reloads."
+      "  bookmark add NAME        Save the current directory\r\n" +
+      "  bookmark list            List saved bookmarks\r\n" +
+      "  bookmark rename OLD NEW  Rename a bookmark without changing its saved directory\r\n" +
+      "  bookmark remove NAME     Remove a bookmark\r\n" +
+      "Names are case-sensitive and must match [A-Za-z0-9_-]+. Renaming does not change the count, so it works with 25 saved bookmarks. Renaming an existing bookmark to the same name succeeds without writing storage. Invalid names, missing sources, occupied destinations, and storage errors leave all bookmarks unchanged. Up to 25 bookmarks persist across reloads."
     );
     return;
   }

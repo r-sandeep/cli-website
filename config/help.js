@@ -17,6 +17,7 @@ const help = {
   "%unalias% name": "remove a command alias",
   "%bookmark% add NAME": "save the current directory as NAME",
   "%bookmark% list": "list saved directory bookmarks",
+  "%bookmark% rename OLD NEW": "rename a bookmark while preserving its saved directory",
   "%bookmark% remove NAME": "remove a saved directory bookmark",
   "%go% NAME": "go to the directory saved as NAME",
   "PIPELINES": "pipe command output through filters from left to right",

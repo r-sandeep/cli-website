@@ -748,12 +748,22 @@ describe("bookmark and go", () => {
   });
 
   it("rejects malformed command shapes with usage and no mutation or dispatch", () => {
-    for (const args of [[], ["add"], ["add", "name", "extra"], ["list", "extra"], ["remove"], ["unknown"]]) {
+    for (const args of [
+      [],
+      ["add"],
+      ["add", "name", "extra"],
+      ["list", "extra"],
+      ["rename"],
+      ["rename", "old"],
+      ["rename", "old", "new", "extra"],
+      ["remove"],
+      ["unknown"],
+    ]) {
       const { commands, storage, term } = loadCommands({ cwd: "bin" });
       const before = storage.getItem("rootvc.bookmarks.v1");
       commands.bookmark(args);
       expect(term.stylePrint).toHaveBeenLastCalledWith(
-        "Usage: bookmark add NAME | bookmark list | bookmark remove NAME"
+        "Usage: bookmark add NAME | bookmark list | bookmark rename OLD NEW | bookmark remove NAME"
       );
       expect(storage.getItem("rootvc.bookmarks.v1")).toBe(before);
       expect(term.cwd).toBe("bin");
@@ -838,6 +848,181 @@ describe("bookmark and go", () => {
       'Could not save bookmark "desk": browser storage is unavailable.'
     );
     expect(writeFailure.getItem("rootvc.bookmarks.v1")).toBeNull();
+  });
+  it("renames through the real command while preserving the exact saved path, unrelated entries, and reload state", () => {
+    const storage = createMemoryStorage();
+    const first = loadCommands({ cwd: "home", storage });
+    first.commands.bookmark(["add", "old"]);
+    first.term.cwd = "bin";
+    first.commands.bookmark(["add", "kept"]);
+    first.term.cwd = "~";
+    const writesBeforeRename = storage.setItem.mock.calls.length;
+
+    first.commands.bookmark(["rename", "old", "new"]);
+
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith("Bookmark old renamed to new.");
+    expect(first.term.cwd).toBe("~");
+    expect(storage.setItem).toHaveBeenCalledTimes(writesBeforeRename + 1);
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(
+      JSON.stringify([["new", "home"], ["kept", "bin"]])
+    );
+
+    first.term.stylePrint.mockClear();
+    first.commands.bookmark(["list"]);
+    expect(first.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> bin",
+      "new -> home",
+    ]);
+    first.commands.go(["new"]);
+    expect(first.term.cwd).toBe("home");
+    first.commands.go(["old"]);
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith('Bookmark "old" not found.');
+
+    const reloaded = loadCommands({ cwd: "~", storage });
+    reloaded.commands.bookmark(["list"]);
+    expect(reloaded.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> bin",
+      "new -> home",
+    ]);
+    reloaded.commands.go(["new"]);
+    expect(reloaded.term.cwd).toBe("home");
+  });
+
+  it("reports each rename rejection and preserves complete persisted state, cwd, and writes", () => {
+    const storage = createMemoryStorage();
+    const { commands, term } = loadCommands({ cwd: "home", storage });
+    commands.bookmark(["add", "old"]);
+    term.cwd = "work";
+    commands.bookmark(["add", "occupied"]);
+    term.cwd = "bin";
+    const expectedBytes = JSON.stringify([["old", "home"], ["occupied", "work"]]);
+
+    for (const [args, message] of [
+      [["rename", "missing", "fresh"], 'Bookmark "missing" not found.'],
+      [["rename", "old", "occupied"], 'Bookmark "occupied" already exists.'],
+      [["rename", "bad.name", "fresh"], 'Invalid bookmark rename "bad.name" to "fresh". OLD and NEW must match [A-Za-z0-9_-]+.'],
+      [["rename", "old", "bad/name"], 'Invalid bookmark rename "old" to "bad/name". OLD and NEW must match [A-Za-z0-9_-]+.'],
+      [["rename", "", "fresh"], 'Invalid bookmark rename "" to "fresh". OLD and NEW must match [A-Za-z0-9_-]+.'],
+      [["rename", "old", ""], 'Invalid bookmark rename "old" to "". OLD and NEW must match [A-Za-z0-9_-]+.'],
+    ]) {
+      term.stylePrint.mockClear();
+      storage.setItem.mockClear();
+
+      commands.bookmark(args);
+
+      expect(term.stylePrint).toHaveBeenLastCalledWith(message);
+      expect(storage.setItem).not.toHaveBeenCalled();
+      expect(storage.getItem("rootvc.bookmarks.v1")).toBe(expectedBytes);
+      expect(term.cwd).toBe("bin");
+      const reloaded = loadCommands({ storage });
+      reloaded.commands.bookmark(["list"]);
+      expect(reloaded.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+        "occupied -> work",
+        "old -> home",
+      ]);
+    }
+  });
+
+  it("keeps rename exact-case and supports prototype-like and same-name operands", () => {
+    const initial = JSON.stringify([
+      ["__proto__", "home"],
+      ["constructor", "work"],
+      ["Case", "~"],
+    ]);
+    const storage = createMemoryStorage({ "rootvc.bookmarks.v1": initial });
+    const { commands, term } = loadCommands({ cwd: "bin", storage });
+
+    commands.bookmark(["rename", "__proto__", "toString"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("Bookmark __proto__ renamed to toString.");
+    commands.bookmark(["rename", "Case", "case"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("Bookmark Case renamed to case.");
+    const bytesBeforeNoop = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockClear();
+    commands.bookmark(["rename", "constructor", "constructor"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark constructor renamed to constructor."
+    );
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(bytesBeforeNoop);
+    expect(JSON.parse(bytesBeforeNoop)).toEqual([
+      ["toString", "home"],
+      ["constructor", "work"],
+      ["case", "~"],
+    ]);
+    expect(term.cwd).toBe("bin");
+  });
+
+  it("reports rename storage failures without publishing a partial state", () => {
+    const originalBytes = JSON.stringify([["old", "home"], ["kept", "work"]]);
+    const storage = createMemoryStorage({ "rootvc.bookmarks.v1": originalBytes });
+    const loaded = loadCommands({ cwd: "bin", storage });
+    storage.setItem.mockImplementation(() => { throw new Error("full"); });
+
+    loaded.commands.bookmark(["rename", "old", "new"]);
+
+    expect(loaded.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not rename bookmark "old" to "new": browser storage is unavailable.'
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(originalBytes);
+    loaded.term.stylePrint.mockClear();
+    loaded.commands.bookmark(["list"]);
+    expect(loaded.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> work",
+      "old -> home",
+    ]);
+    expect(loaded.term.cwd).toBe("bin");
+
+    const unreadableStorage = {
+      getItem: vi.fn(() => { throw new Error("blocked"); }),
+      setItem: vi.fn(),
+    };
+    const unreadable = loadCommands({ cwd: "work", storage: unreadableStorage });
+    unreadable.commands.bookmark(["rename", "old", "new"]);
+    expect(unreadable.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not rename bookmark "old" to "new": browser storage is unavailable.'
+    );
+    expect(unreadableStorage.setItem).not.toHaveBeenCalled();
+    expect(unreadable.term.cwd).toBe("work");
+  });
+});
+
+describe("bookmark documentation", () => {
+  it("exposes accurate rename syntax and semantics through help, man, and README", () => {
+    expect(helpContext.helpEntries["%bookmark% rename OLD NEW"]).toBe(
+      "rename a bookmark while preserving its saved directory"
+    );
+
+    const { commands, term } = loadCommands();
+    commands.help([]);
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      expect.stringContaining("%bookmark% rename OLD NEW")
+    );
+
+    term.stylePrint.mockClear();
+    commands.man(["bookmark"]);
+    const manual = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(manual).toContain("bookmark rename OLD NEW");
+    expect(manual).toContain("without changing its saved directory");
+    expect(manual).toContain("case-sensitive");
+    expect(manual).toContain("works with 25 saved bookmarks");
+    expect(manual).toContain("same name succeeds without writing storage");
+    expect(manual).toContain("leave all bookmarks unchanged");
+    expect(manual).toContain("bookmark add NAME");
+    expect(manual).toContain("bookmark list");
+    expect(manual).toContain("bookmark remove NAME");
+
+    const readme = readFileSync("README.md", "utf8");
+    const bookmarkSection = readme.split("## Directory bookmarks\n")[1].split("\n## ")[0];
+    expect(bookmarkSection).toContain("bookmark rename OLD NEW");
+    expect(bookmarkSection).toContain("preserving its exact saved directory");
+    expect(bookmarkSection).toContain("case-sensitive");
+    expect(bookmarkSection).toContain("works at the maximum of 25 saved bookmarks");
+    expect(bookmarkSection).toContain("same name succeeds without writing browser storage");
+    expect(bookmarkSection).toContain("storage errors leave\nall bookmarks unchanged");
+    expect(bookmarkSection).toContain("bookmark add NAME");
+    expect(bookmarkSection).toContain("bookmark list");
+    expect(bookmarkSection).toContain("bookmark remove NAME");
+    expect(bookmarkSection).toContain("go NAME");
   });
 });
 

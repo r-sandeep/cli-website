@@ -229,4 +229,226 @@ describe("bookmark terminal integration", () => {
     expect(reloaded.term.locked).toBe(false);
     expect(reloaded.env.window.location.href).toBe(reloadedURL);
   });
+
+  it("renames through literal input and preserves the full list, navigation, and reload state", async () => {
+    const storage = createSharedStorage();
+    const first = createTerminalEnvironment(storage, "home");
+    environments.push(first);
+    const initialURL = first.env.window.location.href;
+    const beforeUnload = vi.fn();
+    first.env.window.addEventListener("beforeunload", beforeUnload);
+
+    await submit(first.term, "bookmark add old");
+    first.term.cwd = "work";
+    await submit(first.term, "bookmark add kept");
+    first.term.cwd = "~";
+    first.term.stylePrint.mockClear();
+    first.term.prompt.mockClear();
+    first.term.clearCurrentLine.mockClear();
+
+    await submit(first.term, "bookmark rename old new");
+
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith("Bookmark old renamed to new.");
+    expect(first.term.cwd).toBe("~");
+    expect(first.term.prompt).toHaveBeenCalledTimes(1);
+    expect(first.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(first.term.currentLine).toBe("");
+    expect(first.term.locked).toBe(false);
+    expect(first.term.busy).toBe(false);
+    expect(first.env.window.location.href).toBe(initialURL);
+    expect(beforeUnload).not.toHaveBeenCalled();
+
+    first.term.stylePrint.mockClear();
+    await submit(first.term, "bookmark list");
+    expect(first.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> work",
+      "new -> home",
+    ]);
+    await submit(first.term, "go new");
+    expect(first.term.cwd).toBe("home");
+    first.term.stylePrint.mockClear();
+    await submit(first.term, "go old");
+    expect(first.term.stylePrint).toHaveBeenLastCalledWith('Bookmark "old" not found.');
+
+    first.env.cleanup();
+    environments = [];
+    const reloaded = createTerminalEnvironment(storage, "~");
+    environments.push(reloaded);
+    reloaded.term.stylePrint.mockClear();
+    await submit(reloaded.term, "bookmark list");
+    expect(reloaded.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> work",
+      "new -> home",
+    ]);
+    await submit(reloaded.term, "go new");
+    expect(reloaded.term.cwd).toBe("home");
+    reloaded.term.stylePrint.mockClear();
+    await submit(reloaded.term, "pwd");
+    expect(reloaded.term.stylePrint).toHaveBeenLastCalledWith("/home");
+    expect(reloaded.term.currentLine).toBe("");
+    expect(reloaded.term.locked).toBe(false);
+    expect(reloaded.term.busy).toBe(false);
+  });
+
+  it("routes a normally defined alias through rename and keeps later input interactive", async () => {
+    const storage = createSharedStorage();
+    const run = createTerminalEnvironment(storage, "home");
+    environments.push(run);
+    const initialURL = run.env.window.location.href;
+    await submit(run.term, "bookmark add old");
+    await submit(run.term, "alias b=bookmark");
+    run.term.cwd = "work";
+    run.term.stylePrint.mockClear();
+    run.term.prompt.mockClear();
+    run.term.clearCurrentLine.mockClear();
+
+    await submit(run.term, "b rename old new");
+
+    expect(run.term.stylePrint).toHaveBeenLastCalledWith("Bookmark old renamed to new.");
+    expect(run.term.prompt).toHaveBeenCalledTimes(1);
+    expect(run.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(run.term.currentLine).toBe("");
+    expect(run.term.locked).toBe(false);
+    expect(run.term.busy).toBe(false);
+    expect(run.env.window.location.href).toBe(initialURL);
+
+    run.term.stylePrint.mockClear();
+    await submit(run.term, "bookmark list");
+    expect(run.term.stylePrint.mock.calls.map(([line]) => line)).toEqual(["new -> home"]);
+    await submit(run.term, "go new");
+    expect(run.term.cwd).toBe("home");
+    run.term.stylePrint.mockClear();
+    await submit(run.term, "pwd");
+    expect(run.term.stylePrint).toHaveBeenLastCalledWith("/home");
+  });
+
+  it("rejects rename errors and wrong arities through Enter with exact state unchanged", async () => {
+    const storage = createSharedStorage();
+    const initialBytes = JSON.stringify([["old", "home"], ["occupied", "work"]]);
+    storage.setItem("rootvc.bookmarks.v1", initialBytes);
+    const run = createTerminalEnvironment(storage, "~");
+    environments.push(run);
+
+    for (const [line, output] of [
+      ["bookmark rename missing fresh", 'Bookmark "missing" not found.'],
+      ["bookmark rename old occupied", 'Bookmark "occupied" already exists.'],
+      ["bookmark rename 'bad.name' fresh", 'Invalid bookmark rename "bad.name" to "fresh". OLD and NEW must match [A-Za-z0-9_-]+.'],
+      ["bookmark rename old ''", 'Invalid bookmark rename "old" to "". OLD and NEW must match [A-Za-z0-9_-]+.'],
+      ["bookmark rename", "Usage: bookmark add NAME | bookmark list | bookmark rename OLD NEW | bookmark remove NAME"],
+      ["bookmark rename old", "Usage: bookmark add NAME | bookmark list | bookmark rename OLD NEW | bookmark remove NAME"],
+      ["bookmark rename old fresh extra", "Usage: bookmark add NAME | bookmark list | bookmark rename OLD NEW | bookmark remove NAME"],
+    ]) {
+      run.term.stylePrint.mockClear();
+      run.term.prompt.mockClear();
+      run.term.clearCurrentLine.mockClear();
+      storage.setItem.mockClear();
+
+      await submit(run.term, line);
+
+      expect(run.term.stylePrint).toHaveBeenLastCalledWith(output);
+      expect(storage.setItem).not.toHaveBeenCalled();
+      expect(storage.getItem("rootvc.bookmarks.v1")).toBe(initialBytes);
+      expect(run.term.cwd).toBe("~");
+      expect(run.term.prompt).toHaveBeenCalledTimes(1);
+      expect(run.term.clearCurrentLine).toHaveBeenCalledTimes(1);
+      expect(run.term.currentLine).toBe("");
+      expect(run.term.locked).toBe(false);
+      expect(run.term.busy).toBe(false);
+
+      run.term.stylePrint.mockClear();
+      await submit(run.term, "bookmark list");
+      expect(run.term.stylePrint.mock.calls.map(([text]) => text)).toEqual([
+        "occupied -> work",
+        "old -> home",
+      ]);
+    }
+  });
+
+  it("keeps write and load failures atomic while later ordinary commands execute", async () => {
+    const storage = createSharedStorage();
+    const originalBytes = JSON.stringify([["old", "home"], ["kept", "work"]]);
+    storage.setItem("rootvc.bookmarks.v1", originalBytes);
+    const writeFailure = createTerminalEnvironment(storage, "~");
+    environments.push(writeFailure);
+    storage.setItem.mockImplementation(() => { throw new Error("full"); });
+
+    await submit(writeFailure.term, "bookmark rename old new");
+    expect(writeFailure.term.stylePrint).toHaveBeenLastCalledWith(
+      'Could not rename bookmark "old" to "new": browser storage is unavailable.'
+    );
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(originalBytes);
+    writeFailure.term.stylePrint.mockClear();
+    await submit(writeFailure.term, "bookmark list");
+    expect(writeFailure.term.stylePrint.mock.calls.map(([line]) => line)).toEqual([
+      "kept -> work",
+      "old -> home",
+    ]);
+    writeFailure.term.stylePrint.mockClear();
+    await submit(writeFailure.term, "pwd");
+    expect(writeFailure.term.stylePrint).toHaveBeenLastCalledWith("/home/guest");
+    expect(writeFailure.term.currentLine).toBe("");
+    expect(writeFailure.term.locked).toBe(false);
+    expect(writeFailure.term.busy).toBe(false);
+
+    for (const failedStorage of [
+      {
+        getItem: vi.fn(() => { throw new Error("blocked"); }),
+        setItem: vi.fn(),
+      },
+      (() => {
+        const corrupt = createSharedStorage();
+        corrupt.setItem("rootvc.bookmarks.v1", "{broken");
+        corrupt.setItem.mockClear();
+        return corrupt;
+      })(),
+    ]) {
+      const failed = createTerminalEnvironment(failedStorage, "work");
+      environments.push(failed);
+      await submit(failed.term, "bookmark rename old new");
+      expect(failed.term.stylePrint).toHaveBeenLastCalledWith(
+        'Could not rename bookmark "old" to "new": browser storage is unavailable.'
+      );
+      expect(failedStorage.setItem).not.toHaveBeenCalled();
+      failed.term.stylePrint.mockClear();
+      await submit(failed.term, "pwd");
+      expect(failed.term.stylePrint).toHaveBeenLastCalledWith("/work");
+      expect(failed.term.currentLine).toBe("");
+      expect(failed.term.locked).toBe(false);
+      expect(failed.term.busy).toBe(false);
+    }
+  });
+
+  it("preserves special names, exact case, and write-free same-name success through Enter", async () => {
+    const storage = createSharedStorage();
+    storage.setItem(
+      "rootvc.bookmarks.v1",
+      JSON.stringify([["__proto__", "home"], ["constructor", "work"], ["Case", "~"]])
+    );
+    const run = createTerminalEnvironment(storage, "home");
+    environments.push(run);
+
+    await submit(run.term, "bookmark rename __proto__ toString");
+    expect(run.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark __proto__ renamed to toString."
+    );
+    await submit(run.term, "bookmark rename Case case");
+    expect(run.term.stylePrint).toHaveBeenLastCalledWith("Bookmark Case renamed to case.");
+    const bytesBeforeNoop = storage.getItem("rootvc.bookmarks.v1");
+    storage.setItem.mockClear();
+    await submit(run.term, "bookmark rename constructor constructor");
+    expect(run.term.stylePrint).toHaveBeenLastCalledWith(
+      "Bookmark constructor renamed to constructor."
+    );
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.getItem("rootvc.bookmarks.v1")).toBe(bytesBeforeNoop);
+    expect(JSON.parse(bytesBeforeNoop)).toEqual([
+      ["toString", "home"],
+      ["constructor", "work"],
+      ["case", "~"],
+    ]);
+    expect(run.term.cwd).toBe("home");
+    expect(run.term.currentLine).toBe("");
+    expect(run.term.locked).toBe(false);
+    expect(run.term.busy).toBe(false);
+  });
 });
