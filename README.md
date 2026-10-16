@@ -63,6 +63,12 @@ terminal for the corresponding manual page.
 ## Terminal editing shortcuts
 
 - **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches
+- **Delete** — delete the character under the cursor
+- **Ctrl+D** — delete the character under the cursor (never exits)
+- **Home** — move to the start of the line
+- **End** — move to the end of the line
+- **Ctrl+B** — move one character left
+- **Ctrl+F** — move one character right
 - **Alt+Left** — move to the start of the previous word
 - **Alt+Right** — move to the start of the next word
 - **Ctrl+W** — delete back to the start of the previous word

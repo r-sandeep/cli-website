@@ -62,6 +62,42 @@ function _completionRows(candidates, width) {
   return rows;
 }
 
+function _characterEdit(line, cursor, action) {
+  const boundedCursor = Math.max(0, Math.min(cursor, line.length));
+
+  switch (action) {
+    case "deleteForward":
+      return {
+        line: line.slice(0, boundedCursor) + line.slice(boundedCursor + 1),
+        cursor: boundedCursor,
+      };
+    case "previousCharacter":
+      return { line, cursor: Math.max(0, boundedCursor - 1) };
+    case "nextCharacter":
+      return { line, cursor: Math.min(line.length, boundedCursor + 1) };
+    default:
+      return { line, cursor: boundedCursor };
+  }
+}
+
+function _updateInput(term, line, cursor) {
+  const oldLine = term.currentLine;
+  const oldCursor = term.pos();
+  if (line === oldLine && cursor === oldCursor) return;
+
+  if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
+  term.currentLine = line;
+  term.write(`${line}\x1b[K`);
+  if (cursor < line.length) {
+    term.write("\x1b[D".repeat(line.length - cursor));
+  }
+}
+
+function _editCharacterInput(term, action) {
+  const result = _characterEdit(term.currentLine, term.pos(), action);
+  _updateInput(term, result.line, result.cursor);
+}
+
 function runRootTerminal(term) {
   if (term._initialized) {
     return;
@@ -132,16 +168,7 @@ function runRootTerminal(term) {
   };
 
   const updateInput = (line, cursor) => {
-    const oldLine = term.currentLine;
-    const oldCursor = term.pos();
-    if (line === oldLine && cursor === oldCursor) return;
-
-    if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
-    term.currentLine = line;
-    term.write(`${line}\x1b[K`);
-    if (cursor < line.length) {
-      term.write("\x1b[D".repeat(line.length - cursor));
-    }
+    _updateInput(term, line, cursor);
   };
 
   const editInput = (action) => {
@@ -149,6 +176,11 @@ function runRootTerminal(term) {
     const cursor = Math.max(0, Math.min(term.pos(), line.length));
 
     switch (action) {
+      case "deleteForward":
+      case "previousCharacter":
+      case "nextCharacter":
+        _editCharacterInput(term, action);
+        break;
       case "previousWord":
         updateInput(line, previousWordStart(line, cursor));
         break;
@@ -178,14 +210,18 @@ function runRootTerminal(term) {
   };
 
   const shortcutForEvent = (event) => {
-    if (
-      event.type !== "keydown" ||
-      event.shiftKey ||
-      event.metaKey ||
-      event.altKey === event.ctrlKey
-    ) {
+    if (event.type !== "keydown" || event.shiftKey || event.metaKey) {
       return null;
     }
+
+    if (!event.altKey && !event.ctrlKey) {
+      if (event.key === "Delete") return "deleteForward";
+      if (event.key === "Home") return "lineStart";
+      if (event.key === "End") return "lineEnd";
+      return null;
+    }
+
+    if (event.altKey === event.ctrlKey) return null;
 
     if (event.altKey) {
       if (event.key === "ArrowLeft") return "previousWord";
@@ -199,6 +235,9 @@ function runRootTerminal(term) {
     }
 
     if (event.ctrlKey) {
+      if (event.key.toLowerCase() === "b") return "previousCharacter";
+      if (event.key.toLowerCase() === "d") return "deleteForward";
+      if (event.key.toLowerCase() === "f") return "nextCharacter";
       if (event.key.toLowerCase() === "w") return "deletePreviousWord";
       if (event.key.toLowerCase() === "a") return "lineStart";
       if (event.key.toLowerCase() === "e") return "lineEnd";
