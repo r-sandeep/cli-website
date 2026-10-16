@@ -141,6 +141,96 @@ describe("runRootTerminal", () => {
     expect(term._initialized).toBe(true);
   });
 
+  it.each([32, 80])(
+    "keeps sequential wrapped pipeline input contiguous at %i columns",
+    async (cols) => {
+      env = createBrowserEnv({
+        globals: {
+          ...baseGlobals,
+          LOGO_TYPE: "ROOT",
+          colorText: (text) => text,
+          ensureASCIIArt: vi.fn(() => Promise.resolve()),
+          ensureFileLoaded: vi.fn(() => Promise.resolve()),
+          fitAddon: { fit: vi.fn() },
+          getASCIIArtIdForCommand: vi.fn(() => null),
+          getArt: vi.fn(() => ""),
+          getPreloadFileForCommand: vi.fn(() => null),
+          jobs: {},
+          preloadASCIIArt: vi.fn(() => Promise.resolve()),
+          scheduleIdleTask: vi.fn((task) => task()),
+        },
+      });
+      env.loadScripts([
+        "js/xterm.js",
+        "js/pipeline.js",
+        "js/terminal-ext.js",
+        "js/terminal.js",
+      ]);
+      const { extend, runRootTerminal } = env.exportValues([
+        "extend",
+        "runRootTerminal",
+      ]);
+      const term = new env.window.Terminal({ cols, rows: 24 });
+      const nativeOnData = term.onData.bind(term);
+      Object.defineProperty(term, "onData", {
+        configurable: true,
+        value: vi.fn((handler) => {
+          term._productionDataHandler = handler;
+          return nativeOnData(handler);
+        }),
+      });
+      extend(term);
+      term.init = vi.fn();
+      term.runDeepLink = vi.fn();
+      term.scrollToBottom = vi.fn();
+      const submitted = [];
+      term.executeCommandLine = vi.fn((line) => {
+        submitted.push(line);
+        term.write("\r\n");
+        term.clearCurrentLine(true);
+        return Promise.resolve();
+      });
+      runRootTerminal(term);
+
+      const flushWrites = () =>
+        new Promise((resolve) => term.write("", resolve));
+      const type = async (text) => {
+        for (let index = 0; index < text.length; index++) {
+          term._productionDataHandler(text[index]);
+          await flushWrites();
+          expect(term.currentLine).toBe(text.slice(0, index + 1));
+          expect(term.pos()).toBe(index + 1);
+        }
+      };
+      const transcript = () => {
+        const buffer = term.buffer.active;
+        let output = "";
+        for (let row = 0; row < buffer.length; row++) {
+          const line = buffer.getLine(row);
+          if (!line) continue;
+          if (row > 0 && !line.isWrapped) output += "\n";
+          output += line.translateToString(true);
+        }
+        return output;
+      };
+      const commands = [
+        "echo alpha:beta:gamma | cut -d : -f 2",
+        "echo one:two | cut -f 2 -d : | wc -l",
+      ];
+
+      await flushWrites();
+      for (const command of commands) {
+        await type(command);
+        expect(transcript()).toContain(`guest:rootpc ~ $ ${command}`);
+        term._productionDataHandler("\r");
+        await flushWrites();
+        expect(term.currentLine).toBe("");
+        expect(term.pos()).toBe(0);
+      }
+      expect(submitted).toEqual(commands);
+    }
+  );
+
   it("completes a unique command case-insensitively with canonical spelling", () => {
     const { runRootTerminal } = loadTerminalScript({
       commands: { HelpDesk: () => {}, history: () => {} },

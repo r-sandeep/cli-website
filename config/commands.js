@@ -1240,6 +1240,15 @@ for (const [alias, target] of Object.entries(_aliases)) {
 // standalone commands. Give them focused manual pages while retaining tldr as
 // man's fallback for portfolio companies and every other topic.
 const _pipelineManuals = {
+  cut: [
+    "%CUT(1)% — select one field from pipeline output",
+    "Usage: COMMAND | %cut% -d DELIM -f N (the -d and -f pairs may be reversed)",
+    "DELIM is exactly one printable non-whitespace ASCII character other than |. N is a positive safe base-10 integer.",
+    "Each line is split literally and field N is selected from 1. Leading, adjacent, and trailing delimiters create empty fields; a missing field prints an empty line.",
+    "Escape sequences are removed before selection and the field is emitted as plain visible text. No input lines produce no output lines.",
+    "Quoting delimiters, CSV interpretation, field lists, and ranges are not supported.",
+    "Example: %echo% alpha:beta:gamma | %cut% -d : -f 2 | %grep% beta",
+  ],
   sort: [
     "%SORT(1)% — sort pipeline output",
     "Usage: COMMAND | %sort% [-rnu]",
@@ -1256,12 +1265,16 @@ const _pipelineManuals = {
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
+    "Use %cut% -d DELIM -f N (or -f N -d DELIM) to select a 1-based literal field; run man cut for restrictions and empty or missing-field behavior.",
+    "Example: %echo% alpha:beta:gamma | %cut% -d : -f 2 | %wc% -l",
     "Example: %whois% | %grep% -i root | %head% 3",
   ],
   piping: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
+    "Use %cut% -d DELIM -f N (or -f N -d DELIM) to select a 1-based literal field; run man cut for restrictions and empty or missing-field behavior.",
+    "Example: %echo% alpha:beta:gamma | %cut% -d : -f 2 | %wc% -l",
     "Example: %whois% | %grep% -i root | %head% 3",
   ],
   grep: [

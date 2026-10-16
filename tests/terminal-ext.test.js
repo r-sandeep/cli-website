@@ -28,7 +28,14 @@ function loadTerminalExt(globals = {}) {
 function createTerm(overrides = {}) {
   const term = {
     VERSION: 4,
-    _core: { buffer: { x: 0 } },
+    buffer: {
+      active: {
+        baseY: 0,
+        cursorX: 0,
+        cursorY: 0,
+        getLine: vi.fn(() => ({ isWrapped: false })),
+      },
+    },
     cols: 80,
     command: vi.fn(() => 0),
     currentLine: "",
@@ -743,6 +750,37 @@ describe("terminal-ext", () => {
     );
   });
 
+  it("computes logical input positions from public wrapped-buffer metadata", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({ cols: 32 });
+    extend(term);
+    const buffer = term.buffer.active;
+
+    buffer.cursorX = 20;
+    expect(term.pos()).toBe(3);
+
+    buffer.cursorY = 1;
+    buffer.cursorX = 1;
+    buffer.getLine.mockImplementation((row) => ({ isWrapped: row === 1 }));
+    expect(term.pos()).toBe(16);
+
+    buffer.cursorY = 2;
+    buffer.cursorX = 5;
+    buffer.getLine.mockImplementation((row) => ({ isWrapped: row > 0 }));
+    expect(term.pos()).toBe(52);
+
+    buffer.cursorY = 0;
+    buffer.cursorX = 32;
+    buffer.getLine.mockImplementation(() => ({ isWrapped: false }));
+    expect(term.pos()).toBe(15);
+
+    buffer.baseY = 7;
+    buffer.cursorY = 2;
+    buffer.cursorX = 5;
+    buffer.getLine.mockImplementation((row) => ({ isWrapped: row === 9 }));
+    expect(term.pos()).toBe(20);
+  });
+
   it("runs a producer once and applies ANSI-aware pipeline stages left to right", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -786,6 +824,127 @@ describe("terminal-ext", () => {
         event: "commandSent",
       },
     ]);
+  });
+
+  it("runs cut publicly in both option orders and restores output ownership", async () => {
+    const { commands, term } = loadAliasTerminal();
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    term.command = vi.fn((line) => {
+      const [name, ...args] = line.split(" ");
+      return commands[name](args);
+    });
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    for (const line of [
+      "echo alpha:beta:gamma | cut -d : -f 2",
+      "echo alpha:beta:gamma | cut -f 2 -d :",
+      "echo left'right | cut -d ' -f 2",
+    ]) {
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+      expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+        line.includes("left") ? "right" : "beta",
+      ]);
+      expect(term.write).toBe(originalWrite);
+      expect(term.writeln).toBe(originalWriteln);
+      expect(term.busy).toBe(false);
+    }
+    expect(term.command).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects every invalid cut category before export preload or dispatch", async () => {
+    const { commands, term } = loadAliasTerminal();
+    expect(term.environment.set("UNCHANGED", "before")).toMatchObject({ ok: true });
+    const entriesBefore = term.environment.entries();
+    const storageBefore = env.window.localStorage.getItem(environmentStorageKey);
+    const exportCommand = vi.spyOn(commands, "export");
+    const dispatchCommand = vi.spyOn(term, "dispatchCommand");
+    const stylePrint = vi.spyOn(term, "stylePrint");
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const invalidStages = [
+      "cut",
+      "cut -d :",
+      "cut -f 2",
+      "cut -d : -f",
+      "cut -d : -d , -f 2",
+      "cut -d : -f 2 -f 3",
+      "cut -d : -x value -f 2",
+      "cut -d : -f 2 extra",
+      "cut -d :: -f 2",
+      "cut -d | -f 2",
+      "cut -d : -f 0",
+      "cut -d : -f -1",
+      "cut -d : -f 9007199254740992",
+      "grep CUT_SENTINEL | cut -d : -f 0",
+    ];
+
+    for (const stage of invalidStages) {
+      stylePrint.mockClear();
+      term.preloadCommandAssets.mockClear();
+      dispatchCommand.mockClear();
+      exportCommand.mockClear();
+
+      await term.executeCommandLine(`export CUT_SENTINEL=changed | ${stage}`, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+
+      const output = stylePrint.mock.calls.map(([line]) => line).join("\n");
+      expect(output).toContain("cut:");
+      expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      expect(exportCommand).not.toHaveBeenCalled();
+      expect(term.environment.entries()).toEqual(entriesBefore);
+      expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+        storageBefore
+      );
+    }
+  });
+
+  it("selects captured records, escapes, empty fields, and no output exactly", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const outputs = {
+      records: "\r\nleft:one\nplain\rmid::three\r\n",
+      escaped:
+        "\u001b[31ma:beta\u001b[0m\r\n" +
+        "\u001b]8;;https://example.test/a:b\u0007a:beta\u001b]8;;\u0007\r\n" +
+        "\u001b]8;;https://example.test/a:b\u001b\\a:beta\u001b]8;;\u001b\\\r\n" +
+        "a:%help%\r\n",
+      quiet: "",
+    };
+    term.command = vi.fn((line) => term.write(outputs[line]));
+
+    const execute = async (line) => {
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+      return term.writeln.mock.calls.map(([output]) => output);
+    };
+
+    expect(await execute("records | cut -d : -f 2")).toEqual([
+      "",
+      "one",
+      "",
+      "",
+    ]);
+    expect(await execute("records | cut -d : -f 4")).toEqual(["", "", "", ""]);
+    expect(await execute("escaped | cut -d : -f 2")).toEqual([
+      "beta",
+      "beta",
+      "beta",
+      "%help%",
+    ]);
+    expect(await execute("quiet | cut -d : -f 2")).toEqual([]);
+    expect(await execute("quiet | cut -d : -f 2 | wc -l")).toEqual(["0"]);
   });
 
   it("runs the registered version producer through a pipeline and restores output ownership", async () => {

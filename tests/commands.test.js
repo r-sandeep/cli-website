@@ -1017,6 +1017,10 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("PIPELINES");
     expect(output).toContain("COMMAND | %grep% [-ivn] PATTERN");
     expect(output).toContain("-i case-insensitive, -v invert, -n number");
+    expect(output).toContain("COMMAND | %cut% -d DELIM -f N");
+    expect(output).toContain("1-based field");
+    expect(output).toContain("-d and -f may be reversed");
+    expect(output).toContain("%echo% alpha:beta:gamma | %cut% -d : -f 2");
     expect(output).toContain("COMMAND | %head% [N]");
     expect(output).toContain("COMMAND | %tail% [N]");
     expect(output).toContain("default: 10");
@@ -1032,6 +1036,7 @@ describe("help output (pipelines)", () => {
 describe("pipeline manual pages preserve standalone commands", () => {
   it.each([
     ["pipe", "COMMAND | FILTER [| FILTER ...]"],
+    ["cut", "COMMAND | %cut% -d DELIM -f N"],
     ["grep", "COMMAND | %grep% [-ivn] PATTERN"],
     ["head", "COMMAND | %head% [N]"],
     ["tail", "COMMAND | %tail% [N]"],
@@ -1042,6 +1047,53 @@ describe("pipeline manual pages preserve standalone commands", () => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
     expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it("documents cut syntax, restrictions, field boundaries, and chaining", () => {
+    const cutRun = loadCommands();
+    cutRun.commands.man(["cut"]);
+    const cutOutput = cutRun.term.stylePrint.mock.calls.flat().join("\n");
+    for (const expected of [
+      "-d DELIM -f N",
+      "-d and -f pairs may be reversed",
+      "printable non-whitespace ASCII character other than |",
+      "positive safe base-10 integer",
+      "Leading, adjacent, and trailing delimiters create empty fields",
+      "missing field prints an empty line",
+      "Escape sequences are removed before selection",
+      "plain visible text",
+      "No input lines produce no output lines",
+      "Quoting delimiters, CSV interpretation, field lists, and ranges are not supported",
+      "%echo% alpha:beta:gamma | %cut% -d : -f 2 | %grep% beta",
+    ]) {
+      expect(cutOutput).toContain(expected);
+    }
+
+    const pipeRun = loadCommands();
+    pipeRun.commands.man(["pipe"]);
+    const pipeOutput = pipeRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(pipeOutput).toContain("%cut% -d DELIM -f N");
+    expect(pipeOutput).toContain("-f N -d DELIM");
+    expect(pipeOutput).toContain("empty or missing-field behavior");
+    expect(pipeOutput).toContain("%cut% -d : -f 2 | %wc% -l");
+
+    const readme = readFileSync("README.md", "utf8");
+    const normalizedReadme = readme.replace(/\s+/g, " ");
+    for (const expected of [
+      "COMMAND | cut -d DELIM -f N",
+      "pairs may appear in either order",
+      "printable non-whitespace ASCII",
+      "positive safe base-10 integer",
+      "Leading, adjacent, and trailing delimiters create empty fields",
+      "absent field prints an empty line",
+      "Escape sequences are removed before selection",
+      "No input lines produce no output",
+      "Quoted delimiter wrappers, CSV interpretation, field lists, and ranges are not supported",
+      "echo alpha:beta:gamma | cut -d : -f 2",
+      "cut -f 2 -d : | wc -l",
+    ]) {
+      expect(normalizedReadme).toContain(expected);
+    }
   });
 
   it("documents every sort and uniq flag", () => {

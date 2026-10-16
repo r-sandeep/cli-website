@@ -142,11 +142,78 @@ var Pipeline = (function () {
     };
   }
 
+  function compileCut(stage) {
+    var args = stage.args.slice();
+    var delimiter = null;
+    var fieldValue = null;
+
+    for (var index = 0; index < args.length; index += 2) {
+      var option = args[index];
+      if (option !== "-d" && option !== "-f") {
+        return preDispatchError(
+          stage.name,
+          "cut: unknown option or extra argument: " + option
+        );
+      }
+      if (index + 1 >= args.length) {
+        return preDispatchError(
+          stage.name,
+          "cut: " + option + " requires a value"
+        );
+      }
+      if (option === "-d") {
+        if (delimiter !== null) {
+          return preDispatchError(stage.name, "cut: -d may be specified only once");
+        }
+        delimiter = args[index + 1];
+      } else {
+        if (fieldValue !== null) {
+          return preDispatchError(stage.name, "cut: -f may be specified only once");
+        }
+        fieldValue = args[index + 1];
+      }
+    }
+
+    if (delimiter === null) {
+      return preDispatchError(stage.name, "cut: exactly one -d delimiter is required");
+    }
+    if (fieldValue === null) {
+      return preDispatchError(stage.name, "cut: exactly one -f field is required");
+    }
+
+    var delimiterCode = delimiter.length === 1 ? delimiter.charCodeAt(0) : -1;
+    if (delimiterCode < 33 || delimiterCode > 126 || delimiter === "|") {
+      return preDispatchError(
+        stage.name,
+        "cut: delimiter must be one printable non-whitespace ASCII character other than |"
+      );
+    }
+
+    var field = Number(fieldValue);
+    if (!/^[0-9]+$/.test(fieldValue) || !Number.isSafeInteger(field) || field <= 0) {
+      return preDispatchError(
+        stage.name,
+        "cut: field must be a positive safe base-10 integer"
+      );
+    }
+
+    return {
+      ok: true,
+      filter: {
+        type: "cut",
+        name: stage.name,
+        delimiter: delimiter,
+        field: field,
+      },
+    };
+  }
+
   function compileStage(stage) {
     if (!stage.name) {
       return preDispatchError("", "Pipeline stages cannot be empty");
     }
     if (stage.name === "grep") return compileGrep(stage);
+    if (stage.name === "cut") return compileCut(stage);
     if (stage.name === "head" || stage.name === "tail") {
       return compileCountFilter(stage);
     }
@@ -193,6 +260,24 @@ var Pipeline = (function () {
     };
   }
 
+  function cutVisibleText(value) {
+    return String(value)
+      .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
+      .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+      .replace(/\x1b[ -\/]*[0-~]/g, "");
+  }
+
+  function applyCut(inputLines, filter) {
+    var lines = inputLines || [];
+    return {
+      lines: lines.map(function (line) {
+        var fields = cutVisibleText(line).split(filter.delimiter);
+        return fields[filter.field - 1] || "";
+      }),
+      error: null,
+    };
+  }
+
   function applyPipelineFilter(inputLines, filter, options) {
     var lines = inputLines || [];
     var getText = options && options.getText
@@ -216,6 +301,9 @@ var Pipeline = (function () {
       };
     }
 
+    if (filter.type === "cut") {
+      return applyCut(lines, filter);
+    }
     if (filter.type === "head") {
       return { lines: lines.slice(0, filter.count), error: null };
     }
@@ -309,8 +397,10 @@ var Pipeline = (function () {
   }
 
   return {
+    applyCut: applyCut,
     applyPipeline: applyPipeline,
     applyPipelineFilter: applyPipelineFilter,
+    compileCut: compileCut,
     parsePipeline: parsePipeline,
     validatePipeline: validatePipeline,
   };

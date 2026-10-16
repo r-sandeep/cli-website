@@ -293,3 +293,173 @@ describe("deferred unknown filters", () => {
     });
   });
 });
+
+describe("reusable cut helpers", () => {
+  function compileCut(args) {
+    return pipeline.compileCut({ source: `cut ${args.join(" ")}`, name: "cut", args });
+  }
+
+  function expectCutError(args, message) {
+    const result = compileCut(args);
+    expect(result.ok).toBe(false);
+    expect(result.error.type).toBe("pre-dispatch");
+    expect(result.error.stageName).toBe("cut");
+    expect(result.error.message).toContain(message);
+    expect(result.filter).toBeUndefined();
+  }
+
+  it("accepts both option orders, leading-zero fields, and the safe-integer boundary", () => {
+    expect(compileCut(["-d", ":", "-f", "1"])).toEqual({
+      ok: true,
+      filter: { type: "cut", name: "cut", delimiter: ":", field: 1 },
+    });
+    expect(compileCut(["-f", "0002", "-d", ":"])).toEqual({
+      ok: true,
+      filter: { type: "cut", name: "cut", delimiter: ":", field: 2 },
+    });
+
+    const maximum = compileCut(["-d", ":", "-f", "9007199254740991"]);
+    expect(maximum.ok).toBe(true);
+    expect(pipeline.applyCut(["alpha:beta"], maximum.filter)).toEqual({
+      lines: [""],
+      error: null,
+    });
+  });
+
+  it("accepts every printable non-pipe ASCII delimiter literally", () => {
+    for (let code = 33; code <= 126; code += 1) {
+      if (code === 124) continue;
+      const delimiter = String.fromCharCode(code);
+      const result = compileCut(["-d", delimiter, "-f", "2"]);
+      expect(result.ok, `delimiter ${JSON.stringify(delimiter)}`).toBe(true);
+      expect(pipeline.applyCut([`左${delimiter}右`], result.filter)).toEqual({
+        lines: ["右"],
+        error: null,
+      });
+    }
+  });
+
+  it("rejects missing, duplicated, unknown, and extra option structure", () => {
+    expectCutError([], "-d delimiter is required");
+    expectCutError(["-d", ":"], "-f field is required");
+    expectCutError(["-f", "2"], "-d delimiter is required");
+    expectCutError(["-d"], "-d requires a value");
+    expectCutError(["-d", ":", "-f"], "-f requires a value");
+    expectCutError(["-d", ":", "-d", ",", "-f", "2"], "-d may be specified only once");
+    expectCutError(["-f", "2", "-d", ":", "-f", "3"], "-f may be specified only once");
+    expectCutError(["-d", ":", "-x", "value", "-f", "2"], "unknown option");
+    expectCutError(["-d", ":", "-f", "2", "extra"], "extra argument");
+  });
+
+  it.each(["", " ", "\t", "\n", "\u001f", "\u007f", "é", "|", "::"])(
+    "rejects invalid delimiter %j without returning a transform",
+    (delimiter) => {
+      expectCutError(["-d", delimiter, "-f", "2"], "delimiter must be one printable");
+    }
+  );
+
+  it("does not add quoted-delimiter syntax", () => {
+    expectCutError(["-d", "':'", "-f", "2"], "delimiter must be one printable");
+    expectCutError(["-d", "\":\"", "-f", "2"], "delimiter must be one printable");
+  });
+
+  it.each([
+    "0",
+    "000",
+    "-1",
+    "+1",
+    "1.5",
+    "1e2",
+    "0x10",
+    "NaN",
+    "Infinity",
+    "9007199254740992",
+    "999999999999999999999999999999999999999999",
+    "1,2",
+    "1-2",
+  ])("rejects invalid field value %s", (field) => {
+    expectCutError(["-d", ":", "-f", field], "field must be a positive safe base-10 integer");
+  });
+
+  it("selects literal 1-based fields and retains empty and missing fields", () => {
+    const input = ["alpha:beta:gamma", ":beta", "alpha::gamma", "alpha:", "plain", ""];
+    const expected = [
+      ["alpha", "", "alpha", "alpha", "plain", ""],
+      ["beta", "beta", "", "", "", ""],
+      ["gamma", "", "gamma", "", "", ""],
+      ["", "", "", "", "", ""],
+    ];
+
+    expected.forEach((lines, index) => {
+      expect(pipeline.applyCut(input, { delimiter: ":", field: index + 1 })).toEqual({
+        lines,
+        error: null,
+      });
+    });
+    expect(pipeline.applyCut(["left.middle", "leftXmiddle"], { delimiter: ".", field: 2 }).lines)
+      .toEqual(["middle", ""]);
+    expect(pipeline.applyCut(["left*middle", "leftXmiddle"], { delimiter: "*", field: 2 }).lines)
+      .toEqual(["middle", ""]);
+  });
+
+  it("preserves order, line count, immutable input, and empty input", () => {
+    const input = Object.freeze(["z:two", ":", "a:", "", "m:one"]);
+    const empty = Object.freeze([]);
+    const filter = { delimiter: ":", field: 2 };
+
+    expect(pipeline.applyCut(input, filter)).toEqual({
+      lines: ["two", "", "", "", "one"],
+      error: null,
+    });
+    expect(pipeline.applyCut(input, filter)).toEqual({
+      lines: ["two", "", "", "", "one"],
+      error: null,
+    });
+    expect(input).toEqual(["z:two", ":", "a:", "", "m:one"]);
+    expect(pipeline.applyCut(empty, filter)).toEqual({ lines: [], error: null });
+    expect(empty).toEqual([]);
+  });
+
+  it("removes CSI, OSC hyperlink, and short escape sequences before splitting", () => {
+    const input = [
+      "\u001b[31ma:beta\u001b[0m",
+      "\u001b]8;;https://example.test/a:b\u0007a:beta\u001b]8;;\u0007",
+      "\u001b]8;;https://example.test/a:b\u001b\\a:beta\u001b]8;;\u001b\\",
+      "\u001b(Ba:beta",
+      "a:%help%",
+    ];
+    const result = pipeline.applyCut(input, { delimiter: ":", field: 2 });
+
+    expect(result).toEqual({
+      lines: ["beta", "beta", "beta", "beta", "%help%"],
+      error: null,
+    });
+    result.lines.forEach((line) => expect(line).not.toContain("\u001b"));
+  });
+
+  it("registers cut through ordinary stage compilation and composition", () => {
+    const validated = compile("echo alpha:beta | cut -d : -f 2");
+    expect(validated.ok).toBe(true);
+    expect(validated.filters).toEqual([
+      { type: "cut", name: "cut", delimiter: ":", field: 2 },
+    ]);
+    expect(pipeline.applyPipeline(["alpha:beta"], validated.filters)).toEqual({
+      lines: ["beta"],
+      error: null,
+    });
+    expect(
+      run(
+        "cmd | cut -d : -f 2 | sort | uniq",
+        ["z:beta", "a:beta", "q:alpha"]
+      )
+    ).toEqual({ lines: ["alpha", "beta"], error: null });
+    expect(
+      run(
+        "cmd | grep beta | cut -d : -f 2 | sort | uniq | wc -l",
+        ["z:beta", "a:beta", "q:alpha"]
+      )
+    ).toEqual({ lines: ["1"], error: null });
+    expect(run("cmd | cut -d : -f 2 | cut -d . -f 2", ["a:beta.two"]))
+      .toEqual({ lines: ["two"], error: null });
+  });
+});

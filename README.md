@@ -42,6 +42,15 @@ replace the existing standalone commands with the same names.
   Add `-i` for case-insensitive matching, `-v` to invert the match, or `-n` to
   prefix retained lines with their 1-based incoming line number. Flags may be
   combined, as in `grep -ivn PATTERN`.
+- `COMMAND | cut -d DELIM -f N` selects the 1-based field N after literally
+  splitting each input line on DELIM. The `-d DELIM` and `-f N` pairs may appear
+  in either order. DELIM must be exactly one printable non-whitespace ASCII
+  character other than `|`, and N must be a positive safe base-10 integer.
+  Leading, adjacent, and trailing delimiters create empty fields; an absent
+  field prints an empty line. Escape sequences are removed before selection and
+  fields are emitted as plain visible text. No input lines produce no output.
+  Quoted delimiter wrappers, CSV interpretation, field lists, and ranges are not
+  supported. Cut output can continue through ordinary pipeline filters.
 - `COMMAND | head [N]` keeps the first N lines. N defaults to 10.
 - `COMMAND | tail [N]` keeps the last N lines. N defaults to 10.
 - `COMMAND | wc -l` prints the number of output lines.
@@ -55,10 +64,12 @@ replace the existing standalone commands with the same names.
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
-For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
-`tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+For example, `echo alpha:beta:gamma | cut -d : -f 2` prints `beta`, and
+`echo one:two | cut -f 2 -d : | wc -l` prints `1`. The examples
+`whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
+`tldr | uniq -c | sort -rn` also chain filters from left to right. Run `man pipe`,
+`man cut`, `man grep`, `man head`, `man tail`, `man wc`, `man sort`, or
+`man uniq` in the terminal for the corresponding manual page.
 
 ## Terminal editing shortcuts
 
