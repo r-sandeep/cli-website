@@ -26,11 +26,16 @@ The terminal supports persistent named bookmarks for quick directory navigation:
 
 - `bookmark add NAME` saves the current directory.
 - `bookmark list` lists saved bookmarks as `NAME -> path`.
+- `bookmark rename OLD NEW` changes a bookmark's name while preserving its exact saved directory.
 - `bookmark remove NAME` removes a saved bookmark.
 - `go NAME` moves to the directory saved under `NAME`.
 
-`NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
-browser storage, with a maximum of 25 saved bookmarks.
+Names are case-sensitive and must match `[A-Za-z0-9_-]+`. Rename does not change
+the bookmark count, so it works at the maximum of 25 saved bookmarks. Renaming
+an existing bookmark to the same name succeeds without writing browser storage.
+Invalid names, missing sources, occupied destinations, and storage errors leave
+all bookmarks unchanged. Bookmarks persist across page reloads in browser
+storage.
 
 ## Output pipelines
 

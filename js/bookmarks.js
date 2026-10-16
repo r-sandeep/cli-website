@@ -73,6 +73,29 @@ function createBookmarkStore(storage) {
         : { ok: false, error: "not-found" };
     },
 
+    rename(oldName, newName) {
+      if (!_validBookmarkName(oldName) || !_validBookmarkName(newName)) {
+        return { ok: false, error: "invalid-name" };
+      }
+      if (bookmarks === null) return { ok: false, error: "storage" };
+
+      const sourceIndex = bookmarks.findIndex(
+        ([savedName]) => savedName === oldName
+      );
+      if (sourceIndex === -1) return { ok: false, error: "not-found" };
+      if (oldName === newName) return { ok: true };
+      if (bookmarks.some(([savedName]) => savedName === newName)) {
+        return { ok: false, error: "duplicate" };
+      }
+
+      const nextBookmarks = bookmarks.map((entry, entryIndex) =>
+        entryIndex === sourceIndex ? [newName, entry[1]] : entry
+      );
+      return persist(nextBookmarks)
+        ? { ok: true }
+        : { ok: false, error: "storage" };
+    },
+
     remove(name) {
       if (!_validBookmarkName(name)) return { ok: false, error: "invalid-name" };
       if (bookmarks === null) return { ok: false, error: "storage" };
