@@ -1,0 +1,293 @@
+
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET / HTTP/1.1" 200 -
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 62856)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 1422, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                             directory=args.directory)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 732, in __init__
+    super().__init__(*args, **kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 725, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /css/xterm.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /js/addon-fit.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /js/xterm.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /js/addon-web-links.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /js/app.bundle.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /js/aalib.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/rootvc-square.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/avidan.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/kane.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/chrissy.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/lee.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/zodi.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/ben.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/laelah.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/meroxa.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/esper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/particle.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/daily.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/superconductive.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/hash.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/privacy_dynamics.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/okteto.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/nautilus.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/ntopology.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/tortuga.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/instrumental.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/stellar.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/versatile.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/dusty.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:38] "GET /images/thruwave.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/seismic.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/seam.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/chargelab.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/wildtype.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/nordsense.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/trucklabs.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/crux.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/sensable.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/iasql.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/mashgin.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/apolloshield.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/creator.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/shaper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/skycatch.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/cape.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/righthook.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/radical.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/sixwheel.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/kayhan.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/zed.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/quilter.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/allspice.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/adept.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/aperture.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/supertokens.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/fudge.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/topologic.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/kodra.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/ruby.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/instance.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/cady.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/sublayer.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/nullify.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/trieve.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /css/xterm.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /js/xterm.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /js/addon-web-links.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /js/app.bundle.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /js/addon-fit.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /js/aalib.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/rootvc-square.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/avidan.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/chrissy.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:39] "GET /images/kane.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/lee.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/zodi.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/ben.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/laelah.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/esper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/meroxa.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/particle.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/daily.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/superconductive.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/hash.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/okteto.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/privacy_dynamics.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/nautilus.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/ntopology.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/tortuga.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/instrumental.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/versatile.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/stellar.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/dusty.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/thruwave.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/seismic.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/seam.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/chargelab.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/wildtype.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/nordsense.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/trucklabs.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/sensable.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/crux.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/mashgin.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/iasql.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/creator.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/apolloshield.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/shaper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/skycatch.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/righthook.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/cape.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/sixwheel.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/radical.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/kayhan.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/zed.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/allspice.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/quilter.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /css/xterm.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /js/xterm.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /js/app.bundle.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /js/addon-web-links.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /js/addon-fit.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /js/aalib.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/rootvc-square.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/avidan.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/kane.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/chrissy.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/zodi.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/lee.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/laelah.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/ben.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/meroxa.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/esper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/daily.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/particle.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/hash.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/superconductive.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/privacy_dynamics.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/okteto.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/nautilus.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/ntopology.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/tortuga.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:40] "GET /images/instrumental.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/stellar.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/versatile.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/dusty.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/thruwave.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/seismic.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/seam.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/chargelab.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/wildtype.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/trucklabs.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/nordsense.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /css/xterm.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /js/addon-fit.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /js/app.bundle.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /js/addon-web-links.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /js/xterm.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /js/aalib.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/rootvc-square.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/avidan.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/chrissy.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/kane.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/zodi.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/lee.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/ben.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/laelah.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/esper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/meroxa.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/particle.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/daily.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/hash.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/superconductive.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/okteto.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/privacy_dynamics.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/ntopology.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/nautilus.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/tortuga.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/instrumental.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/stellar.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/versatile.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/dusty.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:41] "GET /images/thruwave.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/seam.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/seismic.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/wildtype.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/chargelab.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/nordsense.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/trucklabs.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/crux.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/sensable.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/mashgin.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/iasql.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /css/xterm.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/logo.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /js/xterm.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /js/addon-web-links.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /js/addon-fit.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /js/app.bundle.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /js/aalib.js HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/rootvc-square.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/avidan.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/chrissy.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/kane.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/zodi.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/lee.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/laelah.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/ben.png HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/esper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/meroxa.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/daily.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/particle.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/hash.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/superconductive.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/okteto.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/privacy_dynamics.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/nautilus.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/ntopology.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/tortuga.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/instrumental.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/stellar.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/versatile.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/dusty.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/thruwave.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/seam.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/seismic.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/wildtype.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/chargelab.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/trucklabs.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/nordsense.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/sensable.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/crux.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/iasql.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:42] "GET /images/mashgin.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/creator.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/apolloshield.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/skycatch.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/shaper.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/righthook.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/cape.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/radical.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/sixwheel.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/kayhan.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/zed.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/quilter.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/allspice.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/aperture.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/adept.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/supertokens.jpg HTTP/1.1" 200 -
+127.0.0.1 - - [16/Oct/2026 10:11:43] "GET /images/fudge.jpg HTTP/1.1" 200 -
