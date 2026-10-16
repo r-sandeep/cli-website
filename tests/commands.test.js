@@ -133,6 +133,7 @@ function loadCommands({
   storage = createMemoryStorage(),
   help = {},
   portfolio = {},
+  cols = 100,
 } = {}) {
   const aliases = new Map();
   const location = {
@@ -152,7 +153,7 @@ function loadCommands({
     prompt: vi.fn(),
     clearCurrentLine: vi.fn(),
     collectInput: vi.fn(),
-    cols: 100,
+    cols,
     defineAlias: vi.fn((name, value) => {
       aliases.set(name, value);
       return true;
@@ -1092,6 +1093,12 @@ describe("pipeline manual pages preserve standalone commands", () => {
 describe("terminal editing documentation", () => {
   const expectedShortcuts = [
     "Tab",
+    "Delete",
+    "Ctrl+D",
+    "Home",
+    "End",
+    "Ctrl+B",
+    "Ctrl+F",
     "Alt+Left",
     "Alt+Right",
     "Ctrl+W",
@@ -1119,6 +1126,35 @@ describe("terminal editing documentation", () => {
       );
     }
     expect(manRun.term.command).not.toHaveBeenCalled();
+  });
+
+  it("prints every shortcut in help and man shortcuts at narrow width", () => {
+    const helpRun = loadCommands({ cols: 32 });
+    helpRun.commands.help([]);
+    const helpOutput = helpRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    const manRun = loadCommands({ cols: 32 });
+    manRun.commands.man(["shortcuts"]);
+    const manOutput = manRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    for (const chord of expectedShortcuts) {
+      expect(helpOutput).toContain(
+        `${chord}: ${helpContext.shortcutEntries[chord]}`
+      );
+      expect(manOutput).toContain(
+        `${chord}: ${helpContext.shortcutEntries[chord]}`
+      );
+    }
+    expect(manRun.term.command).not.toHaveBeenCalled();
+  });
+
+  it("documents forward deletion and explicitly non-exiting Ctrl+D semantics", () => {
+    expect(helpContext.shortcutEntries.Delete).toBe(
+      "delete the character under the cursor"
+    );
+    expect(helpContext.shortcutEntries["Ctrl+D"]).toBe(
+      "delete the character under the cursor (never exits)"
+    );
   });
 
   it("keeps bare man, company man, woman, and tldr on the existing tldr path", () => {

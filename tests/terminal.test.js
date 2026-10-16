@@ -22,6 +22,11 @@ function loadTerminalScript(globals = {}) {
   return env.exportValues(["runRootTerminal"]);
 }
 
+function loadCharacterEditScript() {
+  loadTerminalScript();
+  return env.exportValues(["_characterEdit", "_editCharacterInput"]);
+}
+
 function createTerm(overrides = {}) {
   const term = {
     _initialized: false,
@@ -69,6 +74,33 @@ function keyEvent(chord, preventDefault = vi.fn()) {
     ...chord,
   };
 }
+
+const newEditingKeys = [
+  ["Delete", { key: "Delete" }],
+  ["Ctrl+D", { ctrlKey: true, key: "d" }],
+  ["Home", { key: "Home" }],
+  ["End", { key: "End" }],
+  ["Ctrl+B", { ctrlKey: true, key: "b" }],
+  ["Ctrl+F", { ctrlKey: true, key: "f" }],
+];
+
+const newEditingKeyFixtures = [
+  ["Delete", { key: "Delete" }, [["start", "abcd", 0, "bcd", 0], ["middle", "abcd", 2, "abd", 2], ["end", "abcd", 4, "abcd", 4], ["empty", "", 0, "", 0]]],
+  ["Ctrl+D", { ctrlKey: true, key: "d" }, [["start", "abcd", 0, "bcd", 0], ["middle", "abcd", 2, "abd", 2], ["end", "abcd", 4, "abcd", 4], ["empty", "", 0, "", 0]]],
+  ["Home", { key: "Home" }, [["start", "abcd", 0, "abcd", 0], ["middle", "abcd", 2, "abcd", 0], ["end", "abcd", 4, "abcd", 0], ["empty", "", 0, "", 0]]],
+  ["End", { key: "End" }, [["start", "abcd", 0, "abcd", 4], ["middle", "abcd", 2, "abcd", 4], ["end", "abcd", 4, "abcd", 4], ["empty", "", 0, "", 0]]],
+  ["Ctrl+B", { ctrlKey: true, key: "b" }, [["start", "abcd", 0, "abcd", 0], ["middle", "abcd", 2, "abcd", 1], ["end", "abcd", 4, "abcd", 3], ["empty", "", 0, "", 0]]],
+  ["Ctrl+F", { ctrlKey: true, key: "f" }, [["start", "abcd", 0, "abcd", 1], ["middle", "abcd", 2, "abcd", 3], ["end", "abcd", 4, "abcd", 4], ["empty", "", 0, "", 0]]],
+].flatMap(([name, chord, fixtures]) =>
+  fixtures.map(([boundary, line, cursor, expectedLine, expectedCursor]) => [
+    `${name} at ${boundary}`,
+    chord,
+    line,
+    cursor,
+    expectedLine,
+    expectedCursor,
+  ])
+);
 
 function createEditingTerm({ line = "", cursor = line.length, history = [] } = {}) {
   let visualCursor = cursor;
@@ -139,6 +171,354 @@ describe("runRootTerminal", () => {
     expect(term.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1);
     expect(term.onData).toHaveBeenCalledTimes(1);
     expect(term._initialized).toBe(true);
+  });
+
+describe("character editing actions", () => {
+  it.each([
+    ["start", "abcd", 0, "bcd", 0],
+    ["middle", "abcd", 2, "abd", 2],
+    ["end", "abcd", 4, "abcd", 4],
+    ["empty", "", 0, "", 0],
+  ])(
+    "deletes forward once at the %s boundary",
+    (_name, line, cursor, expectedLine, expectedCursor) => {
+      const { _characterEdit } = loadCharacterEditScript();
+
+      expect(_characterEdit(line, cursor, "deleteForward")).toEqual({
+        line: expectedLine,
+        cursor: expectedCursor,
+      });
+    }
+  );
+
+  it.each([
+    ["start", "abcd", 0, "bcd", 0],
+    ["middle", "abcd", 2, "abd", 2],
+    ["end", "abcd", 4, "abcd", 4],
+    ["empty", "", 0, "", 0],
+  ])(
+    "applies forward deletion through the renderer boundary at %s",
+    (_name, line, cursor, expectedLine, expectedCursor) => {
+      const { _editCharacterInput } = loadCharacterEditScript();
+      const editing = createEditingTerm({ line, cursor });
+      const { term } = editing;
+
+      _editCharacterInput(term, "deleteForward");
+
+      expect(term.currentLine).toBe(expectedLine);
+      expect(editing.cursor()).toBe(expectedCursor);
+      expect(term.prompt).not.toHaveBeenCalled();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      if (expectedLine === line) {
+        expect(term.write).not.toHaveBeenCalled();
+      } else {
+        expect(term.write.mock.calls.flat().join("")).toContain("\x1b[K");
+      }
+    }
+  );
+
+  it.each([
+    ["previous at start", "previousCharacter", "abcd", 0, 0],
+    ["previous in middle", "previousCharacter", "abcd", 2, 1],
+    ["previous at end", "previousCharacter", "abcd", 4, 3],
+    ["previous on empty", "previousCharacter", "", 0, 0],
+    ["next at start", "nextCharacter", "abcd", 0, 1],
+    ["next in middle", "nextCharacter", "abcd", 2, 3],
+    ["next at end", "nextCharacter", "abcd", 4, 4],
+    ["next on empty", "nextCharacter", "", 0, 0],
+  ])(
+    "moves one character for %s without changing text",
+    (_name, action, line, cursor, expectedCursor) => {
+      const { _characterEdit } = loadCharacterEditScript();
+
+      expect(_characterEdit(line, cursor, action)).toEqual({
+        line,
+        cursor: expectedCursor,
+      });
+    }
+  );
+
+  it("composes deletion, movement, redraw, and ordinary insertion", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const { _editCharacterInput } = env.exportValues(["_editCharacterInput"]);
+    const editing = createEditingTerm({ line: "abXcd", cursor: 2 });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    _editCharacterInput(term, "deleteForward");
+    expect([term.currentLine, editing.cursor()]).toEqual(["abcd", 2]);
+    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
+      "\x1b[D".repeat(2),
+      "abcd\x1b[K",
+      "\x1b[D".repeat(2),
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    _editCharacterInput(term, "previousCharacter");
+    expect([term.currentLine, editing.cursor()]).toEqual(["abcd", 1]);
+    _editCharacterInput(term, "nextCharacter");
+    expect([term.currentLine, editing.cursor()]).toEqual(["abcd", 2]);
+    _editCharacterInput(term, "deleteForward");
+    expect([term.currentLine, editing.cursor()]).toEqual(["abd", 2]);
+
+    term._onData("Y");
+    expect([term.currentLine, editing.cursor()]).toEqual(["abYd", 3]);
+    _editCharacterInput(term, "nextCharacter");
+    _editCharacterInput(term, "nextCharacter");
+    expect([term.currentLine, editing.cursor()]).toEqual(["abYd", 4]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+});
+
+  it.each(newEditingKeyFixtures)(
+    "handles %s exactly once through the real key handler",
+    (_name, chord, line, cursor, expectedLine, expectedCursor) => {
+      const { runRootTerminal } = loadTerminalScript();
+      const editing = createEditingTerm({ line, cursor });
+      const { term } = editing;
+      runRootTerminal(term);
+      term.write.mockClear();
+      const keydownDefault = vi.fn();
+      const keyupDefault = vi.fn();
+
+      expect(term._customKeyHandler(keyEvent(chord, keydownDefault))).toBe(false);
+      expect(term.currentLine).toBe(expectedLine);
+      expect(editing.cursor()).toBe(expectedCursor);
+      expect(keydownDefault).toHaveBeenCalledTimes(1);
+
+      expect(
+        term._customKeyHandler(
+          keyEvent({ ...chord, type: "keyup" }, keyupDefault)
+        )
+      ).toBe(true);
+      expect(term.currentLine).toBe(expectedLine);
+      expect(editing.cursor()).toBe(expectedCursor);
+      expect(keyupDefault).not.toHaveBeenCalled();
+      expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      expect(term.clearCurrentLine).not.toHaveBeenCalled();
+      expect(term.prompt).toHaveBeenCalledTimes(1);
+      expect(term.runDeepLink).toHaveBeenCalledTimes(1);
+      expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each([
+    ["uninitialized", { _initialized: false }],
+    ["busy", { busy: true }],
+    ["locked", { locked: true }],
+  ])(
+    "ignores every new editing key while %s and never replays it",
+    async (_name, guard) => {
+      const open = vi.fn();
+      const { runRootTerminal } = loadTerminalScript({ open });
+      const initialURL = env.window.location.href;
+
+      for (const [, chord] of newEditingKeys) {
+        const editing = createEditingTerm({
+          line: "abcd",
+          cursor: 2,
+          history: ["previous"],
+        });
+        const { term } = editing;
+        runRootTerminal(term);
+        Object.assign(term, guard);
+        term.write.mockClear();
+        term.scrollToBottom.mockClear();
+        const preventDefault = vi.fn();
+
+        expect(term._customKeyHandler(keyEvent(chord, preventDefault))).toBe(false);
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+        expect(term.currentLine).toBe("abcd");
+        expect(editing.cursor()).toBe(2);
+        expect(term.history).toEqual(["previous"]);
+        expect(term.historyCursor).toBe(-1);
+        expect(term.write).not.toHaveBeenCalled();
+        expect(term.scrollToBottom).not.toHaveBeenCalled();
+        expect(term.executeCommandLine).not.toHaveBeenCalled();
+        expect(term.clearCurrentLine).not.toHaveBeenCalled();
+        expect(term.prompt).toHaveBeenCalledTimes(1);
+        expect(term.runDeepLink).toHaveBeenCalledTimes(1);
+        expect(open).not.toHaveBeenCalled();
+        expect(env.window.location.href).toBe(initialURL);
+
+        if (Object.hasOwn(guard, "_initialized")) term._initialized = true;
+        if (Object.hasOwn(guard, "busy")) term.busy = false;
+        if (Object.hasOwn(guard, "locked")) term.locked = false;
+        await Promise.resolve();
+        term._onData("X");
+
+        expect(term.currentLine).toBe("abXcd");
+        expect(editing.cursor()).toBe(3);
+        expect(term.history).toEqual(["previous"]);
+        expect(term.executeCommandLine).not.toHaveBeenCalled();
+        expect(term.prompt).toHaveBeenCalledTimes(1);
+      }
+    }
+  );
+
+  it.each([
+    ["middle", "abcd", 2, "abd", 2, "abXd", 3],
+    ["end", "abcd", 4, "abcd", 4, "abcdX", 5],
+    ["empty", "", 0, "", 0, "X", 1],
+  ])(
+    "keeps Ctrl+D non-exiting and exactly once at %s",
+    (_name, line, cursor, deletedLine, deletedCursor, insertedLine, insertedCursor) => {
+      const open = vi.fn();
+      const { runRootTerminal } = loadTerminalScript({ open });
+      const editing = createEditingTerm({ line, cursor, history: ["previous"] });
+      const { term } = editing;
+      runRootTerminal(term);
+      const initialURL = env.window.location.href;
+      term.write.mockClear();
+
+      expect(
+        term._customKeyHandler(keyEvent({ ctrlKey: true, key: "d" }))
+      ).toBe(false);
+      expect([term.currentLine, editing.cursor()]).toEqual([
+        deletedLine,
+        deletedCursor,
+      ]);
+      expect(
+        term._customKeyHandler(
+          keyEvent({ ctrlKey: true, key: "d", type: "keyup" })
+        )
+      ).toBe(true);
+      expect([term.currentLine, editing.cursor()]).toEqual([
+        deletedLine,
+        deletedCursor,
+      ]);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      expect(term.prompt).toHaveBeenCalledTimes(1);
+      expect(term.clearCurrentLine).not.toHaveBeenCalled();
+      expect(term.history).toEqual(["previous"]);
+      expect(term.runDeepLink).toHaveBeenCalledTimes(1);
+      expect(open).not.toHaveBeenCalled();
+      expect(env.window.location.href).toBe(initialURL);
+      expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
+
+      term._onData("X");
+      expect([term.currentLine, editing.cursor()]).toEqual([
+        insertedLine,
+        insertedCursor,
+      ]);
+    }
+  );
+
+  it.each([
+    ["Delete with Ctrl", { ctrlKey: true, key: "Delete" }],
+    ["Home with Alt", { altKey: true, key: "Home" }],
+    ["End with Shift", { key: "End", shiftKey: true }],
+    ["Ctrl+B with Shift", { ctrlKey: true, key: "b", shiftKey: true }],
+    ["Ctrl+D with Meta", { ctrlKey: true, key: "d", metaKey: true }],
+    ["Ctrl+F keyup", { ctrlKey: true, key: "f", type: "keyup" }],
+  ])("passes new-key near miss through unchanged: %s", (_name, chord) => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ line: "abcd", cursor: 2 });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+    const preventDefault = vi.fn();
+
+    expect(term._customKeyHandler(keyEvent(chord, preventDefault))).toBe(true);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe("abcd");
+    expect(editing.cursor()).toBe(2);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("preserves real collectInput ownership and listener lifetime after feature use", async () => {
+    const { runRootTerminal } = loadTerminalScript();
+    env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+    const { extend } = env.exportValues(["extend"]);
+    const editing = createEditingTerm({ line: "pending", cursor: 2 });
+    const { term } = editing;
+    const editingMethods = {
+      clearCurrentLine: term.clearCurrentLine,
+      init: term.init,
+      pos: term.pos,
+      prompt: term.prompt,
+      setCurrentLine: term.setCurrentLine,
+    };
+    const listeners = new Set();
+    term.onData = vi.fn((handler) => {
+      listeners.add(handler);
+      const dispose = vi.fn(() => listeners.delete(handler));
+      return { dispose };
+    });
+    term._core = { buffer: { x: 0 } };
+    term.VERSION = 4;
+    term.cols = 80;
+    term.command = vi.fn(() => 0);
+    term.focus = vi.fn();
+    term.loadAddon = vi.fn();
+    term.open = vi.fn();
+    term.reset = vi.fn();
+    term.writeln = vi.fn();
+
+    extend(term);
+    Object.assign(term, editingMethods, {
+      currentLine: "pending",
+      resizeListener: vi.fn(),
+      runDeepLink: vi.fn(),
+    });
+    const cursorWrite = term.write;
+    term.write = vi.fn((output) => {
+      if (!term.locked) cursorWrite(output);
+    });
+    runRootTerminal(term);
+    term.write.mockClear();
+    const dispatchData = (data) => {
+      for (const listener of [...listeners]) listener(data);
+    };
+
+    expect(listeners.size).toBe(1);
+    expect(
+      term._customKeyHandler(keyEvent({ ctrlKey: true, key: "d" }))
+    ).toBe(false);
+    expect([term.currentLine, editing.cursor()]).toEqual(["peding", 2]);
+    term._onData = undefined;
+
+    const collected = term.collectInput("Field");
+    expect(term.locked).toBe(true);
+    expect(listeners.size).toBe(2);
+    for (const [, chord] of newEditingKeys) {
+      expect(term._customKeyHandler(keyEvent(chord))).toBe(false);
+      expect([term.currentLine, editing.cursor()]).toEqual(["peding", 2]);
+    }
+    dispatchData("a");
+    dispatchData("b");
+    dispatchData("\u007f");
+    dispatchData("c");
+    dispatchData("\r");
+    await expect(collected).resolves.toBe("ac");
+    expect(term.locked).toBe(false);
+    expect(listeners.size).toBe(1);
+    expect([term.currentLine, editing.cursor()]).toEqual(["peding", 2]);
+
+    const cancelled = term.collectInput("Cancel");
+    expect(listeners.size).toBe(2);
+    dispatchData("\u0003");
+    await expect(cancelled).resolves.toBeNull();
+    expect(term.locked).toBe(false);
+    expect(listeners.size).toBe(1);
+    expect([term.currentLine, editing.cursor()]).toEqual(["peding", 2]);
+
+    const optional = term.collectInput("Optional", true);
+    expect(listeners.size).toBe(2);
+    dispatchData("\r");
+    await expect(optional).resolves.toBe("");
+    expect(term.locked).toBe(false);
+    expect(listeners.size).toBe(1);
+    expect([term.currentLine, editing.cursor()]).toEqual(["peding", 2]);
+
+    dispatchData("X");
+    expect([term.currentLine, editing.cursor()]).toEqual(["peXding", 3]);
+    expect(listeners.size).toBe(1);
   });
 
   it("completes a unique command case-insensitively with canonical spelling", () => {
