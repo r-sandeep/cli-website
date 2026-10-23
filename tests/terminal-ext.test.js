@@ -300,7 +300,7 @@ describe("terminal-ext", () => {
     );
   });
 
-  it("preserves environment state across init, shell reset, and resize replay", async () => {
+  it("preserves environment state across init, shell reset, and replay-free resize", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
     extend(term);
@@ -314,14 +314,14 @@ describe("terminal-ext", () => {
 
     term.runDeepLink = vi.fn();
     term.history = ["historical mutation"];
-    // Replay now runs each history line through executeCommandLine, so the
-    // replayed mutation happens at the dispatch seam.
     term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
     const persistedBeforeResize = env.window.localStorage.getItem(
       environmentStorageKey
     );
     await term.resizeListener();
-    expect(term.dispatchCommand).toHaveBeenCalledTimes(1);
+    expect(term.dispatchCommand).not.toHaveBeenCalled();
+    expect(term.runDeepLink).not.toHaveBeenCalled();
+    expect(env.window.fitAddon.fit).toHaveBeenCalledTimes(3);
     expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
     expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
       persistedBeforeResize
@@ -495,17 +495,21 @@ describe("terminal-ext", () => {
   });
 
 
-  it.each(["tui", "launch", "launch | head 1"])("does not reopen the TUI when resizing replays %s", async (line) => {
+  it.each(["tui", "launch", "launch | head 1"])("does not reopen or replay %s while resizing", async (line) => {
     const launch = vi.fn();
     const { extend } = loadTerminalExt({ commands: { tui: launch } });
     const term = createTerm(); extend(term);
     term.defineAlias("launch", "tui");
     term.history = [line];
     term.deepLink = line;
-    term.init = vi.fn(); term.prompt = vi.fn();
+    term.init = vi.fn(); term.prompt = vi.fn(); term.runDeepLink = vi.fn();
     await term.resizeListener();
     expect(launch).not.toHaveBeenCalled();
-    expect(term.prompt).toHaveBeenCalled();
+    expect(term.runDeepLink).not.toHaveBeenCalled();
+    expect(term.init).not.toHaveBeenCalled();
+    expect(term.prompt).not.toHaveBeenCalled();
+    expect(term.history).toEqual([line]);
+    expect(env.window.fitAddon.fit).toHaveBeenCalledOnce();
   });
   it("fits without resetting the retained CLI while the TUI is active", () => {
     const { extend } = loadTerminalExt({rootTui:{active:true}});
@@ -707,7 +711,7 @@ describe("terminal-ext", () => {
     expect(afterRefillReload.environment.get("OVER")).toBeUndefined();
   });
 
-  it("replays environment history for output without changing active or persisted state", async () => {
+  it("does not replay environment history while preserving active and persisted state", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
     extend(term);
@@ -735,8 +739,8 @@ describe("terminal-ext", () => {
 
     await term.resizeListener();
 
-    expect(term.writeln).toHaveBeenCalledWith("ACTIVE=later value");
-    expect(term.writeln).toHaveBeenCalledWith("TEMP=two");
+    expect(term.writeln).not.toHaveBeenCalled();
+    expect(env.window.fitAddon.fit).toHaveBeenCalledOnce();
     expect(term.environment.entries()).toEqual([["ACTIVE", "later value"]]);
     expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
       persistedBefore
@@ -1082,6 +1086,64 @@ describe("terminal-ext", () => {
 
   it.each([
     {
+      name: "both prompt and clear",
+      request: (term) => {
+        term.prompt();
+        term.clearCurrentLine(true, "retained-argument");
+      },
+      expected: ["prompt", "clear:true:retained-argument", "prompt:: "],
+    },
+    {
+      name: "prompt only",
+      request: (term) => term.prompt(),
+      expected: ["prompt"],
+    },
+    {
+      name: "clear only",
+      request: (term) => term.clearCurrentLine(false, "retained-argument"),
+      expected: ["clear:false:retained-argument", "prompt:: "],
+    },
+    {
+      name: "neither",
+      request: () => {},
+      expected: [],
+    },
+  ])("replays deferred cleanup for $name", async ({ request, expected }) => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    const originalPrompt = term.prompt;
+    const originalClearCurrentLine = term.clearCurrentLine;
+    const cleanup = [];
+    term.prompt = (...args) => {
+      cleanup.push(`prompt${args.length ? `:${args.join(":")}` : ""}`);
+      return originalPrompt.apply(term, args);
+    };
+    term.clearCurrentLine = (...args) => {
+      cleanup.push(`clear:${args.join(":")}`);
+      return originalClearCurrentLine.apply(term, args);
+    };
+    const installedPrompt = term.prompt;
+    const installedClearCurrentLine = term.clearCurrentLine;
+    term.command = vi.fn(() => {
+      request(term);
+      term.writeln("retained output");
+      return 1;
+    });
+
+    await term.executeCommandLine("interactive | head 1", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(cleanup).toEqual(expected);
+    expect(term.writeln).toHaveBeenCalledWith("retained output");
+    expect(term.prompt).toBe(installedPrompt);
+    expect(term.clearCurrentLine).toBe(installedClearCurrentLine);
+  });
+
+  it.each([
+    {
       name: "successful submission",
       inputs: ["Ada", "ada@example.com", "", "", ""],
       response: { ok: true, json: vi.fn().mockResolvedValue({}) },
@@ -1137,7 +1199,9 @@ describe("terminal-ext", () => {
     expect(term.writeln).not.toHaveBeenCalledWith(expect.stringContaining("Great!"));
     expect(term.write).toHaveBeenCalledWith(expect.stringContaining("INPUT UI:"));
     expect(term.writeln).not.toHaveBeenCalledWith(expect.stringContaining("INPUT UI:"));
-    expect(prompt).toHaveBeenCalledTimes(1);
+    // The producer's deferred prompt is replayed before clearCurrentLine, whose
+    // established implementation draws the empty prompt after erasing input.
+    expect(prompt).toHaveBeenCalledTimes(2);
     expect(clearCurrentLine).toHaveBeenCalledTimes(1);
     expect(term.write).toBe(originalWrite);
     expect(term.writeln).toBe(originalWriteln);
@@ -1462,7 +1526,7 @@ describe("terminal-ext", () => {
     );
   });
 
-  it("replays alias-backed history through execution without submission side effects", async () => {
+  it("does not replay alias-backed history or submission side effects on resize", async () => {
     const target = vi.fn((args) => term.writeln(`target:${args.join("|")}`));
     const { extend } = loadTerminalExt({ commands: { target } });
     const term = createTerm();
@@ -1480,20 +1544,19 @@ describe("terminal-ext", () => {
     term.scrollToBottom.mockClear();
     await expect(term.resizeListener()).resolves.toBeUndefined();
 
-    expect(target).toHaveBeenCalledTimes(1);
-    expect(target).toHaveBeenCalledWith(["alias group", "tail"]);
-    expect(term.writeln).toHaveBeenCalledWith("target:alias group|tail");
+    expect(target).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
     expect(term.history).toEqual(historyBeforeResize);
     expect(env.window.dataLayer).toEqual(analyticsBeforeResize);
-    expect(term.write).toHaveBeenCalledWith("\r\nguest:rootpc ~ $ run tail\r\n");
-    expect(term.write).toHaveBeenLastCalledWith("\r\nguest:rootpc ~ $ ");
-    expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.scrollToBottom).not.toHaveBeenCalled();
+    expect(env.window.fitAddon.fit).toHaveBeenCalledOnce();
   });
 
   it.each([
     ["help caller", "help", ["caller"]],
     ["missing caller", null, null],
-  ])("retains non-alias resize replay for %s", async (line, command, args) => {
+  ])("does not replay non-alias history for %s", async (line, command, args) => {
     const help = vi.fn();
     const { extend } = loadTerminalExt({ commands: { help } });
     const term = createTerm();
@@ -1507,15 +1570,11 @@ describe("terminal-ext", () => {
 
     await expect(term.resizeListener()).resolves.toBeUndefined();
 
-    if (command === "help") {
-      expect(help).toHaveBeenCalledWith(args);
-    } else {
-      expect(term.writeln).toHaveBeenCalledWith(
-        "Command not found: missing. Try 'help' to get started."
-      );
-    }
+    expect(help).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
     expect(term.history).toEqual(historyBeforeResize);
     expect(env.window.dataLayer).toEqual(analyticsBeforeResize);
+    expect(env.window.fitAddon.fit).toHaveBeenCalledOnce();
   });
 
   it.each([

@@ -35,6 +35,10 @@ function createTerm(overrides = {}) {
     locked: false,
     pos: vi.fn(() => 0),
     prompt: vi.fn(),
+    renderInput: vi.fn((line) => {
+      term.currentLine = line;
+    }),
+    renderHistorySearch: vi.fn(),
     resizeListener: vi.fn(),
     runDeepLink: vi.fn(),
     scrollToBottom: vi.fn(),
@@ -96,6 +100,10 @@ function createEditingTerm({ line = "", cursor = line.length, history = [] } = {
     term.currentLine = "";
     visualCursor = 0;
     if (goToEndOfHistory) term.historyCursor = -1;
+  });
+  term.renderInput = vi.fn((newLine, cursor) => {
+    term.currentLine = newLine;
+    visualCursor = cursor;
   });
   term.setCurrentLine = vi.fn((newLine, preserveCursor = false) => {
     const oldLength = term.currentLine.length;
@@ -505,31 +513,182 @@ describe("runRootTerminal", () => {
 
   it("retains bounded input-history navigation after environment commands", () => {
     const { runRootTerminal } = loadTerminalScript();
-    const term = createTerm({
+    const { term } = createEditingTerm({
       history: ["export NAME=value", "echo $NAME"],
     });
 
     runRootTerminal(term);
     term._onData("\x1b[A");
-    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+    expect(term.currentLine).toBe("echo $NAME");
 
     term._onData("\x1b[A");
-    expect(term.setCurrentLine).toHaveBeenLastCalledWith(
-      "export NAME=value",
-      false
-    );
+    expect(term.currentLine).toBe("export NAME=value");
 
     term._onData("\x1b[B");
-    expect(term.setCurrentLine).toHaveBeenLastCalledWith("echo $NAME", false);
+    expect(term.currentLine).toBe("echo $NAME");
 
     term._onData("\x1b[B");
-    expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
+    expect(term.currentLine).toBe("");
+    expect(term.historyCursor).toBe(-1);
 
     term._onData("\x1b[A");
-    expect(term.setCurrentLine).toHaveBeenLastCalledWith(
-      "export NAME=value",
-      false
-    );
+    expect(term.currentLine).toBe("echo $NAME");
+  });
+
+  it("searches newest-to-oldest without wrapping and restarts after query edits", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const { term } = createEditingTerm({
+      history: ["echo Alpha old", "echo other", "echo ALPHA new", "echo Alpha old"],
+    });
+
+    runRootTerminal(term);
+    const controlR = keyEvent({ ctrlKey: true, key: "r" });
+    expect(term._customKeyHandler(controlR)).toBe(false);
+    expect(term.historySearch.selectedHistoryIndex).toBe(3);
+
+    for (const character of "alpha") term._onData(character);
+    expect(term.historySearch).toMatchObject({
+      query: "alpha",
+      selectedHistoryIndex: 3,
+    });
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.historySearch.selectedHistoryIndex).toBe(2);
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.historySearch.selectedHistoryIndex).toBe(0);
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.historySearch.selectedHistoryIndex).toBeNull();
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.historySearch.selectedHistoryIndex).toBeNull();
+
+    term._onData("\u007f");
+    expect(term.historySearch).toMatchObject({
+      query: "alph",
+      selectedHistoryIndex: 3,
+    });
+    expect(term.renderHistorySearch).toHaveBeenLastCalledWith(term.historySearch);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("accepts a search match for editing and executes only the later Enter", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const { term, cursor } = createEditingTerm({
+      line: "echo draft",
+      cursor: 4,
+      history: ["echo older", "echo newest"],
+    });
+    term.renderHistorySearch = vi.fn();
+
+    runRootTerminal(term);
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    for (const character of "older") term._onData(character);
+    const historyBefore = [...term.history];
+    term._onData("\r");
+
+    expect(term.currentLine).toBe("echo older");
+    expect(cursor()).toBe("echo older".length);
+    expect(term.history).toEqual(historyBefore);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term._onData("X");
+    term._onData("\r");
+    expect(term.executeCommandLine).toHaveBeenCalledOnce();
+    expect(term.executeCommandLine).toHaveBeenCalledWith("echo olderX");
+  });
+
+  it("keeps no-match Enter inert and Escape or Ctrl+G restore exact drafts", () => {
+    const { runRootTerminal } = loadTerminalScript();
+
+    for (const cancel of ["\u001b", "\u0007"]) {
+      const { term, cursor } = createEditingTerm({
+        line: "  echo AB  ",
+        cursor: 8,
+        history: ["echo match"],
+      });
+      term.renderHistorySearch = vi.fn();
+      runRootTerminal(term);
+      term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+      for (const character of "ZZZ") term._onData(character);
+      expect(term.historySearch.selectedHistoryIndex).toBeNull();
+
+      term._onData("\r");
+      term._onData("\r");
+      expect(term.historySearch).not.toBeNull();
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+      expect(term.currentLine).toBe("  echo AB  ");
+
+      term._onData(cancel);
+      expect(term.historySearch).toBeNull();
+      expect(term.currentLine).toBe("  echo AB  ");
+      expect(cursor()).toBe(8);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ["uninitialized", { _initialized: false }],
+    ["locked", { locked: true }],
+    ["busy", { busy: true }],
+  ])("does not start reverse search while input is %s", (_name, state) => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ history: ["echo retained"] });
+    runRootTerminal(term);
+    Object.assign(term, state);
+    const preventDefault = vi.fn();
+
+    expect(
+      term._customKeyHandler(
+        keyEvent({ ctrlKey: true, key: "r" }, preventDefault)
+      )
+    ).toBe(true);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(term.historySearch).toBeFalsy();
+    expect(term.renderHistorySearch).not.toHaveBeenCalled();
+  });
+
+  it("does not start reverse search while the TUI owns input", () => {
+    const { runRootTerminal } = loadTerminalScript({ rootTui: { active: true } });
+    const term = createTerm({ history: ["echo retained"] });
+    runRootTerminal(term);
+
+    expect(
+      term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }))
+    ).toBe(true);
+    expect(term.historySearch).toBeFalsy();
+    expect(term.renderHistorySearch).not.toHaveBeenCalled();
+  });
+
+  it("restores the exact pending draft and cursor after hydrated recall without dispatch", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const { term, cursor } = createEditingTerm({
+      line: "echo AB",
+      cursor: 6,
+      history: ["echo old", "echo duplicate", "echo duplicate"],
+    });
+
+    runRootTerminal(term);
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe("echo duplicate");
+    expect(term.history).toEqual(["echo old", "echo duplicate", "echo duplicate"]);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term._onData("\x1b[A");
+    term._onData("\x1b[A");
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe("echo old");
+
+    term._onData("\x1b[B");
+    term._onData("\x1b[B");
+    term._onData("\x1b[B");
+    expect(term.currentLine).toBe("echo AB");
+    expect(cursor()).toBe(6);
+    expect(term.history).toEqual(["echo old", "echo duplicate", "echo duplicate"]);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term._onData("X");
+    expect(term.currentLine).toBe("echo AXB");
+    term._onData("\r");
+    expect(term.executeCommandLine).toHaveBeenCalledOnce();
+    expect(term.executeCommandLine).toHaveBeenCalledWith("echo AXB");
   });
 
   it.each([
@@ -544,13 +703,9 @@ describe("runRootTerminal", () => {
     const { runRootTerminal } = loadTerminalScript();
     let cursor = start;
     const term = createTerm({ currentLine: line, pos: vi.fn(() => cursor) });
-    term.write = vi.fn((output) => {
-      for (const match of output.matchAll(/\x1b\[([CD])/g)) {
-        cursor += match[1] === "C" ? 1 : -1;
-      }
-      if (!output.startsWith("\x1b[")) {
-        cursor = output.replace(/\x1b\[K$/, "").length;
-      }
+    term.renderInput = vi.fn((newLine, newCursor) => {
+      term.currentLine = newLine;
+      cursor = newCursor;
     });
     const preventDefault = vi.fn();
 
@@ -649,11 +804,8 @@ describe("runRootTerminal", () => {
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(term.currentLine).toBe("keep tail");
     expect(editing.cursor()).toBe(5);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "keep tail\x1b[K",
-      "\x1b[D".repeat(4),
-    ]);
+    expect(term.renderInput).toHaveBeenLastCalledWith("keep tail", 5);
+    expect(term.write).not.toHaveBeenCalled();
     expect(term.currentLine).not.toContain("∂");
     expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
     expect(term.executeCommandLine).not.toHaveBeenCalled();
@@ -857,21 +1009,16 @@ describe("runRootTerminal", () => {
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "w" }));
     expect(term.currentLine).toBe("keep  tail");
     expect(editing.cursor()).toBe(5);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(11),
-      "keep  tail\x1b[K",
-      "\x1b[D".repeat(5),
-    ]);
+    expect(term.renderInput).toHaveBeenLastCalledWith("keep  tail", 5);
+    expect(term.write).not.toHaveBeenCalled();
     expect(term.prompt).toHaveBeenCalledTimes(1);
 
     term.write.mockClear();
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
     expect(term.currentLine).toBe("");
     expect(editing.cursor()).toBe(0);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "\x1b[K",
-    ]);
+    expect(term.renderInput).toHaveBeenLastCalledWith("", 0);
+    expect(term.write).not.toHaveBeenCalled();
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
@@ -951,7 +1098,7 @@ describe("runRootTerminal", () => {
     expect(requestAnimationFrame).toHaveBeenCalledTimes(3);
   });
 
-  it("settles rejected resize replay before trailing and later runs", async () => {
+  it("settles rejected resize handling before trailing and later runs", async () => {
     const rafCallbacks = [];
     const requestAnimationFrame = vi.fn((callback) => {
       rafCallbacks.push(callback);
@@ -993,7 +1140,7 @@ describe("runRootTerminal", () => {
     const failure = new Error("resize failed");
     pending.shift().reject(failure);
     await vi.waitFor(() => {
-      expect(consoleError).toHaveBeenCalledWith("Resize replay failed", failure);
+      expect(consoleError).toHaveBeenCalledWith("Resize handling failed", failure);
       expect(requestAnimationFrame).toHaveBeenCalledTimes(2);
       expect(active).toBe(0);
     });

@@ -7,6 +7,9 @@ const shortcuts = {
   "Ctrl+A": "move to the start of the line",
   "Ctrl+E": "move to the end of the line",
   "Ctrl+U": "clear the whole line",
+  "Up/Down": "recall older/newer saved commands and return to the exact pending draft and cursor",
+  "Ctrl+R": "search saved commands newest-first; repeat for older matches, then Enter accepts for editing without running",
+  "Escape/Ctrl+G": "cancel reverse search and restore the exact pre-search draft and cursor",
 };
 
 const help = {
@@ -19,6 +22,11 @@ const help = {
   "%bookmark% list": "list saved directory bookmarks",
   "%bookmark% remove NAME": "remove a saved directory bookmark",
   "%go% NAME": "go to the directory saved as NAME",
+  "%history%": "list saved commands chronologically with stable numbers",
+  "%history% search TEXT": "find a literal case-insensitive match (quote TEXT containing spaces)",
+  "%history% clear": "erase current recall history and its browser-saved copy",
+  "%clear%": "clear visible terminal output without erasing command history",
+  "%man% history|clear|shortcuts": "history, screen-clearing, and keyboard manuals",
   "PIPELINES": "pipe command output through filters from left to right",
   "  COMMAND | %grep% [-ivn] PATTERN": "keep literal matching lines (-i case-insensitive, -v invert, -n number)",
   "  COMMAND | %head% [N]": "keep the first N lines (default: 10; N must be positive)",

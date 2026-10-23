@@ -279,6 +279,14 @@ describe("script load order", () => {
       appBundleSources.indexOf("js/terminal-ext.js")
     );
   });
+
+  it("the app bundle loads the history store before terminal integration", () => {
+    const { appBundleSources } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/history.js");
+    expect(appBundleSources.indexOf("js/history.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-ext.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {

@@ -746,12 +746,6 @@ const commands = {
     term.stylePrint(`${addressLocality}, ${addressRegion} ${postalCode}`);
   },
 
-  history: function () {
-    term.history.forEach((element, index) => {
-      term.stylePrint(`${1000 + index}  ${element}`);
-    });
-  },
-
   uname: function (args) {
     switch (args[0]) {
       case "-a":
@@ -776,9 +770,61 @@ const commands = {
     term.dispatchCommand("open", ["welcome.htm"]);
   },
 
-  // Reinitializes the terminal, clearing history and resetting the prompt.
+  // Lists and manages the terminal's raw, chronological command history.
+  history: function (args) {
+    const usage = "Usage: history | history search TEXT | history clear";
+    const entries = term.history.slice();
+
+    if (args.length === 0) {
+      if (entries.length === 0) {
+        term.stylePrint("History is empty.");
+        return;
+      }
+      entries.forEach((line, index) =>
+        term.writeHistoryLine(`${index + 1} ${line}`)
+      );
+      return;
+    }
+
+    const subcommand = String(args[0]).toLowerCase();
+    if (subcommand === "search") {
+      const query = args.slice(1).join(" ");
+      if (args.length < 2 || query.trim() === "") {
+        term.stylePrint(usage);
+        return;
+      }
+      const foldedQuery = query.toLowerCase();
+      const matches = entries
+        .map((line, index) => ({ line, number: index + 1 }))
+        .filter(({ line }) => line.toLowerCase().includes(foldedQuery));
+      if (matches.length === 0) {
+        term.writeHistoryLine(`No history entries match "${query}".`);
+        return;
+      }
+      matches.forEach(({ line, number }) =>
+        term.writeHistoryLine(`${number} ${line}`)
+      );
+      return;
+    }
+
+    if (subcommand === "clear" && args.length === 1) {
+      const result = term.clearHistory();
+      if (result.durable) {
+        term.stylePrint("History cleared.");
+      } else {
+        term.stylePrint(
+          "History cleared for this session, but saved history could not be erased and may return after reload."
+        );
+      }
+      return;
+    }
+
+    term.stylePrint(usage);
+  },
+
+  // Clears visible output while retaining recall history.
   clear: function () {
-    term.init();
+    term.clearScreen();
   },
 
   // ── Easter Eggs & Jokes ─────────────────────────────────────────────────────
@@ -1236,6 +1282,29 @@ for (const [alias, target] of Object.entries(_aliases)) {
   commands[alias] = (args) => term.dispatchCommand(target, args);
 }
 
+// History and clear are focused manuals because their distinction is safety-
+// relevant: clearing output must not erase durable recall history.
+const _historyManuals = {
+  history: [
+    "%HISTORY(1)% — list, search, or erase local command history",
+    "Usage: %history% | %history% search TEXT | %history% clear",
+    "history lists retained commands oldest-to-newest with chronological numbers. Filtered results keep those original numbers.",
+    "history search TEXT uses a literal, case-insensitive substring; quote a query containing spaces, for example %history% search \"echo alpha\".",
+    "Up/Down recalls retained commands and returns to the exact pending draft and cursor without executing it.",
+    "Ctrl+R searches newest-first; repeat Ctrl+R for successively older matches. Enter accepts a match into editable input at its end without executing it; press Enter again to execute.",
+    "Escape or Ctrl+G cancels reverse search and restores the exact pre-search draft and cursor. Enter does nothing when no match is selected.",
+    "Submitted raw command lines are saved only in this browser origin, with spelling, quotes, aliases, environment references, pipelines, and duplicates intact. There is no cross-device synchronization.",
+    "The newest 1,000 nonblank submissions are retained. When the limit is exceeded, the oldest entry is evicted and the remaining chronological listing is renumbered from 1.",
+    "history clear erases current recall history and attempts to erase this feature's saved browser data. If storage fails, the terminal reports session-only saves or warns that saved history may remain and may return after reload.",
+    "Malformed or unreadable saved history is left untouched during startup and submission; ordinary commands and session history still work. A later successful history clear resets only command-history storage.",
+  ],
+  clear: [
+    "%CLEAR(1)% — clear visible terminal output",
+    "Usage: %clear%",
+    "clear removes the visible transcript but retains local command history and recall. Use %history% clear to erase current and saved recall history.",
+  ],
+};
+
 // Pipeline filters are stages rather than replacements for the similarly named
 // standalone commands. Give them focused manual pages while retaining tldr as
 // man's fallback for portfolio companies and every other topic.
@@ -1286,8 +1355,8 @@ const _pipelineManuals = {
 };
 
 // Keep `man` compatible with its long-standing `tldr` alias while providing focused
-// manual pages for the bookmark commands, the environment commands, the pipeline
-// filters, and terminal editing shortcuts.
+// manual pages for the bookmark commands, the environment commands, history,
+// visible clear, the pipeline filters, and terminal editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
   if (args.length === 1 && topic === "shortcuts") {
@@ -1337,7 +1406,9 @@ commands.man = function (args) {
   }
   const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
     ? _environmentManuals[topic]
-    : _pipelineManuals[topic];
+    : Object.prototype.hasOwnProperty.call(_historyManuals, topic)
+      ? _historyManuals[topic]
+      : _pipelineManuals[topic];
   if (!manual) {
     return term.command(["tldr", ...args].join(" ").trim());
   }

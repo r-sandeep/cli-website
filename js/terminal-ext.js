@@ -43,14 +43,52 @@ const extend = (term) => {
 
   term.VERSION = term.VERSION || 3;  // bumped to 4 by `upgrade`
   term.currentLine = "";             // text the user has typed so far
+  term.inputCursor = 0;              // logical character offset in currentLine
   term.user = "guest";
   term.host = "rootpc";
   term.cwd = "~";
   term.sep = ":";
   term._promptChar = "$";
-  term.history = [];
+  const historyStore = typeof createHistoryStore === "function"
+    ? createHistoryStore()
+    : (() => {
+        let entries = [];
+        return {
+          entries: () => entries.slice(),
+          append: (line) => {
+            if (typeof line !== "string" || line.trim() === "") {
+              return { ok: true, durable: true, error: null, added: false };
+            }
+            entries = [...entries, line].slice(-1000);
+            return { ok: true, durable: true, error: null, added: true };
+          },
+          clear: () => {
+            entries = [];
+            return { ok: true, durable: true, error: null };
+          },
+        };
+      })();
+  term.historyStore = historyStore;
+  term.history = historyStore.entries();
   term.historyCursor = -1;
+  term.historyDraft = null;
+  term.historySearch = null;
   term.busy = false;
+
+  term.appendHistory = (line) => {
+    const result = historyStore.append(line);
+    term.history = historyStore.entries();
+    return result;
+  };
+
+  term.clearHistory = () => {
+    const result = historyStore.clear();
+    term.history = historyStore.entries();
+    term.historyCursor = -1;
+    term.historyDraft = null;
+    term.historySearch = null;
+    return result;
+  };
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -253,21 +291,6 @@ const extend = (term) => {
     },
   });
 
-  // The replay may be asynchronous (resize replays each history line through
-  // executeCommandLine so aliases and pipelines apply); the guard is held for
-  // its whole duration and restored afterwards.
-  const replayWithoutEnvironmentSideEffects = async (replay) => {
-    const activeVariables = environmentVariables;
-    const previousPersistenceSetting = environmentPersistenceEnabled;
-    environmentVariables = new Map(activeVariables);
-    environmentPersistenceEnabled = false;
-    try {
-      await replay();
-    } finally {
-      environmentVariables = activeVariables;
-      environmentPersistenceEnabled = previousPersistenceSetting;
-    }
-  };
 
   // Tab completion state — reset on any non-tab keypress.
   term.tabIndex = 0;
@@ -275,8 +298,9 @@ const extend = (term) => {
   term.tabBase = "";
 
   // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // Keep this logical: xterm's physical x coordinate is only a column and loses
+  // the input offset as soon as a draft wraps or the terminal is resized.
+  term.pos = () => term.inputCursor;
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -311,35 +335,118 @@ const extend = (term) => {
     return text;
   };
 
+  // History is raw user data. Preserve it in storage and input models, but map
+  // every terminal control byte to a visible fixed-width ASCII escape before it
+  // reaches xterm's parser. Trusted application output continues to use the
+  // ordinary write/stylePrint paths unchanged.
+  const escapeHistoryDisplayText = (value) => {
+    let escaped = "";
+    for (const character of String(value)) {
+      const code = character.charCodeAt(0);
+      if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+        escaped += `\\x${code.toString(16).padStart(2, "0")}`;
+      } else {
+        escaped += character;
+      }
+    }
+    return escaped;
+  };
+
+  term.escapeHistoryDisplayText = escapeHistoryDisplayText;
+  term.writeHistoryLine = (text) =>
+    term.writeln(escapeHistoryDisplayText(text));
+
+  let renderedInputCursorCells = term._promptRawText().length + 1;
+
   // Writes a newline + prompt (default) or a custom prefix/suffix pair.
   term.prompt = (prefix = "\r\n", suffix = " ") => {
     term.write(`${prefix}${term.promptText()}${suffix}`);
+    renderedInputCursorCells = term._promptRawText().length + suffix.length;
+  };
+
+  const inputRowsBeforeCursor = () => {
+    const width = Math.max(1, Number.isFinite(term.cols) ? term.cols : 80);
+    // xterm delays a wrap until another printable cell arrives, so an exact
+    // right-margin cursor still belongs to the preceding physical row.
+    return Math.floor(Math.max(0, renderedInputCursorCells - 1) / width);
+  };
+
+  const eraseRenderedInput = () => {
+    const rows = inputRowsBeforeCursor();
+    return `\r${rows > 0 ? `\x1b[${rows}A` : ""}\x1b[J`;
+  };
+
+  const renderedInput = (line, cursor) => {
+    const prefix = escapeHistoryDisplayText(line.slice(0, cursor));
+    const suffix = escapeHistoryDisplayText(line.slice(cursor));
+    return `${term.promptText()} ${prefix}\x1b[s${suffix}\x1b[u`;
+  };
+
+  const searchStatusText = (state) => {
+    const selected = Number.isInteger(state?.selectedHistoryIndex)
+      ? term.history[state.selectedHistoryIndex]
+      : null;
+    const query = escapeHistoryDisplayText(state?.query || "");
+    const match = selected === null
+      ? "no match"
+      : escapeHistoryDisplayText(selected);
+    return `search [${query}]: ${match}`;
+  };
+
+  const drawInput = (line, cursor) => {
+    renderedInputCursorCells =
+      term._promptRawText().length +
+      1 +
+      escapeHistoryDisplayText(line.slice(0, cursor)).length;
+    return renderedInput(line, cursor);
+  };
+
+  const drawHistorySearch = (state) => {
+    const status = searchStatusText(state);
+    renderedInputCursorCells = status.length;
+    return status;
+  };
+
+  // Replace the editable prompt atomically from the model. Saving/restoring the
+  // cursor after the prefix lets xterm perform wrapping instead of attempting
+  // to translate a logical offset into physical rows here.
+  term.renderInput = (line = term.currentLine, cursor = term.inputCursor) => {
+    const boundedCursor = Math.max(0, Math.min(cursor, line.length));
+    const erase = eraseRenderedInput();
+    term.currentLine = line;
+    term.inputCursor = boundedCursor;
+    term.write(`${erase}${drawInput(line, boundedCursor)}`);
+  };
+
+  // Reverse search is transient input, not terminal output. It reuses the same
+  // bounded erase/redraw region and leaves the saved ordinary draft untouched.
+  term.renderHistorySearch = (state = term.historySearch) => {
+    term.write(`${eraseRenderedInput()}${drawHistorySearch(state)}`);
   };
 
   // Erases the current input line and redraws the prompt, optionally resetting
   // the history cursor so the next Up arrow starts from the most recent entry.
   term.clearCurrentLine = (goToEndofHistory = false) => {
-    term.write("\x1b[2K\r");
-    term.prompt("", " ");
+    const erase = eraseRenderedInput();
     term.currentLine = "";
+    term.inputCursor = 0;
+    term.write(erase);
+    term.prompt("", " ");
     if (goToEndofHistory) {
       term.historyCursor = -1;
+      term.historyDraft = null;
       term.scrollToBottom();
     }
   };
 
   // Replaces the current input with newLine, preserving cursor position if asked.
   term.setCurrentLine = (newLine, preserveCursor = false) => {
-    // Capture position before clearCurrentLine() because the xterm buffer
-    // cursor moves during the erase, making pos() unreliable immediately after.
     const oldPos = term.pos();
     const length = term.currentLine.length;
-    term.clearCurrentLine();
-    term.currentLine = newLine;
-    term.write(newLine);
-    if (preserveCursor) {
-      term.write("\x1b[D".repeat(length - oldPos));
-    }
+    const cursor = preserveCursor
+      ? Math.max(0, newLine.length - (length - oldPos))
+      : newLine.length;
+    term.renderInput(newLine, cursor);
   };
 
   // ── Output ─────────────────────────────────────────────────────────────────
@@ -644,28 +751,58 @@ const extend = (term) => {
       scrollAfter: true,
       ...options,
     };
-    const parsed = parseCommandLine(line);
+    const rawLine = String(line);
+    const parsed = parseCommandLine(rawLine);
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    // Every direct or alias-expanded history invocation is management, even
+    // when its remaining tokens resemble a pipeline. Classify it before asset
+    // loading and validation so invalid forms cannot mutate history.
+    const isHistoryManagement = expanded.cmd === "history";
+    const parsedPipeline = isHistoryManagement
+      ? null
+      : Pipeline.parsePipeline(expanded.line);
     let exitStatus;
+    let historyResult = null;
+
+    if (
+      settings.addToHistory &&
+      rawLine.trim() !== "" &&
+      !isHistoryManagement
+    ) {
+      historyResult = term.appendHistory(rawLine);
+    }
 
     try {
       if (settings.manageBusy) {
         term.busy = true;
       }
 
-      if (parsedPipeline) {
+      if (isHistoryManagement) {
+        const prepared = prepareParsed(expanded);
+        if (settings.showLeadingNewline) {
+          term.writeln("");
+        }
+        exitStatus = await term.dispatchCommand(
+          prepared.cmd,
+          prepared.args,
+          prepared
+        );
+        if (settings.trackAnalytics) {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: "commandSent",
+            command: parsed.cmd,
+            args: parsed.args.join(" "),
+          });
+        }
+      } else if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           term.stylePrint(validation.error.message);
@@ -683,10 +820,6 @@ const extend = (term) => {
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -736,10 +869,6 @@ const extend = (term) => {
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
@@ -759,6 +888,12 @@ const extend = (term) => {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
+      if (historyResult?.added && !historyResult.durable) {
+        term.stylePrint(
+          "History recorded for this session, but could not be saved to browser storage."
+        );
+      }
+
       if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
         term.prompt();
         term.clearCurrentLine(true);
@@ -778,44 +913,36 @@ const extend = (term) => {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  // Called on window resize. xterm clears its buffer on resize, so we
-  // reinitialize the terminal and replay the entire command history to restore
-  // the visible output, then re-render the prompt at the bottom.
+  // Called on window resize. Completed xterm buffer lines reflow natively. The
+  // active editable line is erased before fit because xterm intentionally does
+  // not reflow the cursor-containing wrapped group; it is then redrawn from the
+  // logical line/cursor model without dispatching anything.
   term.resizeListener = async () => {
     if (window.rootTui?.active) {
       window.fitAddon.fit();
       return;
     }
-    term._initialized = false;
-    term.init(term.user, true);
-    if (typeof preloadASCIIArt === "function") {
-      window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
+
+    const ownsNormalInput = term._initialized && !term.locked && !term.busy;
+    if (!ownsNormalInput) {
+      window.fitAddon.fit();
+      return;
     }
-    await term.runDeepLink({ replay: true });
-    // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
-    await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
-        term.prompt("\r\n", ` ${c}\r\n`);
-        if (expandUserAlias(parseCommandLine(c)).cmd !== "tui") await term.executeCommandLine(c, {
-          addToHistory: false,
-          manageBusy: false,
-          promptAfter: false,
-          showLeadingNewline: false,
-          trackAnalytics: false,
-          scrollAfter: false,
-        });
-      }
-    });
-    term.prompt();
+
+    const line = term.currentLine;
+    const cursor = term.inputCursor;
+    const search = term.historySearch;
+    await new Promise((resolve) => term.write(eraseRenderedInput(), resolve));
+    window.fitAddon.fit();
+    await new Promise((resolve) =>
+      term.write(search ? drawHistorySearch(search) : drawInput(line, cursor), resolve)
+    );
     term.scrollToBottom();
-    term._initialized = true;
   };
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
   // prompt instead of the welcome message. Announces open jobs if any exist.
-  term.init = (user = "guest", preserveHistory = false) => {
+  term.init = (user = "guest") => {
     window.fitAddon.fit();
     term.reset();
     term.printLogoType();
@@ -852,18 +979,26 @@ const extend = (term) => {
     }
 
     term.user = user;
-    if (!preserveHistory) {
-      term.history = [];
-    }
+    term.currentLine = "";
+    term.inputCursor = 0;
+    term.historySearch = null;
+    renderedInputCursorCells = term._promptRawText().length + 1;
     term.focus();
   };
 
+  // Clear only the visible terminal. Recall history belongs to the history
+  // lifecycle and is intentionally unaffected by the ordinary clear command.
+  term.clearScreen = () => {
+    term.reset();
+    term.currentLine = "";
+    term.inputCursor = 0;
+    term.historySearch = null;
+    term.prompt("", " ");
+  };
+
   // Runs the deep-link command parsed from the URL hash on page load.
-  //
-  // `replay` is set by the resize listener, which reruns this to redraw a
-  // buffer xterm cleared. That is the same visit, not a new arrival, so it must
-  // not be counted again. History replay uses the same execution boundary with
-  // its user-visible submission side effects disabled for the same reason.
+  // The replay option remains for compatibility with callers that explicitly
+  // request a non-analytics invocation; resize never calls this path.
   term.runDeepLink = ({ replay = false } = {}) => {
     if (replay && expandUserAlias(parseCommandLine(term.deepLink)).cmd === "tui") return;
     if (term.deepLink != "") {
@@ -1012,10 +1147,11 @@ function _captureTerminalOutput(term) {
       }
     },
     flushPromptCleanup: () => {
+      if (promptRequested) {
+        originalPrompt.call(term);
+      }
       if (clearCurrentLineArgs) {
         originalClearCurrentLine.apply(term, clearCurrentLineArgs);
-      } else if (promptRequested) {
-        originalPrompt.call(term);
       }
     },
   };

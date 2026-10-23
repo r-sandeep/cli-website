@@ -81,16 +81,16 @@ function runRootTerminal(term) {
     window.requestAnimationFrame(() => {
       resizeState = "running";
 
-      let replay;
+      let resize;
       try {
-        replay = Promise.resolve(term.resizeListener());
+        resize = Promise.resolve(term.resizeListener());
       } catch (error) {
-        replay = Promise.reject(error);
+        resize = Promise.reject(error);
       }
 
-      replay
+      resize
         .catch((error) => {
-          console.error("Resize replay failed", error);
+          console.error("Resize handling failed", error);
         })
         .finally(() => {
           if (resizePending) {
@@ -135,13 +135,71 @@ function runRootTerminal(term) {
     const oldLine = term.currentLine;
     const oldCursor = term.pos();
     if (line === oldLine && cursor === oldCursor) return;
+    term.renderInput(line, cursor);
+  };
 
-    if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
-    term.currentLine = line;
-    term.write(`${line}\x1b[K`);
-    if (cursor < line.length) {
-      term.write("\x1b[D".repeat(line.length - cursor));
+  const normalInputAvailable = () =>
+    term._initialized &&
+    !term.locked &&
+    !term.busy &&
+    !window.rootTui?.active;
+
+  const newestHistoryMatch = (query, beforeIndex = term.history.length) => {
+    const foldedQuery = query.toLowerCase();
+    for (let index = beforeIndex - 1; index >= 0; index--) {
+      if (term.history[index].toLowerCase().includes(foldedQuery)) return index;
     }
+    return null;
+  };
+
+  const startHistorySearch = () => {
+    term.historySearch = {
+      savedDraft: term.currentLine,
+      savedCursor: term.pos(),
+      query: "",
+      selectedHistoryIndex: newestHistoryMatch(""),
+    };
+    term.renderHistorySearch(term.historySearch);
+  };
+
+  const repeatHistorySearch = () => {
+    const state = term.historySearch;
+    if (!state) {
+      startHistorySearch();
+      return;
+    }
+    if (Number.isInteger(state.selectedHistoryIndex)) {
+      state.selectedHistoryIndex = newestHistoryMatch(
+        state.query,
+        state.selectedHistoryIndex
+      );
+    }
+    term.renderHistorySearch(state);
+  };
+
+  const updateHistorySearchQuery = (query) => {
+    const state = term.historySearch;
+    state.query = query;
+    state.selectedHistoryIndex = newestHistoryMatch(query);
+    term.renderHistorySearch(state);
+  };
+
+  const cancelHistorySearch = () => {
+    const state = term.historySearch;
+    if (!state) return;
+    term.historySearch = null;
+    term.renderInput(state.savedDraft, state.savedCursor);
+  };
+
+  const acceptHistorySearch = () => {
+    const state = term.historySearch;
+    if (!state || !Number.isInteger(state.selectedHistoryIndex)) return false;
+    const selected = term.history[state.selectedHistoryIndex];
+    term.historySearch = null;
+    term.historyCursor = -1;
+    term.historyDraft = null;
+    term.renderInput(selected, selected.length);
+    return true;
   };
 
   const editInput = (action) => {
@@ -279,6 +337,27 @@ function runRootTerminal(term) {
   };
 
   term.attachCustomKeyEventHandler((event) => {
+    const reverseSearchKey =
+      event.type === "keydown" &&
+      event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "r";
+
+    if (reverseSearchKey && normalInputAvailable()) {
+      event.preventDefault();
+      resetCompletion();
+      repeatHistorySearch();
+      term.scrollToBottom();
+      return false;
+    }
+
+    if (term.historySearch) {
+      if (event.key === "Tab") event.preventDefault();
+      return event.key !== "Tab";
+    }
+
     if (event.key === "Tab") {
       event.preventDefault();
       // xterm asks about both phases in some browsers. Complete exactly once,
@@ -303,23 +382,52 @@ function runRootTerminal(term) {
   });
 
   term.onData((e) => {
-    if (term._initialized && !term.locked && !term.busy) {
+    if (normalInputAvailable()) {
+      if (term.historySearch) {
+        resetCompletion();
+        switch (e) {
+          case "\u0012": // Ctrl+R fallback for terminals bypassing key events
+            repeatHistorySearch();
+            break;
+          case "\r": // Enter accepts a match but never executes it.
+            if (!acceptHistorySearch()) term.renderHistorySearch(term.historySearch);
+            break;
+          case "\u001b": // Escape
+          case "\u0007": // Ctrl+G
+            cancelHistorySearch();
+            break;
+          case "\u0008": // Ctrl+H
+          case "\u007F": // Backspace
+            if (term.historySearch.query.length > 0) {
+              updateHistorySearchQuery(term.historySearch.query.slice(0, -1));
+            }
+            break;
+          default:
+            if (e.length === 1 && e.charCodeAt(0) >= 32) {
+              updateHistorySearchQuery(term.historySearch.query + e);
+            }
+            break;
+        }
+        term.scrollToBottom();
+        return;
+      }
+
       if (e !== "\t") resetCompletion();
       switch (e) {
         case "\r": // Enter
-          // Reset tab state
+          // Reset tab and recall draft state before an actual submission.
           term.tabIndex = 0;
           term.tabOptions = [];
           term.tabBase = "";
+          term.historyCursor = -1;
+          term.historyDraft = null;
           term.executeCommandLine(term.currentLine);
           break;
         case "\u0001": // Ctrl+A
-          term.write("\x1b[D".repeat(term.pos()));
+          updateInput(term.currentLine, 0);
           break;
         case "\u0005": // Ctrl+E
-          if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
-          }
+          updateInput(term.currentLine, term.currentLine.length);
           break;
         case "\u0003": // Ctrl+C
           // Reset tab state
@@ -352,6 +460,12 @@ function runRootTerminal(term) {
           term.tabBase = "";
 
           var h = [...term.history].reverse();
+          if (term.historyCursor === -1 && h.length > 0) {
+            term.historyDraft = {
+              line: term.currentLine,
+              cursor: term.pos(),
+            };
+          }
           if (term.historyCursor < h.length - 1) {
             term.historyCursor += 1;
             term.setCurrentLine(h[term.historyCursor], false);
@@ -366,19 +480,22 @@ function runRootTerminal(term) {
           var h = [...term.history].reverse();
           if (term.historyCursor > 0) {
             term.historyCursor -= 1;
-            term.setCurrentLine(h[term.historyCursor], false);
-          } else {
-            term.clearCurrentLine(true);
+            updateInput(h[term.historyCursor], h[term.historyCursor].length);
+          } else if (term.historyCursor === 0) {
+            const draft = term.historyDraft || { line: "", cursor: 0 };
+            term.historyCursor = -1;
+            term.historyDraft = null;
+            updateInput(draft.line, draft.cursor);
           }
           break;
         case "\033[C": // right
           if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C");
+            updateInput(term.currentLine, term.pos() + 1);
           }
           break;
         case "\033[D": // left
           if (term.pos() > 0) {
-            term.write("\x1b[D");
+            updateInput(term.currentLine, term.pos() - 1);
           }
           break;
         case "\t": // tab
@@ -394,13 +511,10 @@ function runRootTerminal(term) {
           // Optimize: just write the character instead of redrawing entire line
           if (e.length === 1 && e.charCodeAt(0) >= 32) {
             const pos = term.pos();
-            const restOfLine = term.currentLine.slice(pos);
-            term.currentLine = term.currentLine.slice(0, pos) + e + restOfLine;
-            term.write(e);
-            if (restOfLine.length > 0) {
-              term.write(restOfLine);
-              term.write("\x1b[D".repeat(restOfLine.length));
-            }
+            updateInput(
+              term.currentLine.slice(0, pos) + e + term.currentLine.slice(pos),
+              pos + 1
+            );
           }
           break;
       }

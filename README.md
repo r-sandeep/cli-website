@@ -60,6 +60,46 @@ For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
 `man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
 terminal for the corresponding manual page.
 
+## Local command history
+
+Every nonblank command submitted at the interactive prompt is retained as its
+exact raw line, including spelling, whitespace, quotes, pipeline syntax, alias
+names, environment references, and duplicates. History persists only on the same browser
+origin; it is not synchronized to another browser or device and cannot be
+exported by this feature.
+
+- `history` lists retained entries chronologically, oldest first, with numbers
+  starting at 1.
+- `history search TEXT` filters that listing by a literal, case-insensitive
+  substring. Quote a query containing spaces, for example
+  `history search "echo alpha"`; matching rows keep their original list numbers.
+- `history clear` clears current recall history and attempts to erase this
+  feature's saved browser data. The history-management command itself is not
+  recorded.
+- `clear` only clears visible terminal output; it does not erase command history.
+
+The newest 1,000 commands are retained. On the 1,001st retained submission, the
+oldest entry is evicted and the remaining chronological listing is renumbered
+from 1. Up/Down recalls older and newer saved entries without running them and
+returns to the exact pending draft and cursor at the newest boundary.
+
+Ctrl+R starts incremental reverse search at the newest match. Type or Backspace
+to refine the literal, case-insensitive query, and press Ctrl+R again to visit
+successively older matches without wrapping. Enter accepts a selected command
+into normal editable input with the cursor at its end; it does **not** execute
+it. Edit if desired, then press Enter a second time to execute. In a no-match
+state Enter does nothing. Escape or Ctrl+G cancels search and restores the exact
+pre-search draft and cursor.
+
+Browser-storage failure never blocks ordinary commands or current-session
+history. A failed save is reported as session-only. A failed `history clear`
+still empties current recall but reports that saved history could not be erased
+and may return after reload. Malformed or unreadable saved history is left untouched
+during startup and normal submissions rather than silently replaced;
+a later successful explicit `history clear` resets only command-history storage.
+
+Run `man history`, `man clear`, or `man shortcuts` for the terminal reference.
+
 ## Terminal editing shortcuts
 
 - **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches
@@ -70,6 +110,9 @@ terminal for the corresponding manual page.
 - **Ctrl+A** — move to the start of the line
 - **Ctrl+E** — move to the end of the line
 - **Ctrl+U** — clear the whole line
+- **Up/Down** — recall older/newer saved commands and return to the exact pending draft and cursor
+- **Ctrl+R** — search saved commands newest-first; repeat for older matches, then Enter accepts for editing without running
+- **Escape/Ctrl+G** — cancel reverse search and restore the exact pre-search draft and cursor
 
 Run `man shortcuts` in the terminal to view the same reference.
 
@@ -81,6 +124,10 @@ Run `man shortcuts` in the terminal to view the same reference.
   - version [--json]: show the terminal version and build date
   - alias [name[=value]]: define, list, or query command aliases
   - unalias name: remove a command alias
+  - history: list saved commands chronologically
+  - history search TEXT: literal case-insensitive search (`"quoted text"` supports spaces)
+  - history clear: erase current recall and its saved browser copy
+  - clear: clear visible output while retaining command history
   - man alias: show alias usage
   - man unalias: show unalias usage
   - whois root: learn about us
