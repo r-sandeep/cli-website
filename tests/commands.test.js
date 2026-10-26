@@ -1099,6 +1099,9 @@ describe("terminal editing documentation", () => {
     "Ctrl+A",
     "Ctrl+E",
     "Ctrl+U",
+    "Up/Down",
+    "Ctrl+R",
+    "Escape/Ctrl+G",
   ];
 
   it("prints every shortcut in help and man shortcuts", () => {
@@ -1119,6 +1122,72 @@ describe("terminal editing documentation", () => {
       );
     }
     expect(manRun.term.command).not.toHaveBeenCalled();
+  });
+
+  it("documents complete local history behavior through real help and manual handlers", () => {
+    const helpRun = loadCommands();
+    helpRun.commands.help([]);
+    const helpOutput = helpRun.term.stylePrint.mock.calls.flat().join("\n");
+    for (const text of [
+      "%history%", "%history% search TEXT", "%history% clear", "%clear%",
+      "chronologically", "literal case-insensitive", "browser-saved copy",
+    ]) expect(helpOutput).toContain(text);
+
+    const historyRun = loadCommands();
+    historyRun.commands.man(["history"]);
+    const historyOutput = historyRun.term.stylePrint.mock.calls.flat().join("\n");
+    for (const text of [
+      "%history% | %history% search TEXT | %history% clear",
+      "oldest-to-newest", "original numbers", 'history% search \"echo alpha\"',
+      "exact pending draft and cursor", "Ctrl+R", "successively older",
+      "Enter accepts", "without executing", "Escape or Ctrl+G",
+      "this browser origin", "no cross-device synchronization", "newest 1,000",
+      "oldest entry is evicted", "session-only", "may return after reload",
+      "Malformed or unreadable", "left untouched", "resets only command-history storage",
+    ]) expect(historyOutput).toContain(text);
+    expect(historyRun.term.command).not.toHaveBeenCalled();
+
+    const clearRun = loadCommands();
+    clearRun.commands.man(["clear"]);
+    const clearOutput = clearRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(clearOutput).toContain("clear visible terminal output");
+    expect(clearOutput).toContain("retains local command history and recall");
+    expect(clearOutput).toContain("history% clear");
+    expect(clearRun.term.command).not.toHaveBeenCalled();
+
+    const readme = readFileSync("README.md", "utf8");
+    for (const text of [
+      "## Local command history", '`history search "echo alpha"`',
+      "newest 1,000", "oldest entry is evicted", "Enter a second time",
+      "Escape or Ctrl+G", "exact pre-search draft and cursor", "same browser",
+      "not synchronized", "session-only", "may return after reload",
+      "Malformed or unreadable", "left untouched", "only command-history storage",
+    ]) expect(readme).toContain(text);
+  });
+
+  it("preserves focused manuals, alias usage, and the portfolio fallback after history manuals", () => {
+    const portfolio = {
+      example: {
+        name: "Example Company",
+        url: "https://example.com",
+        description: "Representative portfolio description.",
+      },
+    };
+    const { commands, term } = loadCommands({ portfolio });
+
+    commands.man(["history"]);
+    commands.man(["shortcuts"]);
+    commands.man(["alias"]);
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "alias: define, list, or query command aliases - usage:"
+    );
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "%alias% name=value  define or replace an alias"
+    );
+
+    term.command.mockClear();
+    commands.man(["example"]);
+    expect(term.command).toHaveBeenCalledWith("tldr example");
   });
 
   it("keeps bare man, company man, woman, and tldr on the existing tldr path", () => {

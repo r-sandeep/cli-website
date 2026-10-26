@@ -656,8 +656,14 @@ dialog::backdrop {
   }
   .menu-item .arrow,
   .menu-label,
-  .sidebar-bottom {
+  .sidebar-bottom .side-mark,
+  .sidebar-bottom p,
+  .sidebar-bottom [data-help] {
     display: none;
+  }
+  .sidebar-bottom {
+    margin-top: 0;
+    padding: 8px 5px 0;
   }
   .main-panel {
     padding: 24px 17px;
