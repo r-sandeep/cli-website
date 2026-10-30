@@ -33,6 +33,7 @@ const vendorScripts = [
 // referenced at the top level of a later file must be defined by an earlier
 // one. config/commands.js reads `firm`, `team`, and `portfolio` at top level.
 const appBundleSources = [
+  "js/sequence.js",
   "js/terminal.js",
   "js/pipeline.js",
   "js/terminal-ext.js",

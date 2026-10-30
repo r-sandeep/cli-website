@@ -21,7 +21,7 @@ function loadTerminalExt(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/sequence.js", "js/pipeline.js", "js/terminal-ext.js"]);
   return env.exportValues(["extend"]);
 }
 
@@ -88,7 +88,12 @@ function loadAliasTerminal() {
       term,
     },
   });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts([
+    "js/sequence.js",
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
   const { commands, extend } = env.exportValues(["commands", "extend"]);
   extend(term);
   return { commands, extend, term };
@@ -664,6 +669,306 @@ describe("terminal-ext", () => {
     expect(term.clearCurrentLine).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).toHaveBeenCalledWith(true);
     expect(term.busy).toBe(false);
+  });
+
+  it.each([
+    ["echo a;echo b", ["a", "b"]],
+    ["false && echo x || echo y", ["y"]],
+    ["true || echo x && echo y", ["y"]],
+    ["false && echo a || echo b", ["b"]],
+    ["true || false && echo y", ["y"]],
+    ["echo a;", ["a"]],
+    ['echo "a; b && c"', ["a; b && c"]],
+    ["echo single&value", ["single&value"]],
+  ])("executes sequence status left to right for %s", async (line, expected) => {
+    const { commands, term } = loadAliasTerminal();
+    const outputs = [];
+    commands.echo = (args) => {
+      outputs.push(args.join(" "));
+    };
+
+    await term.executeCommandLine(line, {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(outputs).toEqual(expected);
+    expect(term.history).toEqual([line]);
+  });
+
+  it("expands environment variables and aliases only when a selected segment runs", async () => {
+    const { commands, term } = loadAliasTerminal();
+    const outputs = [];
+    commands.echo = (args) => {
+      outputs.push(args.join(" "));
+    };
+
+    await term.executeCommandLine("export A=1 && echo $A; alias w=echo alias-ok; w", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    await term.executeCommandLine("false && export SKIPPED=yes || echo $A", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    term.environment.set("OPS", "left;middle&&right||tail");
+    term.defineAlias("opaque", "echo alias;value&&still-data");
+    await term.executeCommandLine("echo $OPS; opaque", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(outputs).toEqual([
+      "1",
+      "alias-ok",
+      "1",
+      "left;middle&&right||tail",
+      "alias;value&&still-data",
+    ]);
+    expect(term.environment.get("SKIPPED")).toBeUndefined();
+  });
+
+  it.each([
+    ["; echo a", ";"],
+    ["echo a && && echo b", "&&"],
+    ["echo a ;; echo b", ";"],
+    ["echo a &&", "&&"],
+    ["echo a ||", "||"],
+  ])("rejects malformed sequence %s atomically", async (line, operator) => {
+    const echo = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { echo } });
+    const term = createTerm();
+    extend(term);
+    term.prompt = vi.fn();
+    term.clearCurrentLine = vi.fn();
+    term.preloadCommandAssets = vi.fn();
+    const stylePrint = vi.spyOn(term, "stylePrint");
+    term.writeln.mockClear();
+
+    await term.executeCommandLine(line);
+
+    expect(echo).not.toHaveBeenCalled();
+    expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+    expect(term.writeln).toHaveBeenCalledWith("\r\n");
+    expect(stylePrint).toHaveBeenCalledTimes(1);
+    expect(stylePrint).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`^sequence:.*${operator.replaceAll("|", "\\|")}`))
+    );
+    expect(env.window.dataLayer ?? []).toEqual([]);
+    expect(term.history).toEqual([line]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["export MUTATED=yes &&", "&&"],
+    ["alias changed=echo nope ||", "||"],
+  ])("preserves complete command state when malformed mutation line %s is rejected", async (line, operator) => {
+    const { term } = loadAliasTerminal();
+    term.environment.set("KEEP", "environment");
+    term.defineAlias("keep", "echo alias");
+    term.cwd = "/before";
+    const aliasStorageKey = "rootvc.aliases";
+    const before = {
+      environment: term.environment.entries(),
+      aliases: term.getAliases(),
+      persistedEnvironment: env.window.localStorage.getItem(environmentStorageKey),
+      persistedAliases: env.window.localStorage.getItem(aliasStorageKey),
+      cwd: term.cwd,
+      analytics: [...(env.window.dataLayer ?? [])],
+    };
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine(line, {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(stylePrint).toHaveBeenCalledTimes(1);
+    expect(stylePrint).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`^sequence:.*${operator.replaceAll("|", "\\|")}`))
+    );
+    expect(term.environment.entries()).toEqual(before.environment);
+    expect(term.getAliases()).toEqual(before.aliases);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
+      before.persistedEnvironment
+    );
+    expect(env.window.localStorage.getItem(aliasStorageKey)).toBe(
+      before.persistedAliases
+    );
+    expect(term.cwd).toBe(before.cwd);
+    expect(env.window.dataLayer ?? []).toEqual(before.analytics);
+    expect(term.history).toEqual([line]);
+  });
+
+  it("keeps one line lifecycle and analytics only for executed segments", async () => {
+    const { commands, term } = loadAliasTerminal();
+    let release;
+    const waiting = new Promise((resolve) => {
+      release = resolve;
+    });
+    const outputs = [];
+    commands.wait = async () => {
+      await waiting;
+      outputs.push("waited");
+    };
+    commands.echo = (args) => {
+      outputs.push(args.join(" "));
+    };
+    term.prompt = vi.fn();
+    term.clearCurrentLine = vi.fn();
+    term.writeln.mockClear();
+
+    const execution = term.executeCommandLine("  wait; false && echo skipped || echo recovered  ");
+    expect(term.busy).toBe(true);
+    expect(term.writeln).toHaveBeenCalledTimes(1);
+    expect(term.writeln).toHaveBeenCalledWith("\r\n");
+    expect(term.prompt).not.toHaveBeenCalled();
+
+    release();
+    await execution;
+
+    expect(outputs).toEqual(["waited", "recovered"]);
+    expect(term.history).toEqual([
+      "  wait; false && echo skipped || echo recovered  ",
+    ]);
+    expect(term.prompt).toHaveBeenCalledTimes(1);
+    expect(term.clearCurrentLine).toHaveBeenCalledTimes(1);
+    expect(term.busy).toBe(false);
+    expect(env.window.dataLayer.map(({ command }) => command)).toEqual([
+      "wait",
+      "false",
+      "echo",
+    ]);
+  });
+
+  it.each([
+    ["nosuchcommand && echo wrong || echo recovered", "Command not found: nosuchcommand.", ["recovered"]],
+    ["echo keep | head 0 && echo wrong || echo recovered", "head: count must be a positive base-10 integer", ["recovered"]],
+    ["echo keep | missingfilter && echo wrong || echo recovered", "Unknown pipeline filter: missingfilter", ["keep", "recovered"]],
+    ["false && echo wrong || echo recovered", null, ["recovered"]],
+    ["nosuchcommand | head 1 && echo wrong || echo recovered", "Command not found: nosuchcommand.", ["recovered"]],
+    ["false | wc -l && echo wrong || echo recovered", null, ["recovered"]],
+  ])("recovers only from a specified segment failure in %s", async (line, diagnostic, expected) => {
+    const { commands, term } = loadAliasTerminal();
+    const outputs = [];
+    commands.echo = (args) => {
+      term.stylePrint(args.join(" "));
+      outputs.push(args.join(" "));
+    };
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine(line, {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(outputs).toEqual(expected);
+    expect(outputs).not.toContain("wrong");
+    if (diagnostic) {
+      expect(stylePrint).toHaveBeenCalledWith(expect.stringContaining(diagnostic));
+    }
+  });
+
+  it("treats a known command diagnostic as success", async () => {
+    const { commands, term } = loadAliasTerminal();
+    const outputs = [];
+    commands.echo = (args) => {
+      outputs.push(args.join(" "));
+    };
+
+    await term.executeCommandLine("cat definitely-missing && echo continued || echo wrong", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.writeln).toHaveBeenCalledWith(
+      expect.stringContaining("No such file: definitely-missing")
+    );
+    expect(outputs).toEqual(["continued"]);
+  });
+
+  it("applies a pipeline only to its segment before continuing the sequence", async () => {
+    const { commands, term } = loadAliasTerminal();
+    commands.records = () => {
+      term.writeln("root first");
+      term.writeln("other");
+      term.writeln("root second");
+    };
+
+    await term.executeCommandLine("records | grep root && echo found", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.writeln).toHaveBeenCalledWith("root first");
+    expect(term.writeln).toHaveBeenCalledWith("root second");
+    expect(term.writeln).not.toHaveBeenCalledWith("other");
+    expect(term.writeln).toHaveBeenCalledWith("found");
+  });
+
+  it.each([
+    { name: "cancellation", inputs: [null], fetches: 0 },
+    { name: "completion", inputs: ["Ada", "ada@example.com", "", "", ""], fetches: 1 },
+  ])("ends a sequence when apply takes prompt ownership through $name", async ({ inputs, fetches }) => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    const fetch = installApplyCommand(term, { inputs });
+    const after = vi.fn();
+    env.window.commands.after = after;
+
+    await term.executeCommandLine("echo before; apply 1; after");
+
+    expect(term.writeln).toHaveBeenCalledWith("before");
+    expect(after).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(fetches);
+    expect(term.locked).toBe(false);
+    expect(term.busy).toBe(false);
+
+    await term.executeCommandLine("echo ordinary", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln).toHaveBeenCalledWith("ordinary");
+  });
+
+  it("replays sequence history repeatedly without retaining environment or submission side effects", async () => {
+    const { commands, term } = loadAliasTerminal();
+    commands.echo = (args) => term.stylePrint(args.join(" "));
+    term.runDeepLink = vi.fn();
+
+    await term.executeCommandLine("export COUNT=one; echo $COUNT; unset COUNT", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    await term.executeCommandLine("export COUNT=current", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    const historyBefore = [...term.history];
+    const analyticsBefore = [...env.window.dataLayer];
+    const activeBefore = term.environment.entries();
+    const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
+
+    term.writeln.mockClear();
+    await term.resizeListener();
+    await term.resizeListener();
+
+    expect(term.writeln).toHaveBeenCalledWith("one");
+    expect(term.history).toEqual(historyBefore);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+    expect(term.environment.entries()).toEqual(activeBefore);
+    expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(persistedBefore);
+
+    await term.executeCommandLine("echo $COUNT", {
+      addToHistory: false,
+      promptAfter: false,
+      showLeadingNewline: false,
+      trackAnalytics: false,
+    });
+    expect(term.writeln).toHaveBeenLastCalledWith("current");
   });
 
   it("persists both sides of a full-store reject, unset, and refill transition", () => {

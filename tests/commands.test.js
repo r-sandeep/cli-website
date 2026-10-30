@@ -197,6 +197,22 @@ function loadCommands({
   return { commands, location, storage, term };
 }
 
+describe("sequence status commands", () => {
+  it("registers true and false as silent production commands", () => {
+    const { commands, term } = loadCommands();
+
+    expect(typeof commands.true).toBe("function");
+    expect(typeof commands.false).toBe("function");
+    expect(commands.true([])).toBeUndefined();
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
+
+    expect(commands.false([])).toBeUndefined();
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
+  });
+});
+
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {
     const { commands, term } = loadCommands();
@@ -1005,6 +1021,101 @@ describe("environment manuals", () => {
     expect(term.stylePrint).toHaveBeenCalledWith(
       "Representative portfolio description."
     );
+  });
+});
+
+describe("command sequence documentation", () => {
+  it("advertises silent status commands and all three sequence operators through real help", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain("COMMAND SEQUENCES");
+    expect(output).toContain("A ; B");
+    expect(output).toContain("A && B");
+    expect(output).toContain("A || B");
+    expect(output).toContain("%true%");
+    expect(output).toContain("succeed silently");
+    expect(output).toContain("%false%");
+    expect(output).toContain("fail silently");
+    expect(output).toContain("%man% sequence|pipe|piping");
+  });
+
+  it("documents complete sequence semantics without delegating to portfolio lookup", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["sequence"]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    for (const expected of [
+      "A ; B",
+      "A && B",
+      "A || B",
+      "equal precedence",
+      "left to right",
+      "Pipelines bind tighter",
+      "Unknown commands",
+      "pipeline filter errors",
+      "%true% and %false% print nothing",
+      "skipped segment leaves status unchanged",
+      "Single or double quotes",
+      "quoted | and || retain the existing pipeline parser behavior",
+      "typed line supplies sequence operators",
+      "expands aliases and environment variables",
+      "empty segment is a sequence syntax error",
+      "One trailing ; is allowed",
+      "takes ownership of terminal input",
+      "%apply%",
+    ]) {
+      expect(output).toContain(expected);
+    }
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it.each(["pipe", "piping"])("points man %s to the sequence manual", (topic) => {
+    const { commands, term } = loadCommands();
+
+    commands.man([topic]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain("COMMAND | FILTER [| FILTER ...]");
+    expect(output).toContain("command-sequence segment");
+    expect(output).toContain("See %man% sequence");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it("keeps README sequence and pipeline sections aligned with terminal semantics", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const sequenceSection = readme.split("## Command sequences\n")[1]
+      .split("## Output pipelines\n")[0]
+      .replace(/\s+/g, " ");
+    const pipelineSection = readme.split("## Output pipelines\n")[1]
+      .split("## Terminal editing shortcuts\n")[0]
+      .replace(/\s+/g, " ");
+
+    for (const expected of [
+      "`A ; B`",
+      "`A && B`",
+      "`A || B`",
+      "equal precedence",
+      "left to right",
+      "Pipelines bind more tightly",
+      "unknown command",
+      "pipeline-filter error",
+      "matching single or double quotes",
+      "quoted `|` and `||`",
+      "split before execution",
+      "expands its aliases and environment variables",
+      "Empty segments are rejected before anything runs",
+      "single trailing semicolon is allowed",
+      "takes ownership of terminal input",
+      "`man sequence`",
+    ]) {
+      expect(sequenceSection).toContain(expected);
+    }
+    expect(pipelineSection).toContain("command-sequence segment");
+    expect(pipelineSection).toContain("`man sequence`");
   });
 });
 

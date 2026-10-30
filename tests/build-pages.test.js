@@ -279,6 +279,25 @@ describe("script load order", () => {
       appBundleSources.indexOf("js/terminal-ext.js")
     );
   });
+
+  it("the app bundle loads sequence syntax before terminal consumers", () => {
+    const { appBundleSources, createAppBundleSource } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/sequence.js");
+    expect(appBundleSources.indexOf("js/sequence.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal.js")
+    );
+    expect(appBundleSources.indexOf("js/sequence.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-ext.js")
+    );
+
+    const source = createAppBundleSource({
+      version: "sequence-order-test",
+      buildDate: "2030-01-01",
+    });
+    expect(source.indexOf("// js/sequence.js")).toBeLessThan(
+      source.indexOf("// js/terminal.js")
+    );
+  });
 });
 
 describe("one page, no mirror", () => {

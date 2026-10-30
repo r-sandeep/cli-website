@@ -136,6 +136,13 @@ function runRootTerminal(term) {
     const oldCursor = term.pos();
     if (line === oldLine && cursor === oldCursor) return;
 
+    if (typeof term.redrawInput === "function") {
+      term.redrawInput(line, cursor);
+      return;
+    }
+
+    // Compatibility fallback for embedders that provide only the original
+    // terminal extension surface.
     if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
     term.currentLine = line;
     term.write(`${line}\x1b[K`);
@@ -229,11 +236,16 @@ function runRootTerminal(term) {
       return false;
     }
 
-    const completion = _completionForLine(term.currentLine);
+    const activeSegment = Sequence.segmentAt(term.currentLine, term.pos());
+    const leadingWhitespace = activeSegment.source.match(/^\s*/)[0];
+    const segmentLine = activeSegment.source.slice(leadingWhitespace.length);
+    const completion = _completionForLine(segmentLine);
     if (!completion) {
       resetCompletion();
       return false;
     }
+    const linePrefix =
+      term.currentLine.slice(0, activeSegment.start) + leadingWhitespace;
 
     const foldedToken = completion.token.toLowerCase();
     const matches = completion.candidates.filter((candidate) =>
@@ -245,13 +257,13 @@ function runRootTerminal(term) {
     }
 
     if (matches.length === 1) {
-      term.setCurrentLine(`${completion.prefix}${matches[0]} `);
+      term.setCurrentLine(`${linePrefix}${completion.prefix}${matches[0]} `);
       resetCompletion();
       return true;
     }
 
     const commonPrefix = _longestCommonCompletionPrefix(matches);
-    const completedLine = `${completion.prefix}${commonPrefix}`;
+    const completedLine = `${linePrefix}${completion.prefix}${commonPrefix}`;
     if (completedLine !== term.currentLine) {
       term.setCurrentLine(completedLine);
       completionState = {
@@ -314,12 +326,10 @@ function runRootTerminal(term) {
           term.executeCommandLine(term.currentLine);
           break;
         case "\u0001": // Ctrl+A
-          term.write("\x1b[D".repeat(term.pos()));
+          updateInput(term.currentLine, 0);
           break;
         case "\u0005": // Ctrl+E
-          if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
-          }
+          updateInput(term.currentLine, term.currentLine.length);
           break;
         case "\u0003": // Ctrl+C
           // Reset tab state
@@ -373,12 +383,12 @@ function runRootTerminal(term) {
           break;
         case "\033[C": // right
           if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C");
+            updateInput(term.currentLine, term.pos() + 1);
           }
           break;
         case "\033[D": // left
           if (term.pos() > 0) {
-            term.write("\x1b[D");
+            updateInput(term.currentLine, term.pos() - 1);
           }
           break;
         case "\t": // tab
@@ -395,12 +405,7 @@ function runRootTerminal(term) {
           if (e.length === 1 && e.charCodeAt(0) >= 32) {
             const pos = term.pos();
             const restOfLine = term.currentLine.slice(pos);
-            term.currentLine = term.currentLine.slice(0, pos) + e + restOfLine;
-            term.write(e);
-            if (restOfLine.length > 0) {
-              term.write(restOfLine);
-              term.write("\x1b[D".repeat(restOfLine.length));
-            }
+            updateInput(term.currentLine.slice(0, pos) + e + restOfLine, pos + 1);
           }
           break;
       }
