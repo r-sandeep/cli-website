@@ -3,6 +3,7 @@ import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 const commandSource = readFileSync("config/commands.js", "utf8");
+const fsSource = readFileSync("config/fs.js", "utf8");
 const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
@@ -145,6 +146,7 @@ function loadCommands({
     user,
     stylePrint: vi.fn(),
     writeln: vi.fn(),
+    write: vi.fn(),
     printArt: vi.fn(),
     openURL: vi.fn(),
     displayURL: vi.fn(),
@@ -167,6 +169,11 @@ function loadCommands({
     ),
     removeAlias: vi.fn((name) => aliases.delete(name)),
   };
+  const staticFiles = new Map([
+    ["id_rsa", { innerHTML: "Nice try!" }],
+    ["README.md", { innerHTML: "static README" }],
+    ["welcome.htm", { innerHTML: "static welcome" }],
+  ]);
   const context = vm.createContext({
     term,
     jobs: productionJobs,
@@ -182,7 +189,13 @@ function loadCommands({
     colorText: (text) => text,
     localStorage: storage,
     window: { location },
+    document: {
+      getElementById: (id) => staticFiles.get(id) || null,
+    },
+    fetch: vi.fn(),
   });
+  vm.runInContext(fsSource, context);
+  term.tmpFiles = vm.runInContext("createTmpFileStore()", context);
   vm.runInContext(bookmarkSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
@@ -655,6 +668,84 @@ describe("cd", () => {
     expect(term.cwd).toBe("~");
     expect(term.stylePrint).toHaveBeenCalledWith("No such directory: nope");
   });
+
+  it("navigates into and out of tmp using absolute and root-relative paths", () => {
+    const absolute = loadCommands({ cwd: "~" });
+    absolute.commands.cd(["/tmp"]);
+    expect(absolute.term.cwd).toBe("tmp");
+    absolute.commands.cd([".."]);
+    expect(absolute.term.cwd).toBe("/");
+
+    const relative = loadCommands({ cwd: "/" });
+    relative.commands.cd(["tmp"]);
+    expect(relative.term.cwd).toBe("tmp");
+    relative.commands.cd(["~"]);
+    expect(relative.term.cwd).toBe("~");
+  });
+});
+
+describe("tmp file commands", () => {
+  it("lists sorted live names and root includes the tmp directory", () => {
+    const { commands, term } = loadCommands({ cwd: "tmp" });
+    term.tmpFiles.write("/tmp/z.txt", "~", "z\n");
+    term.tmpFiles.write("/tmp/a.txt", "~", "a\n");
+
+    commands.ls([]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("a.txt   z.txt");
+
+    term.cwd = "/";
+    commands.ls([]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("bin   home   tmp");
+  });
+
+  it("reads exact tmp text through cat and every existing viewer alias", () => {
+    const { commands, term } = loadCommands({ cwd: "tmp" });
+    const text = "first\n\n<last>&\n";
+    term.tmpFiles.write("/tmp/a.txt", "~", text);
+
+    for (const command of ["cat", "head", "tail", "less", "more"]) {
+      term.write.mockClear();
+      commands[command]([command === "cat" ? "/tmp/a.txt" : "a.txt"]);
+      expect(term.write).toHaveBeenCalledOnce();
+      expect(term.write).toHaveBeenCalledWith("first\r\n\r\n<last>&\r\n");
+      expect(term.writeln).not.toHaveBeenCalled();
+    }
+  });
+
+  it("removes tmp files silently, diagnoses a repeat, and preserves outside rm and fdisk", () => {
+    const { commands, term } = loadCommands({ cwd: "tmp" });
+    term.tmpFiles.write("/tmp/a.txt", "~", "kept");
+
+    commands.rm(["a.txt"]);
+    expect(term.stylePrint).not.toHaveBeenCalled();
+    expect(term.tmpFiles.list()).toEqual([]);
+
+    commands.rm(["a.txt"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "rm: a.txt: No such file or directory"
+    );
+
+    term.cwd = "~";
+    commands.rm(["README.md"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "I'm sorry Dave, I'm afraid I can't do that."
+    );
+    commands.fdisk(["README.md"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "I'm sorry Dave, I'm afraid I can't do that."
+    );
+  });
+
+  it("preserves static cat success, missing output, and id_rsa side effects", () => {
+    const { commands, term } = loadCommands({ cwd: "~" });
+
+    commands.cat(["welcome.htm"]);
+    expect(term.writeln).toHaveBeenLastCalledWith("static welcome");
+    commands.cat(["absent"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("No such file: absent");
+    commands.cat(["id_rsa"]);
+    expect(term.writeln).toHaveBeenLastCalledWith("Nice try!");
+  });
 });
 
 describe("bookmark and go", () => {
@@ -1086,6 +1177,97 @@ describe("pipeline manual pages preserve standalone commands", () => {
     expect(commands.tldr).toHaveBeenCalledWith(["root"]);
     expect(typeof commands.grep).toBe("function");
     expect(commands.grep).not.toBe(commands.man);
+  });
+});
+
+describe("output redirection documentation", () => {
+  it("renders the complete redirect contract through help", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain("OUTPUT REDIRECTION");
+    expect(output).toContain("COMMAND [| FILTER ...] > TARGET");
+    expect(output).toContain("COMMAND [| FILTER ...] >> TARGET");
+    expect(output).toContain("redirect must be last and followed by exactly one target word");
+    expect(output).toContain("quoted > and >> are literal text");
+    expect(output).toContain("/tmp/NAME");
+    expect(output).toContain("NAME or ./NAME while in /tmp");
+    expect(output).toContain("[A-Za-z0-9._-]{1,64}");
+    expect(output).toContain("16 files, 32,768 characters each");
+    expect(output).toContain("discarded on page load");
+    expect(output).toContain("%rm% /tmp/NAME");
+  });
+
+  it("dispatches redirect and both pipeline manual aliases without replacing existing manuals or fallback", () => {
+    const portfolio = {
+      example: {
+        name: "Example Company",
+        url: "https://example.com",
+        description: "Representative portfolio description.",
+      },
+    };
+    const redirectRun = loadCommands({ portfolio });
+
+    redirectRun.commands.man(["redirect"]);
+    const redirectOutput = redirectRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(redirectOutput).toContain("Usage: COMMAND [| FILTER ...] > TARGET");
+    expect(redirectOutput).toContain("COMMAND [| FILTER ...] >> TARGET");
+    expect(redirectOutput).toContain("final syntax");
+    expect(redirectOutput).toContain("single or double quotes is literal text");
+    expect(redirectOutput).toContain("/tmp/NAME");
+    expect(redirectOutput).toContain("NAME or ./NAME");
+    expect(redirectOutput).toContain("[A-Za-z0-9._-]{1,64}");
+    expect(redirectOutput).toContain("16 files");
+    expect(redirectOutput).toContain("32,768 characters");
+    expect(redirectOutput).toContain("session-only");
+    expect(redirectOutput).toContain("every page load");
+    expect(redirectOutput).toContain("%rm% /tmp/NAME");
+    expect(redirectRun.term.command).not.toHaveBeenCalled();
+
+    for (const topic of ["pipe", "piping"]) {
+      const run = loadCommands();
+      run.commands.man([topic]);
+      expect(run.term.stylePrint.mock.calls.flat().join("\n")).toContain(
+        "see %man redirect%"
+      );
+      expect(run.term.command).not.toHaveBeenCalled();
+    }
+
+    redirectRun.term.stylePrint.mockClear();
+    redirectRun.commands.man(["alias"]);
+    expect(redirectRun.term.stylePrint.mock.calls.flat().join("\n")).toContain(
+      "%alias% name=value"
+    );
+    expect(redirectRun.term.command).not.toHaveBeenCalled();
+
+    redirectRun.term.stylePrint.mockClear();
+    redirectRun.commands.man(["example"]);
+    expect(redirectRun.term.stylePrint).toHaveBeenCalledWith("Example Company");
+    expect(redirectRun.term.stylePrint).toHaveBeenCalledWith(
+      "Representative portfolio description."
+    );
+  });
+
+  it("documents operators, tmp boundaries, lifetime, deletion and executable examples in README", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const section = readme.split("## Output redirection\n")[1].split("\n## ")[0];
+
+    expect(section).toContain("`COMMAND > FILE`");
+    expect(section).toContain("`COMMAND >> FILE`");
+    expect(section).toContain("whois root | grep -i root > /tmp/root.txt");
+    expect(section).toContain("cat /tmp/root.txt");
+    expect(section).toContain("Only direct children of `/tmp` are writable");
+    expect(section).toContain("`/tmp/NAME`");
+    expect(section).toContain("`NAME` or `./NAME`");
+    expect(section).toContain("16 files");
+    expect(section).toContain("32,768 characters");
+    expect(section).toContain("session-only");
+    expect(section).toContain("starts empty on every page load");
+    expect(section).toContain("never saved in browser storage");
+    expect(section).toContain("`rm /tmp/NAME`");
+    expect(readme).toContain("`man pipe` or\n`man piping`, `man redirect`");
   });
 });
 

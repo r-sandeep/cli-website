@@ -43,6 +43,7 @@ const extend = (term) => {
 
   term.VERSION = term.VERSION || 3;  // bumped to 4 by `upgrade`
   term.currentLine = "";             // text the user has typed so far
+  term._inputCursor = 0;              // logical position within currentLine
   term.user = "guest";
   term.host = "rootpc";
   term.cwd = "~";
@@ -51,6 +52,9 @@ const extend = (term) => {
   term.history = [];
   term.historyCursor = -1;
   term.busy = false;
+  if (typeof createTmpFileStore === "function") {
+    term.tmpFiles = createTmpFileStore();
+  }
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -256,16 +260,21 @@ const extend = (term) => {
   // The replay may be asynchronous (resize replays each history line through
   // executeCommandLine so aliases and pipelines apply); the guard is held for
   // its whole duration and restored afterwards.
-  const replayWithoutEnvironmentSideEffects = async (replay) => {
+  const replayWithoutSessionSideEffects = async (replay) => {
     const activeVariables = environmentVariables;
+    const activeTmpFiles = term.tmpFiles;
     const previousPersistenceSetting = environmentPersistenceEnabled;
     environmentVariables = new Map(activeVariables);
     environmentPersistenceEnabled = false;
+    if (activeTmpFiles && typeof createTmpFileStore === "function") {
+      term.tmpFiles = createTmpFileStore(activeTmpFiles.snapshot());
+    }
     try {
       await replay();
     } finally {
       environmentVariables = activeVariables;
       environmentPersistenceEnabled = previousPersistenceSetting;
+      if (activeTmpFiles) term.tmpFiles = activeTmpFiles;
     }
   };
 
@@ -274,9 +283,10 @@ const extend = (term) => {
   term.tabOptions = [];
   term.tabBase = "";
 
-  // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // Cursor position relative to the start of the user's input. Keep it as
+  // logical terminal-owned state: xterm's buffer.x is only a row-local column
+  // and therefore cannot identify positions after input wraps.
+  term.pos = () => term._inputCursor;
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -311,35 +321,97 @@ const extend = (term) => {
     return text;
   };
 
-  // Writes a newline + prompt (default) or a custom prefix/suffix pair.
-  term.prompt = (prefix = "\r\n", suffix = " ") => {
+  const writePrompt = (prefix = "\r\n", suffix = " ") => {
     term.write(`${prefix}${term.promptText()}${suffix}`);
   };
 
-  // Erases the current input line and redraws the prompt, optionally resetting
-  // the history cursor so the next Up arrow starts from the most recent entry.
-  term.clearCurrentLine = (goToEndofHistory = false) => {
-    term.write("\x1b[2K\r");
-    term.prompt("", " ");
+  // Writes a newline + prompt (default) or a custom prefix/suffix pair.
+  term.prompt = writePrompt;
+
+  const inputOriginColumn = () => term._promptRawText().length + 1;
+  const inputPosition = (position) => {
+    const width = Math.max(1, term.cols || 80);
+    const absolute = inputOriginColumn() + position;
+    return { row: Math.floor(absolute / width), column: absolute % width };
+  };
+  const moveInputCursor = (from, to) => {
+    const start = inputPosition(from);
+    const end = inputPosition(to);
+    const rowDelta = end.row - start.row;
+    if (rowDelta < 0) term.write(`\x1b[${-rowDelta}A`);
+    else if (rowDelta > 0) term.write(`\x1b[${rowDelta}B`);
+    term.write("\r");
+    if (end.column > 0) term.write(`\x1b[${end.column}C`);
+    term._inputCursor = to;
+  };
+  term.setInputCursor = (position) => {
+    const next = Math.max(0, Math.min(position, term.currentLine.length));
+    moveInputCursor(term._inputCursor, next);
+  };
+  const writeInputText = (line) => {
+    const width = Math.max(1, term.cols || 80);
+    let offset = 0;
+    let available = width - inputOriginColumn();
+    while (offset < line.length) {
+      const length = Math.min(available, line.length - offset);
+      term.write(line.slice(offset, offset + length));
+      offset += length;
+      if (offset < line.length || length === available) term.write("\r\n");
+      available = width;
+    }
+  };
+
+  // Replaces all rendered input rows from their tracked origin. This avoids
+  // relying on a row-local xterm cursor read and clears every stale wrapped row.
+  term.renderInput = (line, cursor = line.length) => {
+    const oldLength = term.currentLine.length;
+    moveInputCursor(term._inputCursor, 0);
+    const oldEnd = inputPosition(oldLength);
+    for (let row = 0; row <= oldEnd.row; row++) {
+      term.write("\x1b[2K");
+      if (row < oldEnd.row) term.write("\x1b[B\r");
+    }
+    if (oldEnd.row > 0) term.write(`\x1b[${oldEnd.row}A`);
+    term.write("\r");
+    writePrompt("", " ");
+    term.currentLine = line;
+    term._inputCursor = 0;
+    writeInputText(line);
+    term._inputCursor = line.length;
+    if (cursor !== line.length) moveInputCursor(line.length, cursor);
+  };
+
+  // Resets logical input after execution/cancellation once output has moved the
+  // terminal away from the input rows. Unlike renderInput, this emits nothing.
+  term.resetInputState = (goToEndofHistory = false) => {
     term.currentLine = "";
+    term._inputCursor = 0;
+    if (goToEndofHistory) term.historyCursor = -1;
+  };
+
+  // Erases the current input, including wrapped rows, and redraws one prompt.
+  term.clearCurrentLine = (goToEndofHistory = false) => {
+    if (term.currentLine.length === 0 && term.pos() === 0) {
+      term.write("\x1b[2K\r");
+      term.prompt("", " ");
+    } else {
+      term.renderInput("", 0);
+    }
     if (goToEndofHistory) {
       term.historyCursor = -1;
       term.scrollToBottom();
     }
   };
 
-  // Replaces the current input with newLine, preserving cursor position if asked.
+  // Replaces the current input with newLine, preserving its logical cursor when
+  // asked (Backspace) rather than deriving it from a transient buffer column.
   term.setCurrentLine = (newLine, preserveCursor = false) => {
-    // Capture position before clearCurrentLine() because the xterm buffer
-    // cursor moves during the erase, making pos() unreliable immediately after.
     const oldPos = term.pos();
-    const length = term.currentLine.length;
-    term.clearCurrentLine();
-    term.currentLine = newLine;
-    term.write(newLine);
-    if (preserveCursor) {
-      term.write("\x1b[D".repeat(length - oldPos));
-    }
+    const oldLength = term.currentLine.length;
+    const cursor = preserveCursor
+      ? Math.max(0, newLine.length - (oldLength - oldPos))
+      : newLine.length;
+    term.renderInput(newLine, cursor);
   };
 
   // ── Output ─────────────────────────────────────────────────────────────────
@@ -648,7 +720,27 @@ const extend = (term) => {
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    const redirectSyntax = Pipeline.extractRedirection(expanded.line);
+    const redirect = redirectSyntax.ok ? redirectSyntax.redirect : null;
+    const executionLine = redirectSyntax.ok ? redirectSyntax.command : expanded.line;
+    const parsedPipeline = redirectSyntax.ok
+      ? Pipeline.parsePipeline(executionLine)
+      : null;
+    let redirectTarget = null;
+    let redirectError = redirectSyntax.ok ? null : redirectSyntax.message;
+    if (redirect && !redirectError) {
+      redirectTarget = expandArgument(
+        redirect.target,
+        term.environment.snapshot()
+      );
+      const resolvedTarget = term.tmpFiles.resolve(redirectTarget, term.cwd);
+      if (!resolvedTarget.ok) {
+        redirectError = resolvedTarget.message;
+      } else {
+        // Freeze the validated destination before the producer can change cwd.
+        redirectTarget = `/tmp/${resolvedTarget.name}`;
+      }
+    }
     let exitStatus;
 
     try {
@@ -656,8 +748,18 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      if (parsedPipeline) {
-        const validation = Pipeline.validatePipeline(parsedPipeline);
+      if (redirectError) {
+        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          term.writeln("");
+        }
+        if (parsed.line.length > 0 && settings.addToHistory) {
+          term.history.push(parsed.line);
+        }
+        term.stylePrint(redirectError);
+      } else if (parsedPipeline || redirect) {
+        const validation = parsedPipeline
+          ? Pipeline.validatePipeline(parsedPipeline)
+          : { ok: true, producer: executionLine, filters: [] };
 
         if (!validation.ok) {
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
@@ -704,6 +806,18 @@ const extend = (term) => {
 
           if (result.error) {
             term.stylePrint(result.error.message);
+          } else if (redirect) {
+            const visibleLines = result.lines.map(_visibleTerminalText);
+            const content = visibleLines.length > 0
+              ? `${visibleLines.join("\n")}\n`
+              : "";
+            const writeResult = term.tmpFiles.write(
+              redirectTarget,
+              term.cwd,
+              content,
+              redirect.append
+            );
+            if (!writeResult.ok) term.stylePrint(writeResult.message);
           } else {
             for (const outputLine of result.lines) {
               term.writeln(outputLine);
@@ -760,6 +874,7 @@ const extend = (term) => {
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
       if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+        term.resetInputState(true);
         term.prompt();
         term.clearCurrentLine(true);
       }
@@ -791,11 +906,11 @@ const extend = (term) => {
     if (typeof preloadASCIIArt === "function") {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
-    await term.runDeepLink({ replay: true });
-    // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
-    await replayWithoutEnvironmentSideEffects(async () => {
+    // Replay serially through the full execution boundary so aliases,
+    // pipelines, and redirects render exactly as they did interactively while
+    // environment and /tmp mutations occur only in disposable session views.
+    await replayWithoutSessionSideEffects(async () => {
+      await term.runDeepLink({ replay: true });
       for (const c of term.history) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (expandUserAlias(parseCommandLine(c)).cmd !== "tui") await term.executeCommandLine(c, {

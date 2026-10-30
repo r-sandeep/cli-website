@@ -18,7 +18,7 @@ function _longestCommonCompletionPrefix(candidates) {
   return first.slice(0, length);
 }
 
-function _completionForLine(line) {
+function _completionForLine(line, activeTerm) {
   const firstWord = line.match(/^(\S*)$/);
   if (firstWord) {
     return { prefix: "", token: firstWord[1], candidates: Object.keys(commands) };
@@ -33,6 +33,8 @@ function _completionForLine(line) {
   else if (command === "tldr") candidates = Object.keys(portfolio);
   else if (["cd", "ls", "cat", "head", "tail", "less", "more"].includes(command)) {
     candidates = _filesHere();
+  } else if (command === "rm" && activeTerm.cwd === "tmp") {
+    candidates = activeTerm.tmpFiles.list();
   } else {
     return null;
   }
@@ -135,13 +137,7 @@ function runRootTerminal(term) {
     const oldLine = term.currentLine;
     const oldCursor = term.pos();
     if (line === oldLine && cursor === oldCursor) return;
-
-    if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
-    term.currentLine = line;
-    term.write(`${line}\x1b[K`);
-    if (cursor < line.length) {
-      term.write("\x1b[D".repeat(line.length - cursor));
-    }
+    term.renderInput(line, cursor);
   };
 
   const editInput = (action) => {
@@ -229,7 +225,7 @@ function runRootTerminal(term) {
       return false;
     }
 
-    const completion = _completionForLine(term.currentLine);
+    const completion = _completionForLine(term.currentLine, term);
     if (!completion) {
       resetCompletion();
       return false;
@@ -314,12 +310,10 @@ function runRootTerminal(term) {
           term.executeCommandLine(term.currentLine);
           break;
         case "\u0001": // Ctrl+A
-          term.write("\x1b[D".repeat(term.pos()));
+          term.setInputCursor(0);
           break;
         case "\u0005": // Ctrl+E
-          if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
-          }
+          term.setInputCursor(term.currentLine.length);
           break;
         case "\u0003": // Ctrl+C
           // Reset tab state
@@ -327,8 +321,9 @@ function runRootTerminal(term) {
           term.tabOptions = [];
           term.tabBase = "";
 
+          term.renderInput("", 0);
+          term.resetInputState(true);
           term.prompt();
-          term.clearCurrentLine(true);
           break;
         case "\u0008": // Ctrl+H
         case "\u007F": // Backspace (DEL)
@@ -373,12 +368,12 @@ function runRootTerminal(term) {
           break;
         case "\033[C": // right
           if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C");
+            term.setInputCursor(term.pos() + 1);
           }
           break;
         case "\033[D": // left
           if (term.pos() > 0) {
-            term.write("\x1b[D");
+            term.setInputCursor(term.pos() - 1);
           }
           break;
         case "\t": // tab
@@ -395,12 +390,8 @@ function runRootTerminal(term) {
           if (e.length === 1 && e.charCodeAt(0) >= 32) {
             const pos = term.pos();
             const restOfLine = term.currentLine.slice(pos);
-            term.currentLine = term.currentLine.slice(0, pos) + e + restOfLine;
-            term.write(e);
-            if (restOfLine.length > 0) {
-              term.write(restOfLine);
-              term.write("\x1b[D".repeat(restOfLine.length));
-            }
+            const nextLine = term.currentLine.slice(0, pos) + e + restOfLine;
+            term.renderInput(nextLine, pos + 1);
           }
           break;
       }

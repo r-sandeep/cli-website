@@ -11,6 +11,87 @@ var Pipeline = (function () {
     };
   }
 
+  function extractRedirection(commandLine) {
+    var source = typeof commandLine === "string" ? commandLine.trim() : "";
+    var operators = [];
+    var quote = null;
+
+    for (var index = 0; index < source.length; index += 1) {
+      var character = source.charAt(index);
+      if (quote !== null) {
+        if (character === quote) quote = null;
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        quote = character;
+        continue;
+      }
+      if (character === ">") {
+        var length = source.charAt(index + 1) === ">" ? 2 : 1;
+        operators.push({ index: index, length: length });
+        index += length - 1;
+      }
+    }
+
+    if (operators.length === 0) {
+      return { ok: true, redirect: null, command: source };
+    }
+    if (operators.length !== 1) {
+      return { ok: false, message: "redirect: only one redirection is allowed" };
+    }
+
+    var operator = operators[0];
+    var command = source.slice(0, operator.index).trim();
+    var targetSource = source.slice(operator.index + operator.length).trim();
+    if (!command || !targetSource) {
+      return { ok: false, message: "redirect: a command and target are required" };
+    }
+    var targetTokens = [];
+    var token = "";
+    var tokenQuote = null;
+    var started = false;
+    for (var targetIndex = 0; targetIndex < targetSource.length; targetIndex += 1) {
+      var targetCharacter = targetSource.charAt(targetIndex);
+      if (tokenQuote !== null) {
+        if (targetCharacter === tokenQuote) tokenQuote = null;
+        else token += targetCharacter;
+        started = true;
+      } else if (targetCharacter === "'" || targetCharacter === '"') {
+        tokenQuote = targetCharacter;
+        started = true;
+      } else if (targetCharacter === "|") {
+        return { ok: false, message: "redirect: redirection must be the final operation" };
+      } else if (/\s/.test(targetCharacter)) {
+        if (started) {
+          targetTokens.push(token);
+          token = "";
+          started = false;
+        }
+      } else {
+        token += targetCharacter;
+        started = true;
+      }
+    }
+    if (tokenQuote !== null) {
+      return { ok: false, message: "redirect: unmatched quote in target" };
+    }
+    if (started) targetTokens.push(token);
+
+    if (targetTokens.length !== 1) {
+      return { ok: false, message: "redirect: exactly one target word is required" };
+    }
+
+    return {
+      ok: true,
+      command: command,
+      redirect: {
+        append: operator.length === 2,
+        operator: operator.length === 2 ? ">>" : ">",
+        target: targetTokens[0],
+      },
+    };
+  }
+
   function parsePipeline(commandLine) {
     if (typeof commandLine !== "string" || commandLine.indexOf("|") === -1) {
       return null;
@@ -311,6 +392,7 @@ var Pipeline = (function () {
   return {
     applyPipeline: applyPipeline,
     applyPipelineFilter: applyPipelineFilter,
+    extractRedirection: extractRedirection,
     parsePipeline: parsePipeline,
     validatePipeline: validatePipeline,
   };
