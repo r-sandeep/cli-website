@@ -18,8 +18,64 @@ function loadTerminalScript(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/terminal.js"]);
+  env.loadScripts(["js/sequence.js", "js/terminal.js"]);
   return env.exportValues(["runRootTerminal"]);
+}
+
+function loadExtendedTerminal({ cols = 24, history = [], globals = {} } = {}) {
+  env = createBrowserEnv({
+    globals: {
+      ...baseGlobals,
+      LOGO_TYPE: "ROOT",
+      colorText: (text) => text,
+      commands: { echo: () => {}, whoami: () => {}, ...globals.commands },
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      jobs: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      ...globals,
+    },
+  });
+  env.loadScripts([
+    "js/sequence.js",
+    "js/pipeline.js",
+    "js/terminal-ext.js",
+    "js/terminal.js",
+  ]);
+  const { extend, runRootTerminal } = env.exportValues([
+    "extend",
+    "runRootTerminal",
+  ]);
+  const term = {
+    VERSION: 4,
+    _core: { buffer: { x: 0 } },
+    attachCustomKeyEventHandler: vi.fn((handler) => {
+      term._customKeyHandler = handler;
+    }),
+    cols,
+    focus: vi.fn(),
+    loadAddon: vi.fn(),
+    onData: vi.fn((handler) => {
+      term._onData = handler;
+    }),
+    open: vi.fn(),
+    reset: vi.fn(),
+    scrollToBottom: vi.fn(),
+    write: vi.fn(),
+    writeln: vi.fn(),
+  };
+  extend(term);
+  term.init = vi.fn();
+  term.runDeepLink = vi.fn();
+  term.history = [...history];
+  runRootTerminal(term);
+  term.write.mockClear();
+  return term;
 }
 
 function createTerm(overrides = {}) {
@@ -158,6 +214,91 @@ describe("runRootTerminal", () => {
     expect(term.write).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
     expect(term.currentLine).not.toContain("\t");
+  });
+
+  it.each([";", "&&", "||"])(
+    "completes a command after %s while preserving the complete typed prefix",
+    (operator) => {
+      const { runRootTerminal } = loadTerminalScript({
+        commands: { echo: () => {}, whoami: () => {} },
+      });
+      const prefix = `echo before ${operator}  `;
+      const editing = createEditingTerm({ line: `${prefix}whoa` });
+      const { term } = editing;
+      runRootTerminal(term);
+      term.write.mockClear();
+
+      pressTab(term);
+
+      expect(term.currentLine).toBe(`${prefix}whoami `);
+      expect(editing.cursor()).toBe(term.currentLine.length);
+      expect(term.setCurrentLine).toHaveBeenCalledWith(`${prefix}whoami `);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["adjacent semicolon", "echo before;"],
+    ["adjacent and-if", "true&&"],
+    ["adjacent or-if", "false||"],
+    ["alias definition segment", "alias w=whois;"],
+    ["pipeline segment", "echo before | grep before&&"],
+  ])("completes after an %s prefix without rebuilding it", (_name, prefix) => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { echo: () => {}, whoami: () => {} },
+    });
+    const editing = createEditingTerm({ line: `${prefix}whoa` });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+
+    expect(term.currentLine).toBe(`${prefix}whoami `);
+    expect(editing.cursor()).toBe(term.currentLine.length);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it.each([";", "&&", "||"])(
+    "matches standalone later-argument completion after %s",
+    (operator) => {
+      const globals = { team: { Avidan: {}, Avery: {} } };
+      const { runRootTerminal } = loadTerminalScript(globals);
+      const prefix = `echo prior ${operator} `;
+      const editing = createEditingTerm({ line: `${prefix}whois av` });
+      const { term } = editing;
+      runRootTerminal(term);
+      term.write.mockClear();
+
+      pressTab(term);
+      expect(term.currentLine).toBe(`${prefix}whois Av`);
+      expect(term.write).not.toHaveBeenCalled();
+
+      pressTab(term);
+      expect(term.write.mock.calls[0][0]).toContain("Avidan");
+      expect(term.write.mock.calls[0][0]).toContain("Avery");
+      expect(term.write.mock.calls[1][0]).toBe(`${prefix}whois Av`);
+      expect(term.currentLine).toBe(`${prefix}whois Av`);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not treat quoted sequence text as a completion boundary", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { echo: () => {}, whoami: () => {} },
+    });
+    const line = `echo "literal &&" whoa`;
+    const editing = createEditingTerm({ line });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+
+    expect(term.currentLine).toBe(line);
+    expect(editing.cursor()).toBe(line.length);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.setCurrentLine).not.toHaveBeenCalled();
   });
 
   it("extends an ambiguous command to its longest prefix, then lists columns and restores the prompt", () => {
@@ -875,6 +1016,61 @@ describe("runRootTerminal", () => {
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("keeps a logical cursor while production handlers edit input spanning more than two rows", () => {
+    const term = loadExtendedTerminal({ cols: 20 });
+    const source = "echo one two three; echo wrapped terminal input";
+    for (const character of source) term._onData(character);
+    expect(term.currentLine).toBe(source);
+    expect(term.pos()).toBe(source.length);
+
+    for (let index = 0; index < 7; index++) term._onData("\x1b[D");
+    expect(term.pos()).toBe(source.length - 7);
+    term._onData("X");
+    const inserted =
+      source.slice(0, source.length - 7) + "X" + source.slice(source.length - 7);
+    expect(term.currentLine).toBe(inserted);
+    expect(term.pos()).toBe(source.length - 6);
+
+    term._onData("\u007F");
+    expect(term.currentLine).toBe(source);
+    expect(term.pos()).toBe(source.length - 7);
+    term._onData("\x1b[C");
+    expect(term.pos()).toBe(source.length - 6);
+    expect(term.write.mock.calls.some(([output]) => output.includes("\x1b[A\x1b[2K\r"))).toBe(
+      true
+    );
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "a" }));
+    expect(term.pos()).toBe(0);
+    term._onData("Z");
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "e" }));
+    expect(term.currentLine).toBe(`Z${source}`);
+    expect(term.pos()).toBe(term.currentLine.length);
+    expect(term.executeCommandLine).toBeTypeOf("function");
+  });
+
+  it("composes production recall, cancellation, and segment completion after wrapped input", () => {
+    const recalled = "false && echo hidden; echo shown after a wrapped recall";
+    const term = loadExtendedTerminal({ cols: 20, history: [recalled] });
+
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe(recalled);
+    expect(term.pos()).toBe(recalled.length);
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+    for (const character of "echo hi && whoa") term._onData(character);
+    pressTab(term);
+    expect(term.currentLine).toBe("echo hi && whoami ");
+    expect(term.pos()).toBe(term.currentLine.length);
+
+    term._onData("\u0003");
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+    expect(term.historyCursor).toBe(-1);
   });
 
   it("debounces resize handling with requestAnimationFrame", () => {

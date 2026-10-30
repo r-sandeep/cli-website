@@ -32,6 +32,43 @@ The terminal supports persistent named bookmarks for quick directory navigation:
 `NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
 browser storage, with a maximum of 25 saved bookmarks.
 
+## Command sequences
+
+Put multiple commands on one typed line with `;`, `&&`, or `||`. The operators
+work with or without surrounding spaces:
+
+- `A ; B` runs B after A finishes.
+- `A && B` runs B only when A succeeds.
+- `A || B` runs B only when A fails.
+
+All three operators have equal precedence and group from left to right. For
+example, `false && echo x || echo y` and `true || echo x && echo y` both print
+`y`. A skipped segment leaves the current status unchanged. The silent `true`
+and `false` commands are useful for testing these branches.
+
+Pipelines bind more tightly than sequence operators, so
+`whois root | grep -i root && echo found` filters only the `whois` output and
+then prints `found` if that pipeline succeeds. An unknown command, rejected
+pipeline, pipeline-filter error, or `false` is a failure; every other segment
+that runs succeeds.
+
+A `;` or `&&` inside matching single or double quotes is literal text. Pipeline
+quoting is deliberately unchanged, so quoted `|` and `||` still have the
+existing pipeline parser behavior. A single `&` also keeps its existing meaning.
+
+The typed line is split before execution. Each selected segment expands its
+aliases and environment variables and parses its pipeline only when it runs, so
+`export A=1 && echo $A` prints `1` and `alias w=whois; w root` uses the new
+alias. Operators introduced by an alias or variable value remain data rather
+than being rescanned as sequence syntax.
+
+Empty segments are rejected before anything runs, with one `sequence:` error
+that names the offending operator. A single trailing semicolon is allowed
+(`echo a;`), but leading operators, repeated operators, trailing `&&`, and
+trailing `||` are errors. If a command takes ownership of terminal input, such
+as `apply` while collecting answers, it ends the sequence and later segments do
+not run. Run `man sequence` for the terminal reference.
+
 ## Output pipelines
 
 Pipe the output of any terminal command through one or more filters with
@@ -56,9 +93,11 @@ Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
-`tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+`tldr | uniq -c | sort -rn` chain filters from left to right. A complete
+pipeline can be one command-sequence segment; run `man sequence` for how `;`,
+`&&`, and `||` continue from its status. Run `man pipe`, `man piping`, `man grep`,
+`man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the terminal for
+the corresponding manual page.
 
 ## Terminal editing shortcuts
 
@@ -113,6 +152,7 @@ Run `man shortcuts` in the terminal to view the same reference.
  - emacs
  - env: list stored environment variables
  - exit
+ - false: fail silently for command sequences
  - export NAME=value: store an environment variable (or use `export` to list all)
  - fdisk
  - find
@@ -148,6 +188,7 @@ Run `man shortcuts` in the terminal to view the same reference.
  - sudo
  - tail
  - top
+ - true: succeed silently for command sequences
  - touch
  - uname
  - unset NAME: remove an environment variable

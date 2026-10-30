@@ -275,6 +275,12 @@ const commands = {
     term.stylePrint(message);
   },
 
+  // Sequence status constants. Their status meaning is interpreted by the
+  // line executor; the command handlers themselves are deliberately silent.
+  true: function () {},
+
+  false: function () {},
+
   // Stores one exact NAME=value assignment through the terminal's validated,
   // persistent environment API. Splitting on the first equals sign preserves
   // empty values and any subsequent equals signs.
@@ -1256,13 +1262,27 @@ const _pipelineManuals = {
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
+    "A pipeline is one command-sequence segment and finishes before the next sequence operator is evaluated. See %man% sequence.",
     "Example: %whois% | %grep% -i root | %head% 3",
   ],
   piping: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
+    "A pipeline is one command-sequence segment and finishes before the next sequence operator is evaluated. See %man% sequence.",
     "Example: %whois% | %grep% -i root | %head% 3",
+  ],
+  sequence: [
+    "%SEQUENCE(1)% — run multiple commands from one typed line",
+    "Usage: A ; B    A && B    A || B",
+    "; always runs the next segment. && runs it only after success. || runs it only after failure.",
+    "All three operators have equal precedence and group from left to right. Pipelines bind tighter than sequence operators.",
+    "Unknown commands, rejected pipelines, pipeline filter errors, and %false% fail. Every other command that runs succeeds; %true% and %false% print nothing. A skipped segment leaves status unchanged.",
+    "Single or double quotes make ; and && literal. Pipe quoting is unchanged: quoted | and || retain the existing pipeline parser behavior.",
+    "Only the typed line supplies sequence operators. Each selected segment expands aliases and environment variables and parses its pipeline when it runs; separators introduced by expanded values are data, not operators.",
+    "An empty segment is a sequence syntax error and no segment runs. One trailing ; is allowed, but leading, repeated, trailing &&, and trailing || are errors.",
+    "A command that takes ownership of terminal input, such as %apply% while collecting answers, ends the sequence and later segments do not run.",
+    "Examples: %false% && %echo% hidden; %echo% shown    %export% A=1 && %echo% $A",
   ],
   grep: [
     "%GREP(1)% — retain lines containing a literal substring",
@@ -1286,8 +1306,8 @@ const _pipelineManuals = {
 };
 
 // Keep `man` compatible with its long-standing `tldr` alias while providing focused
-// manual pages for the bookmark commands, the environment commands, the pipeline
-// filters, and terminal editing shortcuts.
+// manual pages for the bookmark commands, environment commands, command sequences,
+// pipeline filters, and terminal editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
   if (args.length === 1 && topic === "shortcuts") {

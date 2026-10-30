@@ -43,6 +43,7 @@ const extend = (term) => {
 
   term.VERSION = term.VERSION || 3;  // bumped to 4 by `upgrade`
   term.currentLine = "";             // text the user has typed so far
+  term.inputCursor = 0;               // logical offset within currentLine
   term.user = "guest";
   term.host = "rootpc";
   term.cwd = "~";
@@ -275,12 +276,49 @@ const extend = (term) => {
   term.tabBase = "";
 
   // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // Keep this as logical input state: xterm's buffer column is only a visual-row
+  // coordinate and becomes negative relative to the prompt once input wraps.
+  term.pos = () => term.inputCursor;
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
     `${term.user}${term.sep}${term.host} ${term.cwd} $`;
+
+  const inputLayout = (cursor) => {
+    const columns = Math.max(1, Number.isFinite(term.cols) ? term.cols : 80);
+    const offset = term._promptRawText().length + 1 + cursor;
+    return { row: Math.floor(offset / columns), column: offset % columns };
+  };
+
+  // Redraw the complete prompt/input region. Clearing every occupied visual row
+  // avoids stale wrapped text, while the logical cursor remains independent of
+  // asynchronous xterm buffer updates.
+  term.redrawInput = (newLine, cursor = newLine.length) => {
+    const oldCursorLayout = inputLayout(term.inputCursor);
+    const oldEndLayout = inputLayout(term.currentLine.length);
+    if (oldEndLayout.row > oldCursorLayout.row) {
+      term.write("\x1b[B".repeat(oldEndLayout.row - oldCursorLayout.row));
+    }
+    term.write("\r\x1b[2K");
+    for (let row = oldEndLayout.row; row > 0; row -= 1) {
+      term.write("\x1b[A\x1b[2K\r");
+    }
+
+    term.currentLine = newLine;
+    term.inputCursor = Math.max(0, Math.min(cursor, newLine.length));
+    term.write(`${term.promptText()} `);
+    term.write(newLine);
+
+    const endLayout = inputLayout(newLine.length);
+    const cursorLayout = inputLayout(term.inputCursor);
+    if (endLayout.row > cursorLayout.row) {
+      term.write("\x1b[A".repeat(endLayout.row - cursorLayout.row));
+    }
+    term.write("\r");
+    if (cursorLayout.column > 0) {
+      term.write(`\x1b[${cursorLayout.column}C`);
+    }
+  };
 
   // Deep link: parse the URL hash as a command to run on load.
   // E.g. /#whois-avidan → runs `whois avidan`.
@@ -322,24 +360,22 @@ const extend = (term) => {
     term.write("\x1b[2K\r");
     term.prompt("", " ");
     term.currentLine = "";
+    term.inputCursor = 0;
     if (goToEndofHistory) {
       term.historyCursor = -1;
       term.scrollToBottom();
     }
   };
 
-  // Replaces the current input with newLine, preserving cursor position if asked.
+  // Replaces the current input with newLine, preserving its distance from the
+  // end when asked (the longstanding middle-edit behavior).
   term.setCurrentLine = (newLine, preserveCursor = false) => {
-    // Capture position before clearCurrentLine() because the xterm buffer
-    // cursor moves during the erase, making pos() unreliable immediately after.
     const oldPos = term.pos();
-    const length = term.currentLine.length;
-    term.clearCurrentLine();
-    term.currentLine = newLine;
-    term.write(newLine);
-    if (preserveCursor) {
-      term.write("\x1b[D".repeat(length - oldPos));
-    }
+    const oldLength = term.currentLine.length;
+    const cursor = preserveCursor
+      ? Math.max(0, newLine.length - (oldLength - oldPos))
+      : newLine.length;
+    term.redrawInput(newLine, cursor);
   };
 
   // ── Output ─────────────────────────────────────────────────────────────────
@@ -634,6 +670,100 @@ const extend = (term) => {
     }
   };
 
+  const trackCommand = (parsed, enabled) => {
+    if (!enabled) return;
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      event: "commandSent",
+      command: parsed.cmd,
+      args: parsed.args.join(" "),
+    });
+  };
+
+  // Executes one already-selected raw segment. Status is deliberately separate
+  // from the longstanding command return value: return value 1 means that an
+  // interactive command owns prompt cleanup, not that the command failed.
+  const executeCommandSegment = async (source, settings) => {
+    const parsed = parseCommandLine(source);
+    // Aliases expand only after typed-line sequence selection. Expanded text is
+    // never scanned for sequence operators.
+    const expanded = expandUserAlias(parsed);
+    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    let attempted = false;
+    let legacyResult;
+
+    try {
+      if (parsedPipeline) {
+        const validation = Pipeline.validatePipeline(parsedPipeline);
+        attempted = true;
+        if (!validation.ok) {
+          term.stylePrint(validation.error.message);
+          return { success: false, ownsPrompt: false, legacyResult };
+        }
+
+        const producer = prepareParsed(parseCommandLine(validation.producer));
+        // Preserve the pipeline preloader's public raw-line call shape.
+        await term.preloadCommandAssets(validation.producer);
+        const capture = _captureTerminalOutput(term);
+        try {
+          legacyResult = await term.command(validation.producer);
+        } finally {
+          capture.restore();
+        }
+
+        const result = Pipeline.applyPipeline(capture.lines(), validation.filters, {
+          getText: _visibleTerminalText,
+          prefixLine: (outputLine, lineNumber) => `${lineNumber}:${outputLine}`,
+          prefixCount: (outputLine, count) => `${count} ${outputLine}`,
+        });
+
+        if (result.error) {
+          term.stylePrint(result.error.message);
+        } else {
+          for (const outputLine of result.lines) {
+            term.writeln(outputLine);
+          }
+        }
+
+        // Interactive producers own their normal prompt cleanup. Defer that
+        // cleanup until their captured continuation and all filters settle.
+        capture.flushPromptCleanup();
+        return {
+          success:
+            producer.cmd !== "false" &&
+            typeof commands[producer.cmd] !== "undefined" &&
+            !result.error,
+          ownsPrompt: legacyResult == 1,
+          legacyResult,
+        };
+      }
+
+      // Prepare each selected segment only when it runs, so prior exports and
+      // alias definitions are visible while skipped segments have no effects.
+      const prepared = prepareParsed(expanded);
+      await term.preloadCommandAssets(prepared.cmd, prepared.args);
+      if (parsed.line.length === 0) {
+        return { success: true, ownsPrompt: false, legacyResult };
+      }
+
+      attempted = true;
+      legacyResult = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+      return {
+        success:
+          prepared.cmd !== "false" &&
+          typeof commands[prepared.cmd] !== "undefined",
+        ownsPrompt: legacyResult == 1,
+        legacyResult,
+      };
+    } catch (error) {
+      console.error("Command preparation failed", error);
+      term.stylePrint("Command failed to load required assets. Please try again.");
+      return { success: false, ownsPrompt: legacyResult == 1, legacyResult };
+    } finally {
+      trackCommand(parsed, settings.trackAnalytics && attempted);
+    }
+  };
+
   term.executeCommandLine = async (line, options = {}) => {
     const settings = {
       addToHistory: true,
@@ -644,136 +774,66 @@ const extend = (term) => {
       scrollAfter: true,
       ...options,
     };
-    const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
-    let exitStatus;
+    const source = String(line);
+    const plan = Sequence.scan(source);
+    // A rejected typed sequence has no executable operators in its atomic
+    // error result, but it still uses whole-sequence history and transcript
+    // chrome rather than the standalone-command path.
+    const standalone = plan.ok && plan.operators.length === 0;
+    const firstParsed = parseCommandLine(source);
+    const suppressStandaloneChrome = standalone && firstParsed.cmd === "upgrade";
+    let outcome = { success: true, ownsPrompt: false, legacyResult: undefined };
 
     try {
-      if (settings.manageBusy) {
-        term.busy = true;
+      if (settings.manageBusy) term.busy = true;
+
+      if (settings.showLeadingNewline && !suppressStandaloneChrome) {
+        // Sequence lines retain the specified empty row between the submitted
+        // input and ordered segment output. Standalone commands keep their
+        // longstanding one-row transition unchanged.
+        term.writeln(standalone ? "" : "\r\n");
       }
 
-      if (parsedPipeline) {
-        const validation = Pipeline.validatePipeline(parsedPipeline);
+      const historyLine = standalone ? firstParsed.line : source;
+      if (historyLine.length > 0 && settings.addToHistory) {
+        term.history.push(historyLine);
+      }
 
-        if (!validation.ok) {
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-            term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
-          term.stylePrint(validation.error.message);
-
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
-          }
-        } else {
-          await term.preloadCommandAssets(validation.producer);
-
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-            term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
-          const capture = _captureTerminalOutput(term);
-          try {
-            exitStatus = await term.command(validation.producer);
-          } finally {
-            capture.restore();
-          }
-
-          const result = Pipeline.applyPipeline(capture.lines(), validation.filters, {
-            getText: _visibleTerminalText,
-            prefixLine: (outputLine, lineNumber) => `${lineNumber}:${outputLine}`,
-            prefixCount: (outputLine, count) => `${count} ${outputLine}`,
-          });
-
-          if (result.error) {
-            term.stylePrint(result.error.message);
-          } else {
-            for (const outputLine of result.lines) {
-              term.writeln(outputLine);
-            }
-          }
-
-          // Interactive producers own their normal prompt cleanup. Defer that
-          // cleanup until their captured continuation and all filters settle.
-          capture.flushPromptCleanup();
-
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
-          }
-        }
+      if (!plan.ok) {
+        term.stylePrint(plan.error.message);
+        outcome = { success: false, ownsPrompt: false, legacyResult: undefined };
       } else {
-        // Interactive execution prepares (expands) the alias-expanded line
-        // exactly once, before preload, and dispatches the prepared record so
-        // expanded values stay opaque data instead of being parsed or expanded
-        // a second time, and so the lexical rawArgs reach the alias handler.
-        const prepared = prepareParsed(expanded);
-        await term.preloadCommandAssets(prepared.cmd, prepared.args);
+        for (let index = 0; index < plan.segments.length; index += 1) {
+          // A trailing semicolon has an operator but no following segment. For
+          // every real segment after the first, the preceding separator is at
+          // the same index in the scanner's operator list.
+          const operator = index === 0 ? null : plan.operators[index - 1];
+          const shouldRun =
+            operator === null ||
+            operator === ";" ||
+            (operator === "&&" && outcome.success) ||
+            (operator === "||" && !outcome.success);
+          if (!shouldRun) continue;
 
-        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-          term.writeln("");
-        }
-
-        if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
-          // Commands may own an interactive continuation. Await its final
-          // status so standalone prompt cleanup observes the same lifecycle as
-          // a piped producer.
-          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
-
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
-          }
+          outcome = await executeCommandSegment(plan.segments[index].source, settings);
+          if (outcome.ownsPrompt) break;
         }
       }
-    } catch (error) {
-      console.error("Command preparation failed", error);
-      term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+      if (
+        settings.promptAfter &&
+        !outcome.ownsPrompt &&
+        !suppressStandaloneChrome
+      ) {
         term.prompt();
         term.clearCurrentLine(true);
       }
 
-      if (settings.manageBusy) {
-        term.busy = false;
-      }
-
-      if (settings.scrollAfter) {
-        term.scrollToBottom();
-      }
+      if (settings.manageBusy) term.busy = false;
+      if (settings.scrollAfter) term.scrollToBottom();
     }
 
-    return exitStatus;
+    return outcome.legacyResult;
   };
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
