@@ -32,8 +32,144 @@ const _DIRS = {
   "~": ["id_rsa", "welcome.htm", "README.md"],
   "bin": ["zsh"],
   "home": Object.keys(team).concat("guest", "root").sort(),
-  "/": ["bin", "home"],
+  "tmp": [],
+  "/": ["bin", "home", "tmp"],
 };
+
+// Writable files are deliberately separate from the static DOM-backed files
+// above. A new store is attached to each terminal by extend(), so /tmp survives
+// ordinary redraws and init calls but is never shared or persisted.
+const _TMP_FILE_LIMIT = 16;
+const _TMP_CHARACTER_LIMIT = 32768;
+const _TMP_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+function exceedsTmpCharacterLimit(content) {
+  // JavaScript string iteration advances by Unicode code point: a valid
+  // surrogate pair counts once, while an unpaired surrogate counts by itself.
+  // Keep the check bounded and allocation-free for large captured output.
+  // UTF-16 length is a safe lower bound on code-point count, so common output
+  // at or below the limit can avoid iteration without changing Unicode rules.
+  if (content.length <= _TMP_CHARACTER_LIMIT) return false;
+
+  let remaining = _TMP_CHARACTER_LIMIT;
+  for (const _character of content) {
+    if (remaining === 0) return true;
+    remaining -= 1;
+  }
+  return false;
+}
+
+function createTmpFileStore(initialEntries = []) {
+  let files = new Map(initialEntries);
+
+  const compareNames = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+  const snapshot = () =>
+    Array.from(files.entries())
+      .sort(([left], [right]) => compareNames(left, right))
+      .map(([name, content]) => [name, content]);
+
+  const resolve = (target, cwd) => {
+    const value = typeof target === "string" ? target : "";
+    let name = null;
+
+    if (value.startsWith("/tmp/")) {
+      name = value.slice(5);
+    } else if (cwd === "tmp" && value.startsWith("./")) {
+      name = value.slice(2);
+    } else if (cwd === "tmp" && !value.includes("/")) {
+      name = value;
+    } else {
+      return {
+        ok: false,
+        code: "outside-tmp",
+        message: `redirect: outside /tmp: ${value}`,
+      };
+    }
+
+    if (
+      name === "." ||
+      name === ".." ||
+      !_TMP_NAME_PATTERN.test(name)
+    ) {
+      return {
+        ok: false,
+        code: "invalid-name",
+        message: `redirect: invalid /tmp file name: ${value}`,
+      };
+    }
+
+    return { ok: true, name };
+  };
+
+  const write = (target, cwd, content, append = false) => {
+    const resolved = resolve(target, cwd);
+    if (!resolved.ok) return resolved;
+
+    const text = String(content);
+    const exists = files.has(resolved.name);
+
+    // Appending no captured lines is a true no-op, including for a missing
+    // target. This is intentionally checked before the file-count limit.
+    if (append && text.length === 0) {
+      return { ok: true, name: resolved.name, unchanged: true };
+    }
+
+    if (!exists && files.size >= _TMP_FILE_LIMIT) {
+      return {
+        ok: false,
+        code: "file-limit",
+        message: `redirect: /tmp file limit (${_TMP_FILE_LIMIT}) exceeded`,
+      };
+    }
+
+    const nextContent = append && exists ? files.get(resolved.name) + text : text;
+    // Count Unicode code points rather than UTF-16 code units so astral
+    // characters consume one character of the documented limit. Stop as soon
+    // as the limit is exceeded instead of allocating an array for the output.
+    if (exceedsTmpCharacterLimit(nextContent)) {
+      return {
+        ok: false,
+        code: "character-limit",
+        message: `redirect: ${resolved.name} exceeds ${_TMP_CHARACTER_LIMIT} characters`,
+      };
+    }
+
+    files.set(resolved.name, nextContent);
+    return { ok: true, name: resolved.name };
+  };
+
+  const read = (target, cwd) => {
+    const resolved = resolve(target, cwd);
+    if (!resolved.ok) return resolved;
+    if (!files.has(resolved.name)) {
+      return { ok: false, code: "not-found", name: resolved.name };
+    }
+    return { ok: true, name: resolved.name, content: files.get(resolved.name) };
+  };
+
+  const remove = (target, cwd) => {
+    const resolved = resolve(target, cwd);
+    if (!resolved.ok) return resolved;
+    if (!files.delete(resolved.name)) {
+      return { ok: false, code: "not-found", name: resolved.name };
+    }
+    return { ok: true, name: resolved.name };
+  };
+
+  const restore = (entries) => {
+    files = new Map(entries);
+  };
+
+  return Object.freeze({
+    list: () => snapshot().map(([name]) => name),
+    read,
+    remove,
+    resolve,
+    restore,
+    snapshot,
+    write,
+  });
+}
 
 // Pre-compute absolute paths for every known file, used by `find`.
 let _FULL_PATHS = {};

@@ -353,7 +353,8 @@ const commands = {
   // Simulates a minimal Unix directory tree:
   //   /
   //   ├── bin/   (contains zsh)
-  //   └── home/  (contains guest, root, and each team member)
+  //   ├── home/  (contains guest, root, and each team member)
+  //   └── tmp/   (session-only writable files)
   //       └── ~/  (the current user's home)
   //
   // Team member home dirs are always permission-denied to keep things fun.
@@ -403,7 +404,7 @@ const commands = {
       case "..":
         if (term.cwd === "~") {
           term.dispatchCommand("cd", ["/home"]);
-        } else if (term.cwd === "home" || term.cwd === "bin") {
+        } else if (term.cwd === "home" || term.cwd === "bin" || term.cwd === "tmp") {
           term.dispatchCommand("cd", ["/"]);
         }
         break;
@@ -444,6 +445,16 @@ const commands = {
       case "bin":
         if (term.cwd === "/") {
           term.cwd = "bin";
+        } else {
+          term.stylePrint(`No such directory: ${dir}`);
+        }
+        break;
+      case "/tmp":
+        term.cwd = "tmp";
+        break;
+      case "tmp":
+        if (term.cwd === "/") {
+          term.cwd = "tmp";
         } else {
           term.stylePrint(`No such directory: ${dir}`);
         }
@@ -539,8 +550,11 @@ const commands = {
   // Reading id_rsa triggers the RickRoll easter egg.
   cat: function (args) {
     const filename = args[0];
+    const tmpFile = term.tmpFiles.read(filename, term.cwd);
 
-    if (_filesHere().includes(filename)) {
+    if (tmpFile.ok) {
+      term.write(tmpFile.content.replaceAll("\n", "\r\n"));
+    } else if (_filesHere().includes(filename)) {
       term.writeln(getFileContents(filename));
     } else {
       term.stylePrint(`No such file: ${filename}`);
@@ -793,8 +807,18 @@ const commands = {
     term.stylePrint("Honestly, our memory isn't what it used to be.");
   },
 
-  rm: function () {
-    term.stylePrint("I'm sorry Dave, I'm afraid I can't do that.");
+  rm: function (args) {
+    const target = args[0];
+    const resolved = term.tmpFiles.resolve(target, term.cwd);
+    if (!resolved.ok) {
+      term.stylePrint("I'm sorry Dave, I'm afraid I can't do that.");
+      return;
+    }
+
+    const result = term.tmpFiles.remove(target, term.cwd);
+    if (!result.ok) {
+      term.stylePrint(`rm: ${resolved.name}: No such file or directory`);
+    }
   },
 
   mkdir: function () {
@@ -1200,6 +1224,9 @@ for (const [key, val] of Object.entries(portfolio)) {
 // Returns the list of files visible in the current directory.
 // README.md is hidden from guest — root can see everything.
 function _filesHere() {
+  if (term.cwd === "tmp") {
+    return term.tmpFiles.list();
+  }
   return _DIRS[term.cwd].filter((e) => e != "README.md" || term.user == "root");
 }
 
@@ -1257,12 +1284,26 @@ const _pipelineManuals = {
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
     "Example: %whois% | %grep% -i root | %head% 3",
+    "A completed pipeline can be written to /tmp; see %man redirect%.",
   ],
   piping: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
     "Example: %whois% | %grep% -i root | %head% 3",
+    "A completed pipeline can be written to /tmp; see %man redirect%.",
+  ],
+  redirect: [
+    "%REDIRECT(1)% — write terminal output to a session file",
+    "Usage: COMMAND [| FILTER ...] > TARGET",
+    "       COMMAND [| FILTER ...] >> TARGET",
+    "> creates or replaces TARGET; >> appends and creates TARGET when it does not exist. Success prints no command output.",
+    "The redirection must be the final syntax and must be followed by exactly one target word. A > or >> inside single or double quotes is literal text.",
+    "TARGET must be /tmp/NAME, or NAME or ./NAME while the current directory is /tmp. Nested paths and every target outside /tmp are refused.",
+    "NAME must match [A-Za-z0-9._-]{1,64} and cannot be '.' or '..'.",
+    "/tmp holds at most 16 files of at most 32,768 characters each. Its files are session-only and start empty on every page load.",
+    "Read a file with %cat% /tmp/NAME and delete it with %rm% /tmp/NAME; relative names also work while in /tmp.",
+    "Example: %whois% root | %grep% -i root > /tmp/root.txt",
   ],
   grep: [
     "%GREP(1)% — retain lines containing a literal substring",
@@ -1287,7 +1328,7 @@ const _pipelineManuals = {
 
 // Keep `man` compatible with its long-standing `tldr` alias while providing focused
 // manual pages for the bookmark commands, the environment commands, the pipeline
-// filters, and terminal editing shortcuts.
+// filters, output redirection, and terminal editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
   if (args.length === 1 && topic === "shortcuts") {

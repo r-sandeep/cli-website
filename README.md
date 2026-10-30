@@ -56,13 +56,40 @@ Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
-`tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+`tldr | uniq -c | sort -rn` chain filters from left to right. A completed
+pipeline can also feed output redirection, described below. Run `man pipe` or
+`man piping`, `man redirect`, `man grep`, `man head`, `man tail`, `man wc`,
+`man sort`, or `man uniq` in the terminal for the corresponding manual page.
+
+## Output redirection
+
+Use `COMMAND > FILE` to create or replace a file with the command's visible
+output, or `COMMAND >> FILE` to append to it (creating it when needed). A
+pipeline may appear before either operator, so this writes only filtered output:
+
+```
+whois root | grep -i root > /tmp/root.txt
+cat /tmp/root.txt
+```
+
+The redirect must be at the end of the line and followed by exactly one target
+word. Operators inside single or double quotes are literal text rather than
+redirection syntax. Successful redirection prints no command output.
+
+Only direct children of `/tmp` are writable. Use `/tmp/NAME` from any directory,
+or `NAME` or `./NAME` while the current directory is `/tmp`. `NAME` must match
+`[A-Za-z0-9._-]{1,64}` and cannot be `.` or `..`; nested paths and every target
+outside `/tmp` are refused.
+
+`/tmp` holds at most 16 files, each at most 32,768 characters. `/tmp` starts empty on every page load.
+Its files are session-only and never saved in browser storage. Read a file with
+`cat /tmp/NAME`, and delete it with
+`rm /tmp/NAME` (or use the relative name while in `/tmp`). Run `man redirect`
+for the terminal reference.
 
 ## Terminal editing shortcuts
 
-- **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches
+- **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, more, or rm (in /tmp); press twice to list ambiguous matches
 - **Alt+Left** — move to the start of the previous word
 - **Alt+Right** — move to the start of the next word
 - **Ctrl+W** — delete back to the start of the previous word

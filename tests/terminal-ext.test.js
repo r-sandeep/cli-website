@@ -25,6 +25,63 @@ function loadTerminalExt(globals = {}) {
   return env.exportValues(["extend"]);
 }
 
+function loadTerminalExtWithFs(globals = {}) {
+  env = createBrowserEnv({
+    html: "<!doctype html><html><head></head><body><div id=\"files-all\"></div></body></html>",
+    globals: {
+      LOGO_TYPE: "ROOT",
+      colorText: (text) => text,
+      commands: { help: vi.fn() },
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      jobs: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      team: {},
+      ...globals,
+    },
+  });
+  env.loadScripts(["config/fs.js", "js/pipeline.js", "js/terminal-ext.js"]);
+  return env.exportValues(["extend"]);
+}
+
+function loadProductionRedirectionTerminal() {
+  const term = createTerm();
+  env = createBrowserEnv({
+    html: "<!doctype html><html><head></head><body><div id=\"files-all\"></div></body></html>",
+    globals: {
+      LOGO_TYPE: "ROOT",
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      term,
+    },
+  });
+  env.loadScripts([
+    "config/firm.js",
+    "config/team.js",
+    "config/fs.js",
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
+  const { commands, extend } = env.exportValues(["commands", "extend"]);
+  extend(term);
+  return { commands, extend, term };
+}
+
 function createTerm(overrides = {}) {
   const term = {
     VERSION: 4,
@@ -104,6 +161,88 @@ afterEach(() => {
 
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
+
+  it("tracks and redraws logical input across wrap boundaries", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({ cols: 24 });
+    extend(term);
+    term.init = vi.fn();
+    term.user = "guest";
+    term.cwd = "~";
+    term.write.mockClear();
+
+    const line = "whois root | grep -i root > /tmp/root.txt";
+    term.renderInput(line, line.length);
+    expect(term.currentLine).toBe(line);
+    expect(term.pos()).toBe(line.length);
+    expect(term.write.mock.calls.flat().join("")).toContain("\r\n");
+
+    term.setInputCursor(15);
+    expect(term.pos()).toBe(15);
+    term.setCurrentLine(`${line.slice(0, 15)}X${line.slice(15)}`, false);
+    expect(term.currentLine).toBe(`${line.slice(0, 15)}X${line.slice(15)}`);
+    expect(term.pos()).toBe(line.length + 1);
+
+    term.clearCurrentLine(true);
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+    expect(term.historyCursor).toBe(-1);
+    expect(term.write.mock.calls.flat().join("")).toContain("\x1b[2K");
+  });
+
+  it("resets input state without redrawing after command output", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({ cols: 24 });
+    extend(term);
+    term.currentLine = "wrapped pending input";
+    term._inputCursor = term.currentLine.length;
+    term.historyCursor = 2;
+    term.write.mockClear();
+
+    term.resetInputState(true);
+
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+    expect(term.historyCursor).toBe(-1);
+    expect(term.write).not.toHaveBeenCalled();
+  });
+
+  it("owns an independent empty tmp store per terminal without browser storage", () => {
+    env = null;
+    const { extend } = loadTerminalExtWithFs();
+    const first = createTerm();
+    const second = createTerm();
+    const storageBefore = Object.keys(env.window.localStorage).sort();
+
+    extend(first);
+    expect(first.tmpFiles.list()).toEqual([]);
+    expect(first.tmpFiles.write("/tmp/only-first", "~", "value\n")).toMatchObject({ ok: true });
+    expect(first.tmpFiles.list()).toEqual(["only-first"]);
+
+    extend(second);
+    expect(second.tmpFiles.list()).toEqual([]);
+    expect(first.tmpFiles.list()).toEqual(["only-first"]);
+    expect(Object.keys(env.window.localStorage).sort()).toEqual(storageBefore);
+    expect(env.window.localStorage.getItem("rootvc.tmp")).toBeNull();
+  });
+
+  it("retains tmp across ordinary same-page init", () => {
+    env = null;
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm({
+      printLogoType: vi.fn(),
+      stylePrint: vi.fn(),
+    });
+    extend(term);
+    term.tmpFiles.write("/tmp/kept", "~", "value\n");
+
+    term.init();
+
+    expect(term.tmpFiles.read("/tmp/kept", "~")).toMatchObject({
+      ok: true,
+      content: "value\n",
+    });
+  });
 
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
@@ -741,6 +880,520 @@ describe("terminal-ext", () => {
     expect(env.window.localStorage.getItem(environmentStorageKey)).toBe(
       persistedBefore
     );
+  });
+
+  it("redirects a standalone producer silently with visible-text serialization", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    term.command = vi.fn((line) => {
+      expect(line).toBe("source");
+      term.write("\x1b[31mred\x1b[0m\r\n");
+      term.write("\x1b]8;;https://example.com\x07link\x1b]8;;\x07\n");
+      term.writeln("");
+      term.writeln("last");
+      return 0;
+    });
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("source > /tmp/output.txt", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.command).toHaveBeenCalledOnce();
+    expect(term.preloadCommandAssets).toHaveBeenCalledWith("source");
+    expect(term.tmpFiles.read("/tmp/output.txt", "~")).toMatchObject({
+      ok: true,
+      content: "red\nlink\n\nlast\n",
+    });
+    expect(term.writeln).not.toHaveBeenCalled();
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+  });
+
+  it("appends, replaces, and preserves empty append through dispatch", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    const outputs = new Map([
+      ["first", "one\r\n"],
+      ["second", "two\r\n"],
+      ["quiet", ""],
+    ]);
+    term.command = vi.fn((line) => term.write(outputs.get(line)));
+
+    await term.executeCommandLine("first > /tmp/a", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/a", "~").content).toBe("one\n");
+    await term.executeCommandLine("second >> /tmp/a", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/a", "~").content).toBe("one\ntwo\n");
+    await term.executeCommandLine("quiet >> /tmp/a", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/a", "~").content).toBe("one\ntwo\n");
+    await term.executeCommandLine("quiet > /tmp/a", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/a", "~").content).toBe("");
+  });
+
+  it("expands aliases before redirect syntax and expands target values once as data", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    term.defineAlias("save", "echo alias > /tmp/from-alias");
+    term.defineAlias("w", "whois");
+    term.environment.set("TARGET", "/tmp/value-file");
+    term.environment.set("VALUE", "a > b");
+    term.command = vi.fn((line) => {
+      const prepared = term.prepareCommandLine(line);
+      term.writeln([prepared.cmd, ...prepared.args].join(" "));
+    });
+
+    await term.executeCommandLine("save", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/from-alias", "~").content).toBe("echo alias\n");
+    await term.executeCommandLine("w root > $TARGET", { promptAfter: false });
+    expect(term.command).toHaveBeenLastCalledWith("whois root");
+    expect(term.tmpFiles.read("/tmp/value-file", "~").content).toBe("whois root\n");
+    await term.executeCommandLine(`echo "$VALUE" > /tmp/opaque`, { promptAfter: false });
+    expect(term.command).toHaveBeenLastCalledWith(`echo "$VALUE"`);
+    expect(term.tmpFiles.read("/tmp/opaque", "~").content).toBe("echo a > b\n");
+  });
+
+  it("composes production aliases, quotes, and one-pass environment expansion", async () => {
+    const { term } = loadProductionRedirectionTerminal();
+    term.defineAlias("w", "whois");
+    term.defineAlias("save", "echo alias > /tmp/from-alias");
+    term.environment.set("TARGET", "/tmp/from-target");
+    term.environment.set("VALUE", "a > b");
+    term.environment.set("INDIRECT", "$VALUE");
+
+    await term.executeCommandLine("w root > /tmp/from-w", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/from-w", "~").content).toMatch(/^Root Ventures/);
+    await term.executeCommandLine("save", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/from-alias", "~").content).toBe("alias\n");
+    await term.executeCommandLine(`echo "$VALUE" > $TARGET`, { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/from-target", "~").content).toBe("a > b\n");
+    await term.executeCommandLine(`echo '$VALUE >> literal' > /tmp/single`, { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/single", "~").content).toBe("a > b >> literal\n");
+    await term.executeCommandLine(`echo "$INDIRECT" > /tmp/once`, { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/once", "~").content).toBe("$VALUE\n");
+
+    term.writeln.mockClear();
+    await term.executeCommandLine(`echo "a > b"`, {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln).toHaveBeenCalledWith("a > b");
+  });
+
+  it.each([
+    "cd /tmp >",
+    "cd /tmp >>",
+    "cd /tmp > /tmp/a > /tmp/b",
+    "cd /tmp > /tmp/a | grep tmp",
+    "cd /tmp > /tmp/a extra",
+    "cd /tmp > README.md",
+    "cd /tmp > /tmp/a/b",
+  ])("rejects redirect %s before preload and dispatch without changing state", async (line) => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    term.tmpFiles.write("/tmp/sentinel", "~", "kept\n");
+    const snapshot = term.tmpFiles.snapshot();
+    const command = vi.fn();
+    term.command = command;
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine(line, { promptAfter: false });
+
+    expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual(snapshot);
+    expect(stylePrint.mock.calls.some(([message]) => String(message).startsWith("redirect:"))).toBe(true);
+  });
+
+  it.each([
+    "cd /tmp >",
+    "cd /tmp >>",
+    "cd /tmp > /tmp/a > /tmp/b",
+    "cd /tmp > /tmp/a >> /tmp/b",
+    "cd /tmp >>> /tmp/a",
+    "cd /tmp > /tmp/a | grep tmp",
+    "cd /tmp > /tmp/a extra",
+    "cd /tmp > README.md",
+    "cd /tmp > welcome.htm",
+    "cd /tmp > /tmp",
+    "cd /tmp > /bin",
+    "cd /tmp > /tmp/a/b",
+    "cd /tmp > /tmp/../a",
+    "cd /tmp > /tmp/.",
+    "cd /tmp > /tmp/..",
+    `cd /tmp > "/tmp/has space"`,
+    "cd /tmp > /tmp/bad?name",
+    `cd /tmp > /tmp/${"a".repeat(65)}`,
+    "cd /tmp > /tmp/é",
+  ])("refuses production cd redirect %s before any preload or dispatch", async (line) => {
+    const { commands, term } = loadProductionRedirectionTerminal();
+    term.tmpFiles.write("/tmp/sentinel", "~", "kept\n");
+    const snapshot = term.tmpFiles.snapshot();
+    const cwd = term.cwd;
+    const preload = vi.spyOn(term, "preloadCommandAssets");
+    const command = vi.spyOn(term, "command");
+    const cd = vi.spyOn(commands, "cd");
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine(line, { promptAfter: false });
+
+    expect(preload).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(cd).not.toHaveBeenCalled();
+    expect(term.cwd).toBe(cwd);
+    expect(term.tmpFiles.snapshot()).toEqual(snapshot);
+    expect(stylePrint.mock.calls.some(([message]) => String(message).startsWith("redirect:"))).toBe(true);
+  });
+
+  it("accepts one quoted target word when its expanded name is valid", async () => {
+    const { commands, term } = loadProductionRedirectionTerminal();
+    const cd = vi.spyOn(commands, "cd");
+
+    await term.executeCommandLine(`cd /tmp > "/tmp/quoted-name"`, { promptAfter: false });
+
+    expect(cd).toHaveBeenCalledOnce();
+    expect(term.cwd).toBe("tmp");
+    expect(term.tmpFiles.read("/tmp/quoted-name", "tmp").content).toBe("");
+  });
+
+  it.each([
+    ["a missing target", null],
+    ["an existing target", "OLD\n"],
+  ])("commits %s to its entry-cwd file after production cd changes cwd", async (_case, initialContent) => {
+    const { term } = loadProductionRedirectionTerminal();
+    term.cwd = "tmp";
+    term.tmpFiles.write("/tmp/sentinel", "~", "kept\n");
+    if (initialContent !== null) {
+      term.tmpFiles.write("out", "tmp", initialContent);
+    }
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine("cd ~ > out", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual([
+      ["out", ""],
+      ["sentinel", "kept\n"],
+    ]);
+    expect(stylePrint.mock.calls.some(([message]) => String(message).startsWith("redirect:"))).toBe(false);
+
+    term.write.mockClear();
+    term.writeln.mockClear();
+    await term.executeCommandLine("cat /tmp/out", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.write).toHaveBeenCalledWith("");
+    expect(term.writeln).not.toHaveBeenCalled();
+
+    await term.executeCommandLine("echo NEXT >> /tmp/out", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.tmpFiles.snapshot()).toEqual([
+      ["out", "NEXT\n"],
+      ["sentinel", "kept\n"],
+    ]);
+
+    term.write.mockClear();
+    await term.executeCommandLine("cat /tmp/out", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.write).toHaveBeenCalledWith("NEXT\r\n");
+  });
+
+  it.each([
+    ["out", ">", ""],
+    ["./out", ">", ""],
+    ["/tmp/out", ">", ""],
+    ["out", ">>", "OLD\n"],
+    ["./out", ">>", "OLD\n"],
+    ["/tmp/out", ">>", "OLD\n"],
+  ])("keeps %s with %s bound to tmp after production cd", async (target, operator, expected) => {
+    const { term } = loadProductionRedirectionTerminal();
+    term.cwd = "tmp";
+    term.tmpFiles.write("/tmp/out", "~", "OLD\n");
+    term.tmpFiles.write("/tmp/sentinel", "~", "kept\n");
+
+    await term.executeCommandLine(`cd ~ ${operator} ${target}`, {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual([
+      ["out", expected],
+      ["sentinel", "kept\n"],
+    ]);
+  });
+
+  it("freezes expanded and alias redirect targets and filters cwd-changing producers", async () => {
+    const { term } = loadProductionRedirectionTerminal();
+    term.cwd = "tmp";
+    term.environment.set("TARGET", "./environment");
+
+    await term.executeCommandLine("cd ~ > $TARGET", { promptAfter: false });
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual([["environment", ""]]);
+
+    term.cwd = "tmp";
+    term.defineAlias("home", "cd ~");
+    await term.executeCommandLine("home > ./alias", { promptAfter: false });
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual([
+      ["alias", ""],
+      ["environment", ""],
+    ]);
+
+    term.cwd = "tmp";
+    await term.executeCommandLine("cd ~ | wc -l > ./count", { promptAfter: false });
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual([
+      ["alias", ""],
+      ["count", "0\n"],
+      ["environment", ""],
+    ]);
+  });
+
+  it.each([
+    ["out", "redirect: outside /tmp: out"],
+    ["./out", "redirect: outside /tmp: ./out"],
+    ["/tmp/../out", "redirect: invalid /tmp file name: /tmp/../out"],
+    ["/tmp/bad!", "redirect: invalid /tmp file name: /tmp/bad!"],
+  ])("refuses entry-cwd target %s before cd can make it valid", async (target, diagnostic) => {
+    const { commands, term } = loadProductionRedirectionTerminal();
+    term.tmpFiles.write("/tmp/alpha", "~", "A\n");
+    term.tmpFiles.write("/tmp/beta", "~", "B\n");
+    const before = term.tmpFiles.snapshot();
+    const preload = vi.spyOn(term, "preloadCommandAssets");
+    const command = vi.spyOn(term, "command");
+    const cd = vi.spyOn(commands, "cd");
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine(`cd /tmp > ${target}`, { promptAfter: false });
+
+    expect(stylePrint).toHaveBeenCalledWith(diagnostic);
+    expect(preload).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(cd).not.toHaveBeenCalled();
+    expect(term.cwd).toBe("~");
+    expect(term.tmpFiles.snapshot()).toEqual(before);
+
+    await term.executeCommandLine("cd /tmp > /tmp/valid", { promptAfter: false });
+    expect(command).toHaveBeenCalledOnce();
+    expect(cd).toHaveBeenCalledOnce();
+    expect(term.cwd).toBe("tmp");
+    expect(term.tmpFiles.snapshot()).toEqual([
+      ["alpha", "A\n"],
+      ["beta", "B\n"],
+      ["valid", ""],
+    ]);
+  });
+
+  it("keeps redirect targets unchanged for pre-dispatch and deferred pipeline errors", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    term.tmpFiles.write("/tmp/target", "~", "sentinel\n");
+    term.command = vi.fn(() => term.writeln("producer output"));
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine("fake | grep > /tmp/target", { promptAfter: false });
+    expect(term.command).not.toHaveBeenCalled();
+    expect(term.tmpFiles.read("/tmp/target", "~").content).toBe("sentinel\n");
+    expect(stylePrint).toHaveBeenCalledWith("grep: a pattern is required");
+
+    await term.executeCommandLine("fake | mystery > /tmp/target", { promptAfter: false });
+    expect(term.command).toHaveBeenCalledOnce();
+    expect(term.tmpFiles.read("/tmp/target", "~").content).toBe("sentinel\n");
+    expect(stylePrint).toHaveBeenCalledWith("Unknown pipeline filter: mystery");
+  });
+
+  it("composes actual whois, pipeline, tmp cat, and wc handlers", async () => {
+    const { term } = loadProductionRedirectionTerminal();
+
+    await term.executeCommandLine("whois root | grep -i root > /tmp/root.txt", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    const stored = term.tmpFiles.read("/tmp/root.txt", "~");
+    expect(stored.ok).toBe(true);
+    expect(stored.content).toMatch(/^Root Ventures/);
+    expect(stored.content.endsWith("\n")).toBe(true);
+
+    await term.executeCommandLine("echo APPEND >> /tmp/root.txt", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.tmpFiles.read("/tmp/root.txt", "~").content).toBe(
+      `${stored.content}APPEND\n`
+    );
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("cat /tmp/root.txt | grep -i root | wc -l", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual(["1"]);
+  });
+
+  it("applies empty filtered captures and viewer aliases through production dispatch", async () => {
+    const { term } = loadProductionRedirectionTerminal();
+    term.tmpFiles.write("/tmp/existing", "~", "sentinel\n");
+
+    await term.executeCommandLine("echo no-match | grep present >> /tmp/existing", {
+      promptAfter: false,
+    });
+    expect(term.tmpFiles.read("/tmp/existing", "~").content).toBe("sentinel\n");
+    await term.executeCommandLine("echo no-match | grep present >> /tmp/missing", {
+      promptAfter: false,
+    });
+    expect(term.tmpFiles.read("/tmp/missing", "~").ok).toBe(false);
+    await term.executeCommandLine("echo no-match | grep present > /tmp/existing", {
+      promptAfter: false,
+    });
+    expect(term.tmpFiles.read("/tmp/existing", "~").content).toBe("");
+
+    term.tmpFiles.write("/tmp/source", "~", "first\nsecond\n");
+    await term.executeCommandLine("head /tmp/source > /tmp/viewed", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/viewed", "~").content).toBe("first\nsecond\n");
+  });
+
+  it("awaits interactive producers before committing and restores the next command", async () => {
+    const { commands, term } = loadProductionRedirectionTerminal();
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    let finishInput;
+    term.collectInput = vi.fn(() => new Promise((resolve) => {
+      finishInput = resolve;
+    }));
+    const installedCollectInput = term.collectInput;
+    commands.interactive = async () => {
+      const answer = await term.collectInput("Question");
+      term.writeln(`answer:${answer}`);
+      return 0;
+    };
+
+    const redirectPromise = term.executeCommandLine("interactive > /tmp/answer", {
+      promptAfter: false,
+    });
+    await Promise.resolve();
+    expect(term.tmpFiles.read("/tmp/answer", "~").ok).toBe(false);
+    finishInput("Ada");
+    await redirectPromise;
+
+    expect(term.tmpFiles.read("/tmp/answer", "~").content).toBe("answer:Ada\n");
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+    expect(term.collectInput).toBe(installedCollectInput);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo ordinary", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln).toHaveBeenCalledWith("ordinary");
+  });
+
+  it("enforces character and file-count capacity atomically through dispatch", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    term.command = vi.fn((line) => {
+      if (line === "boundary") term.write("x".repeat(32767));
+      else term.write("x");
+    });
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine("boundary > /tmp/full", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/full", "~").content.length).toBe(32768);
+    const beforeOverflow = term.tmpFiles.snapshot();
+    await term.executeCommandLine("small >> /tmp/full", { promptAfter: false });
+    expect(term.tmpFiles.snapshot()).toEqual(beforeOverflow);
+    expect(stylePrint).toHaveBeenCalledWith("redirect: full exceeds 32768 characters");
+
+    term.tmpFiles.restore(Array.from({ length: 16 }, (_, index) => [`f${index}`, "ok\n"]));
+    const beforeFileOverflow = term.tmpFiles.snapshot();
+    await term.executeCommandLine("small > /tmp/seventeenth", { promptAfter: false });
+    expect(term.tmpFiles.snapshot()).toEqual(beforeFileOverflow);
+    expect(stylePrint).toHaveBeenCalledWith("redirect: /tmp file limit (16) exceeded");
+  });
+
+  it("leaves the target unchanged and restores output ownership when a redirected producer throws", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    term.tmpFiles.write("/tmp/target", "~", "sentinel\n");
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    term.command = vi.fn(() => {
+      term.writeln("partial");
+      throw new Error("redirect producer failed");
+    });
+
+    await term.executeCommandLine("broken > /tmp/target", { promptAfter: false });
+
+    expect(term.tmpFiles.read("/tmp/target", "~").content).toBe("sentinel\n");
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+    expect(term.busy).toBe(false);
+  });
+
+  it("isolates repeated resize replay from live tmp and subsequent appends", async () => {
+    const { term } = loadProductionRedirectionTerminal();
+    const storageBefore = Object.fromEntries(
+      Object.keys(env.window.localStorage).sort().map((key) => [key, env.window.localStorage.getItem(key)])
+    );
+
+    await term.executeCommandLine("echo one > /tmp/survivor", { promptAfter: false });
+    await term.executeCommandLine("echo two >> /tmp/survivor", { promptAfter: false });
+    await term.executeCommandLine("echo gone > /tmp/deleted", { promptAfter: false });
+    await term.executeCommandLine("rm /tmp/deleted", { promptAfter: false });
+    const liveBeforeReplay = term.tmpFiles.snapshot();
+    term.runDeepLink = vi.fn(() => Promise.resolve());
+
+    await term.resizeListener();
+    expect(term.tmpFiles.snapshot()).toEqual(liveBeforeReplay);
+    await term.resizeListener();
+    expect(term.tmpFiles.snapshot()).toEqual(liveBeforeReplay);
+    expect(term.tmpFiles.read("/tmp/deleted", "~").ok).toBe(false);
+
+    await term.executeCommandLine("echo next >> /tmp/survivor", { promptAfter: false });
+    expect(term.tmpFiles.read("/tmp/survivor", "~").content).toBe("one\ntwo\nnext\n");
+    expect(Object.fromEntries(
+      Object.keys(env.window.localStorage).sort().map((key) => [key, env.window.localStorage.getItem(key)])
+    )).toEqual(storageBefore);
+  });
+
+  it("restores the live tmp store when resize replay execution fails", async () => {
+    const { extend } = loadTerminalExtWithFs();
+    const term = createTerm();
+    extend(term);
+    term.tmpFiles.write("/tmp/live", "~", "kept\n");
+    const liveStore = term.tmpFiles;
+    term.history = ["broken > /tmp/live"];
+    term.runDeepLink = vi.fn(() => Promise.resolve());
+    term.command = vi.fn(() => {
+      throw new Error("replay failed");
+    });
+
+    await term.resizeListener();
+
+    expect(term.tmpFiles).toBe(liveStore);
+    expect(term.tmpFiles.snapshot()).toEqual([["live", "kept\n"]]);
   });
 
   it("runs a producer once and applies ANSI-aware pipeline stages left to right", async () => {

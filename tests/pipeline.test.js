@@ -47,6 +47,51 @@ describe("pipeline grammar", () => {
   });
 });
 
+describe("redirection grammar", () => {
+  it.each([
+    ["echo hi > /tmp/a.txt", { append: false, operator: ">", target: "/tmp/a.txt" }, "echo hi"],
+    ["echo hi >> ./a.txt", { append: true, operator: ">>", target: "./a.txt" }, "echo hi"],
+    [`echo hi > "quoted name"`, { append: false, operator: ">", target: "quoted name" }, "echo hi"],
+  ])("extracts one final target from %s", (line, redirect, command) => {
+    expect(pipeline.extractRedirection(line)).toEqual({ ok: true, redirect, command });
+  });
+
+  it.each([
+    `echo "a > b"`,
+    "echo 'a >> b'",
+    `echo "a > b" 'c >> d'`,
+  ])("keeps quoted operators literal in %s", (line) => {
+    expect(pipeline.extractRedirection(line)).toEqual({
+      ok: true,
+      redirect: null,
+      command: line,
+    });
+  });
+
+  it.each([
+    "echo hi >",
+    "echo hi >>",
+    "echo hi > /tmp/a > /tmp/b",
+    "echo hi > /tmp/a >> /tmp/b",
+    "echo hi >>> /tmp/a",
+    `echo hi > "/tmp/a`,
+    "echo hi > /tmp/a | grep hi",
+    "echo hi > /tmp/a extra",
+  ])("rejects invalid redirect syntax in %s", (line) => {
+    const result = pipeline.extractRedirection(line);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/^redirect:/);
+  });
+
+  it("accepts a quoted pipe as one target word instead of a later stage", () => {
+    expect(pipeline.extractRedirection(`echo hi > "a|b"`)).toEqual({
+      ok: true,
+      command: "echo hi",
+      redirect: { append: false, operator: ">", target: "a|b" },
+    });
+  });
+});
+
 describe("grep", () => {
   it.each([
     ["literal metacharacters", "cmd | grep a.b", ["a.b", "axb"], ["a.b"]],

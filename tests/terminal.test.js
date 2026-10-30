@@ -35,11 +35,24 @@ function createTerm(overrides = {}) {
     locked: false,
     pos: vi.fn(() => 0),
     prompt: vi.fn(),
+    renderInput: vi.fn((line, cursor = line.length) => {
+      term.currentLine = line;
+      term._testCursor = cursor;
+    }),
+    resetInputState: vi.fn((goToEndOfHistory = false) => {
+      term.currentLine = "";
+      term._testCursor = 0;
+      if (goToEndOfHistory) term.historyCursor = -1;
+    }),
     resizeListener: vi.fn(),
     runDeepLink: vi.fn(),
     scrollToBottom: vi.fn(),
     setCurrentLine: vi.fn((line) => {
       term.currentLine = line;
+      term._testCursor = line.length;
+    }),
+    setInputCursor: vi.fn((cursor) => {
+      term._testCursor = cursor;
     }),
     tabBase: "",
     tabIndex: 0,
@@ -78,12 +91,15 @@ function createEditingTerm({ line = "", cursor = line.length, history = [] } = {
     pos: vi.fn(() => visualCursor),
   });
 
+  term.renderInput = vi.fn((newLine, newCursor = newLine.length) => {
+    term.currentLine = newLine;
+    visualCursor = newCursor;
+  });
+  term.setInputCursor = vi.fn((newCursor) => {
+    visualCursor = newCursor;
+  });
   term.write = vi.fn((output) => {
-    for (const token of output.matchAll(/\x1b\[([CDK])|([\s\S])/g)) {
-      if (token[1] === "C") visualCursor++;
-      else if (token[1] === "D") visualCursor--;
-      else if (!token[1]) visualCursor++;
-    }
+    if (output === term.currentLine) visualCursor = term.currentLine.length;
   });
   let promptCount = 0;
   term.prompt = vi.fn(() => {
@@ -91,6 +107,11 @@ function createEditingTerm({ line = "", cursor = line.length, history = [] } = {
     // fresh input row, as happens after completion candidates are listed.
     if (promptCount > 0) visualCursor = 0;
     promptCount++;
+  });
+  term.resetInputState = vi.fn((goToEndOfHistory = false) => {
+    term.currentLine = "";
+    visualCursor = 0;
+    if (goToEndOfHistory) term.historyCursor = -1;
   });
   term.clearCurrentLine = vi.fn((goToEndOfHistory = false) => {
     term.currentLine = "";
@@ -305,6 +326,58 @@ describe("runRootTerminal", () => {
       expect(editing.cursor()).toBe(term.currentLine.length);
       expect(term.write).not.toHaveBeenCalled();
       expect(term.executeCommandLine).not.toHaveBeenCalled();
+    }
+  );
+
+  it("completes rm from the live tmp store and leaves rm unsupported outside tmp", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const files = ["a.txt", "alpha.txt", "z.txt"];
+    const editing = createEditingTerm({ line: "rm z" });
+    const { term } = editing;
+    term.cwd = "tmp";
+    term.tmpFiles = { list: vi.fn(() => [...files]) };
+    runRootTerminal(term);
+
+    pressTab(term);
+    expect(term.currentLine).toBe("rm z.txt ");
+    files.splice(files.indexOf("z.txt"), 1);
+    term.setCurrentLine("rm z");
+    pressTab(term);
+    expect(term.currentLine).toBe("rm z");
+    expect(term.tmpFiles.list).toHaveBeenCalledTimes(2);
+
+    term.cwd = "~";
+    term.setCurrentLine("rm a");
+    pressTab(term);
+    expect(term.currentLine).toBe("rm a");
+    expect(term.tmpFiles.list).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["cat", "head", "tail", "less", "more", "rm"])(
+    "lists live sorted tmp candidates for %s and refreshes after deletion",
+    (command) => {
+      let files = ["a.txt", "alpha.txt", "z.txt"];
+      const filesHere = vi.fn(() => [...files]);
+      const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+      const editing = createEditingTerm({ line: `${command} a` });
+      const { term } = editing;
+      term.cwd = "tmp";
+      term.tmpFiles = { list: vi.fn(() => [...files]) };
+      runRootTerminal(term);
+
+      pressTab(term);
+      expect(term.currentLine).toBe(`${command} a`);
+      pressTab(term);
+      const listing = term.write.mock.calls[0][0];
+      expect(listing.indexOf("a.txt")).toBeLessThan(listing.indexOf("alpha.txt"));
+      expect(listing).not.toContain("z.txt");
+
+      files = ["alpha.txt", "z.txt"];
+      term.setCurrentLine(`${command} a`);
+      pressTab(term);
+      expect(term.currentLine).toBe(`${command} alpha.txt `);
+      if (command === "rm") expect(term.tmpFiles.list).toHaveBeenCalled();
+      else expect(filesHere).toHaveBeenCalled();
     }
   );
 
@@ -543,14 +616,16 @@ describe("runRootTerminal", () => {
   ])("handles %s without submitting", (_name, chord, start, line, end, result) => {
     const { runRootTerminal } = loadTerminalScript();
     let cursor = start;
-    const term = createTerm({ currentLine: line, pos: vi.fn(() => cursor) });
-    term.write = vi.fn((output) => {
-      for (const match of output.matchAll(/\x1b\[([CD])/g)) {
-        cursor += match[1] === "C" ? 1 : -1;
-      }
-      if (!output.startsWith("\x1b[")) {
-        cursor = output.replace(/\x1b\[K$/, "").length;
-      }
+    const term = createTerm({
+      currentLine: line,
+      pos: vi.fn(() => cursor),
+      renderInput: vi.fn((newLine, newCursor = newLine.length) => {
+        term.currentLine = newLine;
+        cursor = newCursor;
+      }),
+      setInputCursor: vi.fn((newCursor) => {
+        cursor = newCursor;
+      }),
     });
     const preventDefault = vi.fn();
 
@@ -649,11 +724,7 @@ describe("runRootTerminal", () => {
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(term.currentLine).toBe("keep tail");
     expect(editing.cursor()).toBe(5);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "keep tail\x1b[K",
-      "\x1b[D".repeat(4),
-    ]);
+    expect(term.renderInput).toHaveBeenCalledWith("keep tail", 5);
     expect(term.currentLine).not.toContain("∂");
     expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
     expect(term.executeCommandLine).not.toHaveBeenCalled();
@@ -857,21 +928,14 @@ describe("runRootTerminal", () => {
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "w" }));
     expect(term.currentLine).toBe("keep  tail");
     expect(editing.cursor()).toBe(5);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(11),
-      "keep  tail\x1b[K",
-      "\x1b[D".repeat(5),
-    ]);
+    expect(term.renderInput).toHaveBeenCalledWith("keep  tail", 5);
     expect(term.prompt).toHaveBeenCalledTimes(1);
 
     term.write.mockClear();
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
     expect(term.currentLine).toBe("");
     expect(editing.cursor()).toBe(0);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "\x1b[K",
-    ]);
+    expect(term.renderInput).toHaveBeenCalledWith("", 0);
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
