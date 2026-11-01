@@ -293,3 +293,122 @@ describe("deferred unknown filters", () => {
     });
   });
 });
+
+describe("sed", () => {
+  it("replaces first or all non-overlapping literal matches without state or mutation", () => {
+    const input = ["aaaa", "a.a a.a", "other", "aaaa"];
+    const original = input.slice();
+    const first = compile("cmd | sed s/aa/X/");
+    const global = compile("cmd | sed s/aa/X/g");
+    expect(pipeline.applyPipeline(input, first.filters)).toEqual({
+      lines: ["Xaa", "a.a a.a", "other", "Xaa"],
+      error: null,
+    });
+    expect(pipeline.applyPipeline(input, global.filters)).toEqual({
+      lines: ["XX", "a.a a.a", "other", "XX"],
+      error: null,
+    });
+    expect(pipeline.applyPipeline(input, global.filters)).toEqual({
+      lines: ["XX", "a.a a.a", "other", "XX"],
+      error: null,
+    });
+    expect(input).toEqual(original);
+  });
+
+  it.each([
+    ["dot OLD and dollar NEW", "cmd | sed s/./$&/", ["a.b", "axb"], ["a$&b", "axb"]],
+    ["bracket OLD and capture-like NEW", "cmd | sed s/[x]/$1/", ["[x]", "x"], ["$1", "x"]],
+    ["pipe OLD", "cmd | sed s/a|b/x/", ["a|b", "ab"], ["x", "ab"]],
+    ["backslash NEW", "cmd | sed s/a/\\\\/", ["a", "b"], ["\\", "b"]],
+  ])("treats %s literally", (_name, commandLine, input, expected) => {
+    expect(run(commandLine, input)).toEqual({ lines: expected, error: null });
+  });
+
+  it("supports case-insensitive matching and both combined flag orders", () => {
+    const input = ["aA aa", "Aa", "unchanged"];
+    expect(run("cmd | sed s/aa/nEw/i", input).lines).toEqual(["nEw aa", "nEw", "unchanged"]);
+    expect(run("cmd | sed s/aa/nEw/gi", input).lines).toEqual(["nEw nEw", "nEw", "unchanged"]);
+    expect(run("cmd | sed s/aa/nEw/ig", input).lines).toEqual(["nEw nEw", "nEw", "unchanged"]);
+  });
+
+  it("preserves spaces, decodes only slash and backslash escapes, and allows deletion", () => {
+    expect(run("cmd | sed s/Root  Ventures/RV  Fund/", ["Root  Ventures"]).lines).toEqual(["RV  Fund"]);
+    expect(run("cmd | sed s/\\/home\\/guest/\\/tmp\\/root/", ["/home/guest"]).lines).toEqual(["/tmp/root"]);
+    expect(run("cmd | sed s/a\\\\b/x\\\\y/", ["a\\b"]).lines).toEqual(["x\\y"]);
+    expect(run("cmd | sed s/a\\qb/x\\qy/", ["a\\qb"]).lines).toEqual(["x\\qy"]);
+    expect(run("cmd | sed s/home//", ["/home/guest", "home"]).lines).toEqual(["//guest", ""]);
+  });
+
+  it("keeps literal pipes inside sed fields and composes with a following filter", () => {
+    expect(pipeline.parsePipeline("cmd | sed s/a|b/x|y/ | grep x")).toEqual({
+      producer: "cmd",
+      stages: [
+        { source: "sed s/a|b/x|y/", name: "sed", args: ["s/a|b/x|y/"] },
+        { source: "grep x", name: "grep", args: ["x"] },
+      ],
+    });
+    expect(run("cmd | sed s/a|b/x/ | grep x", ["a|b", "other"])).toEqual({ lines: ["x"], error: null });
+  });
+
+  it("matches visible text, preserves styled nonmatches, and emits plain text for every match", () => {
+    const nonmatch = { rendered: "\u001b[31mother\u001b[0m", text: "other" };
+    const spanning = { rendered: "\u001b[31mRo\u001b[0m\u001b[34mot\u001b[0m", text: "Root" };
+    const linked = { rendered: "\u001b]8;;https://root.vc\u0007Root\u001b]8;;\u0007", text: "Root" };
+    const input = [nonmatch, spanning, linked];
+    const originalBytes = input.map((line) => line.rendered);
+    const options = { getText: (line) => line.text };
+    expect(run("cmd | sed s/Root/RV/", input, options).lines).toEqual([nonmatch, "RV", "RV"]);
+    expect(run("cmd | sed s/Root/Root/", [linked], options).lines).toEqual(["Root"]);
+    expect(run("cmd | sed s/Root//", [spanning], options).lines).toEqual([""]);
+    expect(input.map((line) => line.rendered)).toEqual(originalBytes);
+  });
+
+  it.each([
+    ["no expression", "cmd | sed", "sed: expression required"],
+    ["wrong expression", "cmd | sed x/a/b/", "sed: an expression s/OLD/NEW/[gi] is required"],
+    ["missing OLD terminator", "cmd | sed s/a", "sed: expression is missing a closing /"],
+    ["missing NEW terminator", "cmd | sed s/a/b", "sed: expression is missing a closing /"],
+    ["empty OLD", "cmd | sed s//b/", "sed: OLD cannot be empty"],
+    ["unsupported flag", "cmd | sed s/a/b/x", "sed: flags may contain only g and i"],
+    ["duplicate g", "cmd | sed s/a/b/gg", "sed: flag g may not be repeated"],
+    ["duplicate i", "cmd | sed s/a/b/ii", "sed: flag i may not be repeated"],
+    ["escaped missing terminator", "cmd | sed s/a/b\\/", "sed: expression is missing a closing /"],
+  ])("rejects %s during compilation", (_name, commandLine, message) => {
+    expect(compile(commandLine)).toEqual({
+      ok: false,
+      error: { type: "pre-dispatch", stageName: "sed", message },
+    });
+  });
+
+  it("validates malformed sed after a valid filter", () => {
+    expect(compile("cmd | grep value | sed s/a/b/gg")).toEqual({
+      ok: false,
+      error: {
+        type: "pre-dispatch",
+        stageName: "sed",
+        message: "sed: flag g may not be repeated",
+      },
+    });
+  });
+
+  it("composes with grep, head, tail, wc, sort, uniq, and another sed", () => {
+    const input = ["\u001b[31mb2\u001b[0m", "a1", "a1", "drop"];
+    const options = { getText: (line) => String(line).replace(/\u001b\[[0-9;]*m/g, "") };
+    expect(run("cmd | sed s/a/A/g | grep A", input, options)).toEqual({ lines: ["A1", "A1"], error: null });
+    expect(run("cmd | grep a | sed s/a/A/g", input, options)).toEqual({ lines: ["A1", "A1"], error: null });
+    expect(run("cmd | head 3 | sed s/a/A/", input, options)).toEqual({
+      lines: [input[0], "A1", "A1"], error: null,
+    });
+    expect(run("cmd | sed s/a/A/ | tail 2", input, options)).toEqual({ lines: ["A1", "drop"], error: null });
+    expect(run("cmd | sed s/drop// | wc -l", input, options)).toEqual({ lines: ["4"], error: null });
+    expect(run("cmd | sed s/a/A/ | sort", input, options)).toEqual({
+      lines: ["A1", "A1", input[0], "drop"], error: null,
+    });
+    expect(run("cmd | sed s/a/A/ | uniq", input, options)).toEqual({
+      lines: [input[0], "A1", "drop"], error: null,
+    });
+    expect(run("cmd | sed s/a/A/ | sed s/A/Z/", input, options)).toEqual({
+      lines: [input[0], "Z1", "Z1", "drop"], error: null,
+    });
+  });
+});

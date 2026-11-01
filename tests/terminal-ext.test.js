@@ -94,6 +94,41 @@ function loadAliasTerminal() {
   return { commands, extend, term };
 }
 
+function loadProductionTerminal() {
+  const term = createTerm({ cols: 100, cwd: "~", user: "guest" });
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      shortcuts: {},
+      term,
+    },
+  });
+  env.loadScripts([
+    "config/firm.js",
+    "config/team.js",
+    "config/portfolio.js",
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
+  const { commands, extend } = env.exportValues(["commands", "extend"]);
+  extend(term);
+  return { commands, term };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   if (env) {
@@ -970,6 +1005,169 @@ describe("terminal-ext", () => {
     ]);
     expect(clearCurrentLine).toHaveBeenCalledOnce();
     expect(term.busy).toBe(false);
+  });
+
+  it("rejects every malformed sed stage before real pwd preload or dispatch and remains usable", async () => {
+    const { term } = loadAliasTerminal();
+    const preload = vi.spyOn(term, "preloadCommandAssets");
+    const command = vi.spyOn(term, "command");
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+    const malformed = [
+      ["pwd|sed", "sed: expression required"],
+      ["pwd|sed x/a/b/", "sed: an expression s/OLD/NEW/[gi] is required"],
+      ["pwd|sed s/a", "sed: expression is missing a closing /"],
+      ["pwd|sed s/a/b", "sed: expression is missing a closing /"],
+      ["pwd|sed s//b/", "sed: OLD cannot be empty"],
+      ["pwd|sed s/a/b/x", "sed: flags may contain only g and i"],
+      ["pwd|sed s/a/b/gg", "sed: flag g may not be repeated"],
+      ["pwd|sed s/a/b/ii", "sed: flag i may not be repeated"],
+      ["pwd|head 1|sed s/a/b/x", "sed: flags may contain only g and i"],
+    ];
+
+    for (const [line, message] of malformed) {
+      preload.mockClear();
+      command.mockClear();
+      dispatch.mockClear();
+      term.writeln.mockClear();
+
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+
+      expect(preload).not.toHaveBeenCalled();
+      expect(command).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([message]);
+      expect(term.busy).toBe(false);
+    }
+
+    preload.mockClear();
+    command.mockClear();
+    dispatch.mockClear();
+    term.writeln.mockClear();
+    await term.executeCommandLine("pwd|sed s/e/E/", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(preload).toHaveBeenCalledWith("pwd");
+    expect(command).toHaveBeenCalledWith("pwd");
+    expect(dispatch).toHaveBeenCalledWith(
+      "pwd",
+      [],
+      expect.objectContaining({ cmd: "pwd", line: "pwd" })
+    );
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+      "/homE/guest",
+    ]);
+    expect(term.busy).toBe(false);
+  });
+
+  it("composes sed with real pwd filters in both directions and leaves standalone sed unchanged", async () => {
+    const { commands, term } = loadAliasTerminal();
+    const execute = async (line) => {
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+      return term.writeln.mock.calls.map(([output]) => output);
+    };
+
+    expect(await execute("pwd|sed s/e/E/g|grep E|head 1|tail 1")).toEqual([
+      "/homE/guEst",
+    ]);
+    expect(await execute("pwd|grep -i HOME|sed s/H/X/i|sort|uniq")).toEqual([
+      "/Xome/guest",
+    ]);
+    expect(await execute("pwd|sed s/home//|wc -l")).toEqual(["1"]);
+
+    const notFound = "Command not found: sed. Try 'help' to get started.";
+    expect(await execute("sed")).toEqual([notFound]);
+    expect(await execute("sed s/a/b/")).toEqual([notFound]);
+    expect(await execute("pwd|sed s/e/E/")).toEqual(["/homE/guest"]);
+    expect(await execute("sed")).toEqual([notFound]);
+    expect(commands.sed).toBeUndefined();
+  });
+
+  it("runs sed before and after filters through real whois and tldr producers", async () => {
+    const { term } = loadProductionTerminal();
+    const command = vi.spyOn(term, "command");
+    const execute = async (line) => {
+      command.mockClear();
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, {
+        addToHistory: false,
+        promptAfter: false,
+        showLeadingNewline: false,
+        trackAnalytics: false,
+      });
+      return term.writeln.mock.calls.map(([output]) => output);
+    };
+
+    const whois = await execute("whois|sed s/a/A/g|grep A");
+    expect(command).toHaveBeenCalledOnce();
+    expect(command).toHaveBeenCalledWith("whois");
+    expect(whois).toEqual([
+      "whois: LeArn About the firm, or A pArtner - usAge:",
+      "whois AvidAn",
+      "whois kAne",
+      "whois lAelAh",
+    ]);
+
+    const tldr = await execute("tldr|grep -i ai|sed s/ai/AI/gi");
+    expect(command).toHaveBeenCalledOnce();
+    expect(command).toHaveBeenCalledWith("tldr");
+    expect(tldr).toEqual([
+      "tldr adept\t\thttps://adept.AI",
+      "tldr dAIly\t\thttps://dAIly.co",
+      "tldr deepweave\t\thttps://deepweave.AI/",
+      "tldr fudge\t\thttps://fudge.AI",
+      "tldr hash\t\thttps://hash.AI",
+      "tldr kodra\t\thttps://kodra.AI",
+      "tldr nullify\t\thttps://nullify.AI",
+      "tldr quilter\t\thttps://quilter.AI",
+      "tldr superconductive\thttps://superconductive.AI",
+      "tldr trieve\t\thttps://trieve.AI",
+      "tldr versatile\t\thttps://versatile.AI",
+    ]);
+  });
+
+  it("keeps exact submitted pipeline history and one analytics event across success and rejection", async () => {
+    const { term } = loadAliasTerminal();
+    const submissions = [
+      "  pwd|sed s/e/E/  ",
+      " pwd|sed ",
+      "pwd  |  sed s/e/E/   ",
+    ];
+
+    for (const line of submissions) {
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+    }
+
+    expect(term.history).toEqual(submissions);
+    expect(env.window.dataLayer).toEqual([
+      { args: "s/e/E/", command: "pwd|sed", event: "commandSent" },
+      { args: "", command: "pwd|sed", event: "commandSent" },
+      { args: "| sed s/e/E/", command: "pwd", event: "commandSent" },
+    ]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("history", {
+      addToHistory: false,
+      promptAfter: false,
+      showLeadingNewline: false,
+      trackAnalytics: false,
+    });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+      `1000  ${submissions[0]}`,
+      `1001  ${submissions[1]}`,
+      `1002  ${submissions[2]}`,
+    ]);
   });
 
   it("runs the producer once before reporting and discarding an unknown filter", async () => {

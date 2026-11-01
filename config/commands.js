@@ -1256,12 +1256,14 @@ const _pipelineManuals = {
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
+    "Filters: grep, head, tail, wc, sort, uniq, sed.",
     "Example: %whois% | %grep% -i root | %head% 3",
   ],
   piping: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
+    "Filters: grep, head, tail, wc, sort, uniq, sed.",
     "Example: %whois% | %grep% -i root | %head% 3",
   ],
   grep: [
@@ -1282,6 +1284,16 @@ const _pipelineManuals = {
   wc: [
     "%WC(1)% — count output lines",
     "Usage: COMMAND | %wc% -l",
+  ],
+  sed: [
+    "%SED(1)% — substitute literal text in pipeline output",
+    "Usage: COMMAND | %sed% s/OLD/NEW/[gi]",
+    "OLD and NEW are literal strings. The first occurrence in each line's visible text is replaced by default; g replaces every non-overlapping occurrence from left to right.",
+    "The i flag matches OLD case-insensitively. NEW is inserted exactly as written. Flags may be combined as gi or ig.",
+    "Inside OLD and NEW, \\/ means a literal / and \\\\ means a literal backslash; every other backslash is kept as written.",
+    "NEW may be empty to delete a match. The closing / after NEW is always required.",
+    "Lines with no match retain their original styling. A line with a replacement is printed as plain replaced visible text without styling.",
+    "Errors beginning with sed: reject the whole pipeline before its command runs. Errors identify a missing expression, a form not starting with s/, a missing closing /, an empty OLD, an unsupported flag, or a repeated g or i flag.",
   ],
 };
 

@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserEnv } from "./helpers/browser-env";
+import { inlineScript } from "./helpers/browser-env";
 
 const baseGlobals = {
   _DIRS: { "~": [] },
@@ -10,6 +12,7 @@ const baseGlobals = {
 };
 
 let env;
+let wrappedTerm;
 
 function loadTerminalScript(globals = {}) {
   env = createBrowserEnv({
@@ -119,7 +122,84 @@ function pressTab(term, chord = {}) {
   expect(preventDefault).toHaveBeenCalledTimes(1);
 }
 
+function writeTerminal(term, data) {
+  return new Promise((resolve) => term.write(data, resolve));
+}
+
+async function drainTerminal(term) {
+  await writeTerminal(term, "");
+}
+
+function createWrappedTerminal({ cols = 32, commands = {} } = {}) {
+  env = createBrowserEnv({
+    globals: {
+      ...baseGlobals,
+      LOGO_TYPE: "ROOT",
+      colorText: (text) => text,
+      commands,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      jobs: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+    },
+  });
+  env.window.HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+    measureText: () => ({ width: 0 }),
+  }));
+  const xtermSource = fs.readFileSync(
+    new URL("../js/xterm.js", import.meta.url),
+    "utf8"
+  );
+  env.loadScripts([
+    inlineScript(xtermSource, "xterm.js"),
+    "js/pipeline.js",
+    "js/terminal-ext.js",
+    "js/terminal.js",
+  ]);
+  const term = new env.window.Terminal({
+    cols,
+    rows: 12,
+    allowProposedApi: true,
+  });
+  term.VERSION = 4;
+  term.focus = vi.fn();
+  term.loadAddon = vi.fn();
+  term.open = vi.fn();
+  term.reset = vi.fn();
+  term.resizeListener = vi.fn();
+  term.runDeepLink = vi.fn(() => Promise.resolve());
+  term.scrollToBottom = vi.fn();
+  const { extend, runRootTerminal } = env.exportValues([
+    "extend",
+    "runRootTerminal",
+  ]);
+  extend(term);
+  if (!commands.pwd) {
+    commands.pwd = () => term.writeln("/home/guest");
+  }
+  vi.spyOn(term, "executeCommandLine");
+  vi.spyOn(term, "writeln");
+  term.init = vi.fn();
+  term.prompt = vi.fn(() => term.write(`${term._promptRawText()} `));
+  term.runDeepLink = vi.fn(() => Promise.resolve());
+  term.attachCustomKeyEventHandler = vi.fn((handler) => {
+    term._customKeyHandler = handler;
+  });
+  runRootTerminal(term);
+  wrappedTerm = term;
+  return term;
+}
+
 afterEach(() => {
+  if (wrappedTerm) {
+    wrappedTerm.dispose();
+    wrappedTerm = null;
+  }
   if (env) {
     env.cleanup();
     env = null;
@@ -875,6 +955,86 @@ describe("runRootTerminal", () => {
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("preserves sequential production input across exact and multirow wrap boundaries", async () => {
+    const term = createWrappedTerminal();
+    await drainTerminal(term);
+
+    const cases = [
+      ["pwd|grep guest|head 1", "/home/guest"],
+      ["pwd|sed s/e/E/g|grep E|head 1|tail 1", "/homE/guEst"],
+    ];
+    for (const [line, expectedOutput] of cases) {
+      term.executeCommandLine.mockClear();
+      term.writeln.mockClear();
+
+      for (const [index, character] of [...line].entries()) {
+        term.input(character, true);
+        await drainTerminal(term);
+        expect(term.currentLine).toBe(line.slice(0, index + 1));
+        expect(term.pos()).toBe(index + 1);
+      }
+
+      term.input("\r", true);
+      await vi.waitFor(() => expect(term.busy).toBe(false));
+      await drainTerminal(term);
+      expect(term.executeCommandLine).toHaveBeenCalledWith(line);
+      expect(term.history.at(-1)).toBe(line);
+      expect(term.writeln).toHaveBeenCalledWith(expectedOutput);
+      expect(term.currentLine).toBe("");
+    }
+  });
+
+  it("keeps wrapped backward insertion and ordinary editor consumers compatible", async () => {
+    const term = createWrappedTerminal();
+    await drainTerminal(term);
+
+    const wrapped = "pwd|sed s/e/E/g|grep E";
+    for (const character of wrapped) {
+      term.input(character, true);
+      await drainTerminal(term);
+    }
+    for (let index = 0; index < 8; index += 1) {
+      term.input("\x1b[D", true);
+      await drainTerminal(term);
+    }
+    const insertionOffset = wrapped.length - 8;
+    expect(term.pos()).toBe(insertionOffset);
+    term.input("X", true);
+    await drainTerminal(term);
+    expect(term.currentLine).toBe(
+      wrapped.slice(0, insertionOffset) + "X" + wrapped.slice(insertionOffset)
+    );
+    expect(term.pos()).toBe(insertionOffset + 1);
+
+    term.setCurrentLine("pwz");
+    await drainTerminal(term);
+    term.input("\x7f", true);
+    await drainTerminal(term);
+    term.input("d", true);
+    await drainTerminal(term);
+    expect(term.currentLine).toBe("pwd");
+
+    term.setCurrentLine("pw");
+    await drainTerminal(term);
+    pressTab(term);
+    await drainTerminal(term);
+    expect(term.currentLine).toBe("pwd ");
+    expect(term.pos()).toBe(4);
+
+    term.history = ["pwd|sed s/e/E/g|grep E"];
+    term.clearCurrentLine(true);
+    await drainTerminal(term);
+    term.input("\x1b[A", true);
+    await drainTerminal(term);
+    expect(term.currentLine).toBe("pwd|sed s/e/E/g|grep E");
+    expect(term.pos()).toBe(term.currentLine.length);
+    term.input("\r", true);
+    await drainTerminal(term);
+    expect(term.executeCommandLine).toHaveBeenLastCalledWith(
+      "pwd|sed s/e/E/g|grep E"
+    );
   });
 
   it("debounces resize handling with requestAnimationFrame", () => {

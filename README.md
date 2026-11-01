@@ -51,14 +51,20 @@ replace the existing standalone commands with the same names.
 - `COMMAND | uniq [-cd]` collapses adjacent lines with identical visible text.
   Add `-c` to prefix each surviving line with its run count and one space, or
   `-d` to keep only repeated runs. Flags may be combined, as in `uniq -cd`.
+- `COMMAND | sed s/OLD/NEW/[gi]` replaces literal text in each line. By default
+  it replaces the first occurrence; add `g` for every non-overlapping match or
+  `i` for case-insensitive matching, in either `gi` or `ig` order. Escape a
+  literal slash as `\/` and a literal backslash as `\\`; an empty NEW deletes
+  the match. For example, `whois | sed s/Root Ventures/RV/` replaces the first
+  matching name while preserving spaces in OLD.
 
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+`man grep`, `man head`, `man tail`, `man wc`, `man sort`, `man uniq`, or
+`man sed` in the terminal for the corresponding manual page.
 
 ## Terminal editing shortcuts
 
