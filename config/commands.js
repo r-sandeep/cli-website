@@ -550,6 +550,15 @@ const commands = {
     }
   },
 
+  // Page a current-directory file, retaining cat's exact fitted write path.
+  less: function (args) {
+    return _pageFile("less", args);
+  },
+
+  more: function (args) {
+    return _pageFile("more", args);
+  },
+
   // Grepping id_rsa gets you an appropriate reaction instead.
   grep: function (args) {
     const q = args[0];
@@ -1203,12 +1212,29 @@ function _filesHere() {
   return _DIRS[term.cwd].filter((e) => e != "README.md" || term.user == "root");
 }
 
+function _pageFile(spelling, args) {
+  if (args.length !== 1) {
+    term.stylePrint(`${spelling}: usage: ${spelling} FILE`);
+    return;
+  }
+
+  const filename = args[0];
+  if (!_filesHere().includes(filename)) {
+    term.stylePrint(`No such file: ${filename}`);
+    return;
+  }
+
+  const content = getFileContents(filename);
+  if (filename === "id_rsa") SpawnRickRollPointers();
+  return term.pageOutput([content], () => term.writeln(content));
+}
+
 // ── Aliases ───────────────────────────────────────────────────────────────────
 // Simple one-to-one redirects. Each alias forwards its args to the target
 // command. Chains are fine — ge → great_expectations → superconductive.
 const _aliases = {
   // Standard file viewing aliases
-  tail: "cat", less: "cat", head: "cat", more: "cat",
+  tail: "cat", head: "cat",
   // Network commands all hit the same CORS wall
   ftp: "curl", ssh: "curl", sftp: "curl",
   // woman retains the original portfolio-manual alias; man handles its local
@@ -1234,6 +1260,28 @@ const _aliases = {
 };
 for (const [alias, target] of Object.entries(_aliases)) {
   commands[alias] = (args) => term.dispatchCommand(target, args);
+}
+
+// Pager manuals share controls but retain the spelling the visitor asked for.
+// Keep these topics ahead of man's tldr fallback so `man less` and `man more`
+// never turn into portfolio lookups.
+function _pagerManual(topic) {
+  const heading = topic.toUpperCase();
+  return [
+    `%${heading}(1)% — view a file or final pipeline output one screen at a time`,
+    `Usage: %${topic}% FILE`,
+    `       COMMAND | %${topic}%`,
+    `FILE must be in the current directory. In a pipeline, ${topic} must be the final stage and takes no arguments; earlier filters run first.`,
+    "If all visible screen lines fit within the terminal height minus the status row, output prints normally without opening the pager. Longer output opens the full-screen pager.",
+    "Long lines wrap at the current terminal width. The last row shows lines A-B of T and adds (END) on the final screen.",
+    "Space, f, or PageDown: forward one screen. b or PageUp: back one screen.",
+    "ArrowDown, j, or Enter: down one line. ArrowUp or k: up one line.",
+    "g or Home: first screen. G or End: last screen.",
+    "q, Q, or Ctrl+C: close the pager. At a movement limit the screen does not change, and every other key is inert.",
+    "/ starts a search. Printable keys append text and Backspace deletes the last character.",
+    "Enter searches later content lines literally and case-insensitively. n repeats the last search; Enter on an empty search also repeats it.",
+    "Escape or Ctrl+C cancels search editing without moving. A miss keeps the position and shows Pattern not found: TEXT until the next key.",
+  ];
 }
 
 // Pipeline filters are stages rather than replacements for the similarly named
@@ -1337,7 +1385,9 @@ commands.man = function (args) {
   }
   const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
     ? _environmentManuals[topic]
-    : _pipelineManuals[topic];
+    : (topic === "less" || topic === "more")
+      ? _pagerManual(topic)
+      : _pipelineManuals[topic];
   if (!manual) {
     return term.command(["tldr", ...args].join(" ").trim());
   }

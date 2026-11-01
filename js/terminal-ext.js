@@ -43,12 +43,18 @@ const extend = (term) => {
 
   term.VERSION = term.VERSION || 3;  // bumped to 4 by `upgrade`
   term.currentLine = "";             // text the user has typed so far
+  term._inputCursor = 0;             // logical cursor within currentLine
+  term._inputCursorLine = "";         // line for which the cursor is authoritative
   term.user = "guest";
   term.host = "rootpc";
   term.cwd = "~";
   term.sep = ":";
   term._promptChar = "$";
   term.history = [];
+  // Kept separate from the public string history. Each slot records how that
+  // particular submission finished so duplicate pager commands can replay
+  // without rerunning their producer or reconsidering the fit boundary.
+  term._historyOutcomes = [];
   term.historyCursor = -1;
   term.busy = false;
 
@@ -274,9 +280,13 @@ const extend = (term) => {
   term.tabOptions = [];
   term.tabBase = "";
 
-  // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // Cursor position relative to the start of the user's input (after the
+  // prompt). Keep this independently of xterm's physical buffer column: once
+  // input wraps, buffer.x is only the column on the final physical row.
+  term.pos = () =>
+    term._inputCursorLine === term.currentLine
+      ? term._inputCursor
+      : term._core.buffer.x - term._promptRawText().length - 1;
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -319,9 +329,23 @@ const extend = (term) => {
   // Erases the current input line and redraws the prompt, optionally resetting
   // the history cursor so the next Up arrow starts from the most recent entry.
   term.clearCurrentLine = (goToEndofHistory = false) => {
-    term.write("\x1b[2K\r");
+    // A recalled or completed command can wrap on narrow terminals. CSI 2K
+    // clears only the physical row containing the cursor, leaving the earlier
+    // wrapped rows behind to corrupt the next submitted line. Return to the
+    // first physical prompt row and erase through the end of the input area.
+    const columns = Math.max(1, Number.isFinite(term.cols) ? term.cols : 80);
+    let logicalCursor = term.pos();
+    if (!Number.isFinite(logicalCursor) || logicalCursor < 0) {
+      logicalCursor = term.currentLine.length;
+    }
+    logicalCursor = Math.min(logicalCursor, term.currentLine.length);
+    const occupiedColumns = term._promptRawText().length + 1 + logicalCursor;
+    const cursorRow = Math.floor(Math.max(0, occupiedColumns - 1) / columns);
+    term.write(`\r${"\x1b[A".repeat(cursorRow)}\x1b[J`);
     term.prompt("", " ");
     term.currentLine = "";
+    term._inputCursor = 0;
+    term._inputCursorLine = "";
     if (goToEndofHistory) {
       term.historyCursor = -1;
       term.scrollToBottom();
@@ -339,7 +363,11 @@ const extend = (term) => {
     term.write(newLine);
     if (preserveCursor) {
       term.write("\x1b[D".repeat(length - oldPos));
+      term._inputCursor = Math.max(0, newLine.length - (length - oldPos));
+    } else {
+      term._inputCursor = newLine.length;
     }
+    term._inputCursorLine = newLine;
   };
 
   // ── Output ─────────────────────────────────────────────────────────────────
@@ -634,7 +662,100 @@ const extend = (term) => {
     }
   };
 
+  // Render fitted output through its original writer, or own xterm's alternate
+  // screen until the pager closes. The normal buffer is never rewritten.
+  term.pageOutput = async (renderedRecords, fittedWriter) => {
+    const records = Array.from(renderedRecords || [], (record) =>
+      record == null ? "" : String(record)
+    );
+    const pager = await Pager.create(records, {
+      cols: term.cols,
+      rows: term.rows,
+    });
+    const execution = term._pagerExecution;
+    const saveOutcome = (outcome) => {
+      if (!execution) return;
+      execution.pagerOutcome = outcome;
+      if (execution.historyIndex >= 0) {
+        term._historyOutcomes[execution.historyIndex] = outcome;
+      }
+    };
+
+    // Deep links are intentionally noninteractive. They use the same original
+    // writer as a fitted command even when their output would fill the screen.
+    if (!pager.shouldPage || execution?.pagerMode === "noninteractive") {
+      const outcome = { paged: false, records };
+      saveOutcome(outcome);
+      if (typeof fittedWriter === "function") await fittedWriter();
+      return outcome;
+    }
+
+    const pagedOutcome = { paged: true, records: [] };
+    saveOutcome(pagedOutcome);
+    return new Promise((resolve, reject) => {
+      const session = {
+        pager,
+        closing: false,
+        resized: false,
+        renderQueue: Promise.resolve(),
+      };
+      term._pagerSession = session;
+
+      const finish = () => {
+        if (term._pagerSession === session) term._pagerSession = null;
+        resolve(pagedOutcome);
+      };
+      const fail = (error) => {
+        if (term._pagerSession === session) term._pagerSession = null;
+        reject(error);
+      };
+
+      session.renderQueue = _writeTerminal(term, "\x1b[?1049h")
+        .then(() => pager.render(term))
+        .catch(fail);
+      session.resize = () => {
+        if (session.closing) return session.renderQueue;
+        const anchorSourceLine = pager.topSourceLine;
+        session.resized = true;
+        session.renderQueue = session.renderQueue
+          .then(() => pager.relayout(
+            { cols: term.cols, rows: term.rows },
+            anchorSourceLine
+          ))
+          .then(() => pager.render(term));
+        return session.renderQueue;
+      };
+      session.handleKey = (key) => {
+        if (session.closing) return true;
+        const result = pager.handleKey(key);
+        if (result.action === "close") {
+          session.closing = true;
+          session.renderQueue = session.renderQueue
+            .then(() => _writeTerminal(term, "\x1b[?1049l"))
+            // Resizing xterm also resizes its hidden normal buffer. Rebuild that
+            // buffer through the ordinary replay path, but let this still-open
+            // command emit the one completion prompt after the pager resolves.
+            .then(() => session.resized
+              ? term._redrawNormalBuffer({ promptAfter: false })
+              : undefined)
+            .then(finish, fail);
+        } else {
+          session.renderQueue = session.renderQueue.then(() => pager.render(term), fail);
+        }
+        return true;
+      };
+    });
+  };
+
+  term.handlePagerKey = (key) => {
+    const session = term._pagerSession;
+    if (!session || typeof session.handleKey !== "function") return false;
+    session.handleKey(key);
+    return true;
+  };
+
   term.executeCommandLine = async (line, options = {}) => {
+    const submittedLine = String(line);
     const settings = {
       addToHistory: true,
       manageBusy: true,
@@ -642,9 +763,22 @@ const extend = (term) => {
       showLeadingNewline: true,
       trackAnalytics: true,
       scrollAfter: true,
+      pagerMode: "interactive",
+      replayOutcome: undefined,
       ...options,
     };
-    const parsed = parseCommandLine(line);
+    const pagerExecution = {
+      historyIndex: -1,
+      pagerMode: settings.pagerMode,
+      pagerOutcome: null,
+    };
+    term._pagerExecution = pagerExecution;
+    const addHistory = (historyLine) => {
+      term.history.push(historyLine);
+      term._historyOutcomes.push(null);
+      pagerExecution.historyIndex = term.history.length - 1;
+    };
+    const parsed = parseCommandLine(submittedLine);
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
@@ -652,6 +786,17 @@ const extend = (term) => {
     let exitStatus;
 
     try {
+      // A pager submission has an occurrence-specific completed result. During
+      // resize replay, reproduce that result directly rather than rerunning its
+      // producer or asking whether it fits at the new dimensions.
+      if (settings.replayOutcome) {
+        if (!settings.replayOutcome.paged) {
+          for (const record of settings.replayOutcome.records || []) {
+            term.writeln(record);
+          }
+        }
+        return exitStatus;
+      }
       if (settings.manageBusy) {
         term.busy = true;
       }
@@ -665,7 +810,7 @@ const extend = (term) => {
           }
 
           if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
+            addHistory(submittedLine);
           }
 
           term.stylePrint(validation.error.message);
@@ -686,7 +831,7 @@ const extend = (term) => {
           }
 
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            addHistory(submittedLine);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -704,6 +849,10 @@ const extend = (term) => {
 
           if (result.error) {
             term.stylePrint(result.error.message);
+          } else if (validation.pager) {
+            await term.pageOutput(result.lines, () => {
+              for (const outputLine of result.lines) term.writeln(outputLine);
+            });
           } else {
             for (const outputLine of result.lines) {
               term.writeln(outputLine);
@@ -737,7 +886,7 @@ const extend = (term) => {
 
         if (parsed.line.length > 0) {
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            addHistory(submittedLine);
           }
 
           // Commands may own an interactive continuation. Await its final
@@ -768,6 +917,10 @@ const extend = (term) => {
         term.busy = false;
       }
 
+      if (term._pagerExecution === pagerExecution) {
+        term._pagerExecution = null;
+      }
+
       if (settings.scrollAfter) {
         term.scrollToBottom();
       }
@@ -778,39 +931,52 @@ const extend = (term) => {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  // Called on window resize. xterm clears its buffer on resize, so we
-  // reinitialize the terminal and replay the entire command history to restore
-  // the visible output, then re-render the prompt at the bottom.
-  term.resizeListener = async () => {
-    if (window.rootTui?.active) {
-      window.fitAddon.fit();
-      return;
-    }
+  term._redrawNormalBuffer = async ({ promptAfter = true } = {}) => {
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
       window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
     }
     await term.runDeepLink({ replay: true });
-    // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
+    // Replay serially through the full execution boundary. Pager submissions
+    // consume their aligned completed outcome; ordinary history retains the
+    // existing environment-side-effect sandbox.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+      for (let index = 0; index < term.history.length; index++) {
+        const c = term.history[index];
         term.prompt("\r\n", ` ${c}\r\n`);
-        if (expandUserAlias(parseCommandLine(c)).cmd !== "tui") await term.executeCommandLine(c, {
-          addToHistory: false,
-          manageBusy: false,
-          promptAfter: false,
-          showLeadingNewline: false,
-          trackAnalytics: false,
-          scrollAfter: false,
-        });
+        if (expandUserAlias(parseCommandLine(c)).cmd !== "tui") {
+          await term.executeCommandLine(c, {
+            addToHistory: false,
+            manageBusy: false,
+            promptAfter: false,
+            showLeadingNewline: false,
+            trackAnalytics: false,
+            scrollAfter: false,
+            pagerMode: "noninteractive",
+            replayOutcome: term._historyOutcomes[index] || undefined,
+          });
+        }
       }
     });
-    term.prompt();
+    if (promptAfter) term.prompt();
     term.scrollToBottom();
     term._initialized = true;
+  };
+
+  // Called on window resize. A modal owns the alternate screen, so reflow it
+  // in place. Otherwise rebuild xterm's normal buffer through the established
+  // init/deep-link/history redraw path.
+  term.resizeListener = async () => {
+    if (window.rootTui?.active) {
+      window.fitAddon.fit();
+      return;
+    }
+    if (term._pagerSession) {
+      window.fitAddon.fit();
+      return term._pagerSession.resize();
+    }
+    return term._redrawNormalBuffer();
   };
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
@@ -854,6 +1020,11 @@ const extend = (term) => {
     term.user = user;
     if (!preserveHistory) {
       term.history = [];
+      term._historyOutcomes = [];
+    } else {
+      // Older callers may replace history directly. Preserve occurrence order
+      // while ensuring every string has an aligned outcome slot.
+      term._historyOutcomes.length = term.history.length;
     }
     term.focus();
   };
@@ -875,6 +1046,7 @@ const extend = (term) => {
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.
         trackAnalytics: !replay,
+        pagerMode: "noninteractive",
       }).catch((error) => {
         console.error("Deep link failed", error);
       });
@@ -942,6 +1114,10 @@ const extend = (term) => {
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function _writeTerminal(term, text) {
+  return new Promise((resolve) => term.write(text, resolve));
+}
 
 // Captures the rendered stream emitted by one producer command. Writers are
 // restored by the caller in a finally block before filtering or prompting.

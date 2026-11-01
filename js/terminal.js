@@ -142,6 +142,8 @@ function runRootTerminal(term) {
     if (cursor < line.length) {
       term.write("\x1b[D".repeat(line.length - cursor));
     }
+    term._inputCursor = cursor;
+    term._inputCursorLine = line;
   };
 
   const editInput = (action) => {
@@ -172,7 +174,7 @@ function runRootTerminal(term) {
         updateInput(line, line.length);
         break;
       case "clearLine":
-        updateInput("", 0);
+        if (line.length > 0) term.clearCurrentLine();
         break;
     }
   };
@@ -279,6 +281,13 @@ function runRootTerminal(term) {
   };
 
   term.attachCustomKeyEventHandler((event) => {
+    if (term._pagerSession) {
+      event.preventDefault();
+      // Consume both browser phases, but route exactly one key transition.
+      if (event.type === "keydown") term.handlePagerKey(_pagerEventKey(event));
+      return false;
+    }
+
     if (event.key === "Tab") {
       event.preventDefault();
       // xterm asks about both phases in some browsers. Complete exactly once,
@@ -303,6 +312,11 @@ function runRootTerminal(term) {
   });
 
   term.onData((e) => {
+    if (term._pagerSession) {
+      term.handlePagerKey(_pagerDataKey(e));
+      return;
+    }
+
     if (term._initialized && !term.locked && !term.busy) {
       if (e !== "\t") resetCompletion();
       switch (e) {
@@ -315,11 +329,15 @@ function runRootTerminal(term) {
           break;
         case "\u0001": // Ctrl+A
           term.write("\x1b[D".repeat(term.pos()));
+          term._inputCursor = 0;
+          term._inputCursorLine = term.currentLine;
           break;
         case "\u0005": // Ctrl+E
           if (term.pos() < term.currentLine.length) {
             term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
           }
+          term._inputCursor = term.currentLine.length;
+          term._inputCursorLine = term.currentLine;
           break;
         case "\u0003": // Ctrl+C
           // Reset tab state
@@ -374,11 +392,15 @@ function runRootTerminal(term) {
         case "\033[C": // right
           if (term.pos() < term.currentLine.length) {
             term.write("\x1b[C");
+            term._inputCursor = term.pos() + 1;
+            term._inputCursorLine = term.currentLine;
           }
           break;
         case "\033[D": // left
           if (term.pos() > 0) {
             term.write("\x1b[D");
+            term._inputCursor = term.pos() - 1;
+            term._inputCursorLine = term.currentLine;
           }
           break;
         case "\t": // tab
@@ -396,6 +418,8 @@ function runRootTerminal(term) {
             const pos = term.pos();
             const restOfLine = term.currentLine.slice(pos);
             term.currentLine = term.currentLine.slice(0, pos) + e + restOfLine;
+            term._inputCursor = pos + 1;
+            term._inputCursorLine = term.currentLine;
             term.write(e);
             if (restOfLine.length > 0) {
               term.write(restOfLine);
@@ -407,6 +431,31 @@ function runRootTerminal(term) {
       term.scrollToBottom();
     }
   });
+}
+
+function _pagerEventKey(event) {
+  if (event.ctrlKey && event.key.toLowerCase() === "c") return "Ctrl+C";
+  if (event.key === " ") return "Space";
+  return event.key;
+}
+
+function _pagerDataKey(data) {
+  const keys = {
+    "\r": "Enter",
+    "\x1b[A": "ArrowUp",
+    "\x1b[B": "ArrowDown",
+    "\x1b[5~": "PageUp",
+    "\x1b[6~": "PageDown",
+    "\x1b[H": "Home",
+    "\x1b[F": "End",
+    "\x1bOH": "Home",
+    "\x1bOF": "End",
+    "\x1b": "Escape",
+    "\x7f": "Backspace",
+    "\x08": "Backspace",
+    "\x03": "Ctrl+C",
+  };
+  return keys[data] || data;
 }
 
 function colorText(text, color) {

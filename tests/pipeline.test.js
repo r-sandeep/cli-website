@@ -47,6 +47,49 @@ describe("pipeline grammar", () => {
   });
 });
 
+describe("pager sink", () => {
+  it.each(["less", "more"])("accepts %s only as an argument-free final sink", (spelling) => {
+    const result = compile(`cmd | grep keep | ${spelling}`);
+
+    expect(result).toEqual({
+      ok: true,
+      producer: "cmd",
+      filters: [expect.objectContaining({ type: "grep", pattern: "keep" })],
+      pager: { name: spelling },
+    });
+  });
+
+  it.each(["less", "more"])("rejects argument-bearing %s before dispatch", (spelling) => {
+    const result = compile(`cmd | ${spelling} extra`);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toEqual({
+      type: "pre-dispatch",
+      stageName: spelling,
+      message: `${spelling}: pipeline pager takes no arguments`,
+    });
+  });
+
+  it.each(["less", "more"])("rejects nonfinal %s before dispatch", (spelling) => {
+    const result = compile(`cmd | ${spelling} | wc -l`);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toEqual({
+      type: "pre-dispatch",
+      stageName: spelling,
+      message: `${spelling}: pipeline pager must be the final stage`,
+    });
+  });
+
+  it.each(["less", "more"])("rejects standalone-file %s as a pipeline producer", (spelling) => {
+    const result = compile(`${spelling} welcome.htm | grep Root`);
+
+    expect(result.ok).toBe(false);
+    expect(result.error.stageName).toBe(spelling);
+    expect(result.error.message).toBe(`${spelling}: pipeline pager must be the final stage`);
+  });
+});
+
 describe("grep", () => {
   it.each([
     ["literal metacharacters", "cmd | grep a.b", ["a.b", "axb"], ["a.b"]],

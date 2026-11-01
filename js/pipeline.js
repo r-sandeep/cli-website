@@ -180,16 +180,34 @@ var Pipeline = (function () {
     }
 
     var filters = [];
+    var pager = null;
     for (var index = 0; index < parsedPipeline.stages.length; index += 1) {
-      var result = compileStage(parsedPipeline.stages[index]);
+      var stage = parsedPipeline.stages[index];
+      if (stage.name === "less" || stage.name === "more") {
+        if (stage.args.length > 0) {
+          return preDispatchError(stage.name, stage.name + ": pipeline pager takes no arguments");
+        }
+        if (index !== parsedPipeline.stages.length - 1) {
+          return preDispatchError(stage.name, stage.name + ": pipeline pager must be the final stage");
+        }
+        pager = { name: stage.name };
+        continue;
+      }
+      var result = compileStage(stage);
       if (!result.ok) return result;
       filters.push(result.filter);
+    }
+
+    var producerName = parseStage(parsedPipeline.producer).name;
+    if (producerName === "less" || producerName === "more") {
+      return preDispatchError(producerName, producerName + ": pipeline pager must be the final stage");
     }
 
     return {
       ok: true,
       producer: parsedPipeline.producer,
       filters: filters,
+      pager: pager,
     };
   }
 

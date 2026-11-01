@@ -1,3 +1,4 @@
+import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserEnv } from "./helpers/browser-env";
 
@@ -16,12 +17,14 @@ function loadTerminalExt(globals = {}) {
       getArt: vi.fn(() => ""),
       getPreloadFileForCommand: vi.fn(() => null),
       jobs: {},
+
       preloadASCIIArt: vi.fn(() => Promise.resolve()),
       scheduleIdleTask: vi.fn((task) => task()),
+      Terminal,
       ...globals,
     },
   });
-  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/pipeline.js", "js/pager.js", "js/terminal-ext.js"]);
   return env.exportValues(["extend"]);
 }
 
@@ -103,6 +106,23 @@ afterEach(() => {
 });
 
 describe("terminal-ext", () => {
+  it("clears every physical row occupied by wrapped input before redrawing the prompt", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.cols = 20;
+    term.currentLine = "whois | grep -i laelah";
+    term._core.buffer.x = 5;
+    term.write.mockClear();
+    term.prompt = vi.fn();
+
+    term.clearCurrentLine();
+
+    expect(term.write).toHaveBeenCalledWith("\r\x1b[A\x1b[J");
+    expect(term.prompt).toHaveBeenCalledWith("", " ");
+    expect(term.currentLine).toBe("");
+  });
+
   const environmentStorageKey = "rootvc.cli.environment.v1";
 
   it("keeps environment state private and returns sorted defensive copies", () => {
@@ -899,6 +919,7 @@ describe("terminal-ext", () => {
     expect(term.busy).toBe(false);
   });
 
+
   it("prints no transformed records when a pipeline producer emits no output", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -1440,6 +1461,7 @@ describe("terminal-ext", () => {
       // now, and a fragment fires no pageview of its own, so these arrivals
       // would otherwise be invisible in analytics.
       trackAnalytics: true,
+      pagerMode: "noninteractive",
     });
   });
 
@@ -1460,6 +1482,259 @@ describe("terminal-ext", () => {
       "whois lee",
       expect.objectContaining({ trackAnalytics: false })
     );
+  });
+
+  it("reflows an active pager through resizeListener and redraws the normal buffer on close", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      cols: 6,
+      rows: 4,
+      write: vi.fn((text, callback) => {
+        if (typeof callback === "function") callback();
+      }),
+    });
+    extend(term);
+    term._redrawNormalBuffer = vi.fn(() => Promise.resolve());
+
+    const completion = term.pageOutput([
+      "alpha wraps here",
+      "beta stays",
+      "gamma wraps too",
+      "delta",
+      "epsilon",
+    ]);
+    await vi.waitFor(() => expect(term._pagerSession).toBeTruthy());
+    await term._pagerSession.renderQueue;
+    term.handlePagerKey("ArrowDown");
+    await term._pagerSession.renderQueue;
+    const anchoredSource = term._pagerSession.pager.topSourceLine;
+
+    term.cols = 9;
+    term.rows = 5;
+    await term.resizeListener();
+
+    expect(env.window.fitAddon.fit).toHaveBeenCalled();
+    expect(term._pagerSession.pager.topSourceLine).toBe(anchoredSource);
+    expect(term._pagerSession.pager.frame().rows).toHaveLength(4);
+    expect(term._redrawNormalBuffer).not.toHaveBeenCalled();
+
+    term.handlePagerKey("q");
+    await expect(completion).resolves.toEqual({ paged: true, records: [] });
+    expect(term._redrawNormalBuffer).toHaveBeenCalledOnce();
+    expect(term._redrawNormalBuffer).toHaveBeenCalledWith({ promptAfter: false });
+    expect(term._pagerSession).toBeNull();
+  });
+
+  it("replays occurrence-aligned fitted and paged outcomes without rerunning duplicate producers", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      cols: 40,
+      rows: 4,
+      write: vi.fn((text, callback) => {
+        if (typeof callback === "function") callback();
+      }),
+    });
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    let records = ["\x1b[35mfit one\x1b[0m", "fit two", "fit three"];
+    const producer = vi.fn(() => {
+      for (const record of records) term.writeln(record);
+      return 0;
+    });
+    term.command = producer;
+
+    await term.executeCommandLine("fake | less", { promptAfter: false });
+    records = ["page one", "page two", "page three", "page four"];
+    const pagedExecution = term.executeCommandLine("fake | less", {
+      promptAfter: false,
+    });
+    await vi.waitFor(() => expect(term._pagerSession).toBeTruthy());
+    term.handlePagerKey("q");
+    await pagedExecution;
+
+    expect(term.history).toEqual(["fake | less", "fake | less"]);
+    expect(term._historyOutcomes).toEqual([
+      {
+        paged: false,
+        records: ["\x1b[35mfit one\x1b[0m", "fit two", "fit three"],
+      },
+      { paged: true, records: [] },
+    ]);
+    const historyBefore = [...term.history];
+    const analyticsBefore = [...env.window.dataLayer];
+    producer.mockClear();
+    records = ["changed content that would now fit"];
+    term.rows = 3;
+    term.writeln.mockClear();
+
+    await term.resizeListener();
+    await term.resizeListener();
+
+    expect(producer).not.toHaveBeenCalled();
+    expect(term._pagerSession).toBeFalsy();
+    expect(term.history).toEqual(historyBefore);
+    expect(term._historyOutcomes).toHaveLength(2);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+    expect(term.writeln).toHaveBeenCalledWith("\x1b[35mfit one\x1b[0m");
+    expect(term.writeln).not.toHaveBeenCalledWith("page one");
+    expect(term.writeln).not.toHaveBeenCalledWith("changed content that would now fit");
+  });
+
+  it("does not repeat a pager producer's environment mutation during replay", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      cols: 40,
+      rows: 4,
+      write: vi.fn((text, callback) => {
+        if (typeof callback === "function") callback();
+      }),
+    });
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const pagerProducer = vi.fn(() => {
+      term.environment.set("A", "one");
+      return 0;
+    });
+    const ordinaryDispatch = vi.fn((command, args) => {
+      if (command === "export") {
+        term.environment.set("A", args[0].slice(args[0].indexOf("=") + 1));
+      } else if (command === "env") {
+        term.writeln(`A=${term.environment.get("A")}`);
+      }
+      return 0;
+    });
+    term.command = pagerProducer;
+    term.dispatchCommand = ordinaryDispatch;
+
+    await term.executeCommandLine("export A=one | less", { promptAfter: false });
+    await term.executeCommandLine("export A=later", { promptAfter: false });
+
+    expect(term.environment.entries()).toEqual([["A", "later"]]);
+    expect(term._historyOutcomes).toEqual([
+      { paged: false, records: [] },
+      null,
+    ]);
+    const historyBefore = [...term.history];
+    const analyticsBefore = [...env.window.dataLayer];
+    const environmentBefore = term.environment.entries();
+    pagerProducer.mockClear();
+    ordinaryDispatch.mockClear();
+
+    await term.resizeListener();
+    await term.resizeListener();
+
+    expect(pagerProducer).not.toHaveBeenCalled();
+    expect(ordinaryDispatch).toHaveBeenCalledTimes(2);
+    expect(ordinaryDispatch).toHaveBeenNthCalledWith(
+      1,
+      "export",
+      ["A=later"],
+      expect.objectContaining({ line: "export A=later" })
+    );
+    expect(term.environment.entries()).toEqual(environmentBefore);
+    expect(term.history).toEqual(historyBefore);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("env", { promptAfter: false });
+    expect(term.writeln).toHaveBeenCalledWith("A=later");
+    expect(term.environment.entries()).toEqual(environmentBefore);
+  });
+
+  it.each(["less", "more"])(
+    "keeps an overflowing %s deep link noninteractive, including resize replay",
+    async (spelling) => {
+      const term = createTerm({
+        cols: 20,
+        rows: 3,
+        write: vi.fn((text, callback) => {
+          if (typeof callback === "function") callback();
+        }),
+      });
+      const pageCommand = vi.fn(() =>
+        term.pageOutput(["\x1b[32mone\x1b[0m", "two", "three"], () => {
+          term.writeln("\x1b[32mone\x1b[0m");
+          term.writeln("two");
+          term.writeln("three");
+        })
+      );
+      const { extend } = loadTerminalExt({
+        commands: { [spelling]: pageCommand },
+      });
+      extend(term);
+      term.deepLink = `${spelling} welcome.htm`;
+      term.writeln.mockClear();
+
+      await term.runDeepLink();
+
+      expect(pageCommand).toHaveBeenCalledOnce();
+      expect(term._pagerSession).toBeFalsy();
+      expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+        "\x1b[32mone\x1b[0m",
+        "two",
+        "three",
+      ]);
+      expect(term.history).toEqual([]);
+      const analyticsAfterArrival = [...env.window.dataLayer];
+
+      pageCommand.mockClear();
+      term.writeln.mockClear();
+      await term.runDeepLink({ replay: true });
+
+      expect(pageCommand).toHaveBeenCalledOnce();
+      expect(term._pagerSession).toBeFalsy();
+      expect(term.writeln).toHaveBeenCalledWith("\x1b[32mone\x1b[0m");
+      expect(term.history).toEqual([]);
+      expect(env.window.dataLayer).toEqual(analyticsAfterArrival);
+    }
+  );
+
+  it("renders an overflowing pager-pipeline deep link without opening a modal", async () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      cols: 20,
+      rows: 3,
+      write: vi.fn((text, callback) => {
+        if (typeof callback === "function") callback();
+      }),
+    });
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const producer = vi.fn(() => {
+      term.writeln("\x1b[36mone\x1b[0m");
+      term.writeln("two");
+      term.writeln("three");
+      return 0;
+    });
+    term.command = producer;
+    term.deepLink = "fake | less";
+    term.writeln.mockClear();
+
+    await term.runDeepLink();
+
+    expect(producer).toHaveBeenCalledOnce();
+    expect(term._pagerSession).toBeFalsy();
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "\x1b[36mone\x1b[0m",
+      "two",
+      "three",
+    ]);
+    expect(term.history).toEqual([]);
+    const analyticsAfterArrival = [...env.window.dataLayer];
+
+    producer.mockClear();
+    term.writeln.mockClear();
+    await term.runDeepLink({ replay: true });
+
+    expect(producer).toHaveBeenCalledOnce();
+    expect(term._pagerSession).toBeFalsy();
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "\x1b[36mone\x1b[0m",
+      "two",
+      "three",
+    ]);
+    expect(term.history).toEqual([]);
+    expect(env.window.dataLayer).toEqual(analyticsAfterArrival);
   });
 
   it("replays alias-backed history through execution without submission side effects", async () => {
