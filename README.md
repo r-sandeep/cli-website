@@ -1,0 +1,74 @@
+# ASD delivery verification
+
+0 command checks and 7 application scenarios (42 assertions) passed for published revision `a16f3144f289f73c1466eeec9e602143667d581f`. 48 retained artifacts.
+
+Workflow: `workflow_run_0d88e3cc333f43dd80ac8eed9b44e82c`. Accepted content: `60d6b993844cbf37b8c5356593d7c3c6bf6b747160e45b2b78d040261b80d8fa`.
+
+## Commands
+
+
+
+## Application scenarios
+
+- `cli_website/baseline_narrow`: passed, 5 assertions.
+- `cli_website/baseline_wide`: passed, 5 assertions.
+- `cli_website/baseline_http`: passed, 4 assertions.
+- `cli_website/acceptance_narrow`: passed, 9 assertions.
+- `cli_website/acceptance_wide`: passed, 9 assertions.
+- `cli_website/unicode_input_narrow`: passed, 5 assertions.
+- `cli_website/unicode_input_wide`: passed, 5 assertions.
+
+## Evidence
+
+[Manifest](manifest.json) · [Immutable execution receipts](receipts.json)
+
+- [artifact_0ea43ad0-d434-4339-8018-5a6fe993fd21_hf](artifacts/7b8da822cca06ee544e780e0c4553fa71cd9da075b18887e01a1f0c0411dbf89.png) — 43412 bytes, SHA-256 `7b8da822cca06ee544e780e0c4553fa71cd9da075b18887e01a1f0c0411dbf89`
+- [artifact_1077b97a-8741-4035-bd57-6ff7a8cd0b59_hc](artifacts/d024f361887e35793400af1e2fa67e2e07f06e7507c67f8dcb28344e47e56f89.png) — 22778 bytes, SHA-256 `d024f361887e35793400af1e2fa67e2e07f06e7507c67f8dcb28344e47e56f89`
+- [artifact_21dabaff-5ff0-478c-8d5d-8a53e407f8bd_i3](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_21fb6b73-76ee-41e0-b4a7-71447bfe71fb_h6](artifacts/6f8237a1cfb4c795512d2721e8f7e460709224ae7689549f83e024c599381f61.zip) — 1637040 bytes, SHA-256 `6f8237a1cfb4c795512d2721e8f7e460709224ae7689549f83e024c599381f61`
+- [artifact_2567dd12-5895-4bdd-8fc9-2b0fc833f196_h3](artifacts/7a9ee7f69ee28f66c31018d3f74d0f2c523cddf8824a7ea55df2f69ab7efcc6f.bin) — 2678 bytes, SHA-256 `7a9ee7f69ee28f66c31018d3f74d0f2c523cddf8824a7ea55df2f69ab7efcc6f`
+- [artifact_26828f07-3039-4721-bd92-cb9091bfb551_hg](artifacts/a6bd43bf35aa0721108f673b4820a475df020559d8ef0ecf83151c680bce8fbd.png) — 50835 bytes, SHA-256 `a6bd43bf35aa0721108f673b4820a475df020559d8ef0ecf83151c680bce8fbd`
+- [artifact_27959e13-30c6-46d0-b6b4-01dd5b3ea1f6_hl](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_2b14f3ae-4584-472b-8fd2-620b64bcc627_hb](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_2fa3d4db-d3d3-467d-b507-e529d920d1d4_i1](artifacts/eb0198f04d90c27cce25fa846fa900ac934c379cdc8c21881d314029edfff2c7.bin) — 1649 bytes, SHA-256 `eb0198f04d90c27cce25fa846fa900ac934c379cdc8c21881d314029edfff2c7`
+- [artifact_3a49368a-6f4f-42d1-9204-b0e6a5c54bff_he](artifacts/e292dc865314ababadf22d0be8b272cb8ad9c012c25c7261b02c90547a9a02b5.png) — 34704 bytes, SHA-256 `e292dc865314ababadf22d0be8b272cb8ad9c012c25c7261b02c90547a9a02b5`
+- [artifact_3b6debd4-7120-449c-a0bc-689484a11a7f_h5](artifacts/7146197b5025e0c457abaff32b95bc3e0fc8b78da72b968726f0ca91bbfa7b48.png) — 33190 bytes, SHA-256 `7146197b5025e0c457abaff32b95bc3e0fc8b78da72b968726f0ca91bbfa7b48`
+- [artifact_47314c84-0d9f-493c-a323-184923aec59b_hq](artifacts/7e8bb984fd8ea6f68e208e0c30b4ca8b8d7a7e39eca78b19f642d56094bd39b1.png) — 63253 bytes, SHA-256 `7e8bb984fd8ea6f68e208e0c30b4ca8b8d7a7e39eca78b19f642d56094bd39b1`
+- [artifact_47f5424a-16cb-4067-a9c1-4c943bd37157_hp](artifacts/5f2726456fe4601e692366c1a600dd885ebd697e78dabb775f004cb75ebb09d5.png) — 54088 bytes, SHA-256 `5f2726456fe4601e692366c1a600dd885ebd697e78dabb775f004cb75ebb09d5`
+- [artifact_4a0684e2-c774-470f-847f-373e89f11116_hx](artifacts/478f7983f9ce779fa9e5f30c7b0b81aa17e2f62b6ef613eceeb9bf277a32fb9c.png) — 32550 bytes, SHA-256 `478f7983f9ce779fa9e5f30c7b0b81aa17e2f62b6ef613eceeb9bf277a32fb9c`
+- [artifact_4e86108f-9067-4f0c-a069-8c3b55941b17_ht](artifacts/20cbbad1ae41af18a80d418dff0c2784a07409214062a66736e56475af71b7c2.bin) — 2289 bytes, SHA-256 `20cbbad1ae41af18a80d418dff0c2784a07409214062a66736e56475af71b7c2`
+- [artifact_4f16a385-0521-4610-bd59-d2d74c6197d4_hw](artifacts/85a5884684442ea47480f2d4bd6488cf6f197289fd7e0bc477f691fafa95b0be.png) — 24177 bytes, SHA-256 `85a5884684442ea47480f2d4bd6488cf6f197289fd7e0bc477f691fafa95b0be`
+- [artifact_50b73508-0a4f-413b-a02d-d41266ad817a_i6](artifacts/822950df1f9495d4af95dc5596abf8354feaf739a223ad8d5d3a7d6e9bd3f10f.png) — 45229 bytes, SHA-256 `822950df1f9495d4af95dc5596abf8354feaf739a223ad8d5d3a7d6e9bd3f10f`
+- [artifact_51ef61d9-bb0b-4b51-907a-bfdb2cf7c39c_i7](artifacts/822950df1f9495d4af95dc5596abf8354feaf739a223ad8d5d3a7d6e9bd3f10f.png) — 45229 bytes, SHA-256 `822950df1f9495d4af95dc5596abf8354feaf739a223ad8d5d3a7d6e9bd3f10f`
+- [artifact_569a291e-1a7d-4462-b720-e288b557886c_i2](artifacts/298bfa353f0e4850157f9a1ef093986716d80f39c1aae60c516b98b5ff14da54.bin) — 2678 bytes, SHA-256 `298bfa353f0e4850157f9a1ef093986716d80f39c1aae60c516b98b5ff14da54`
+- [artifact_6c08f71c-24fa-4cd7-a0f5-1dbfb7e57dcc_hy](artifacts/7d6f2797fe3d1159e5bf71875ced5e6d9eaa66e6db9a934e33a8c2694310d0ad.png) — 37106 bytes, SHA-256 `7d6f2797fe3d1159e5bf71875ced5e6d9eaa66e6db9a934e33a8c2694310d0ad`
+- [artifact_6f9b380e-d4a9-46c1-8763-9c5b8d7fad6b_h0](artifacts/7d06547f5327c10203e365d4979c52c014d61aea4999fbeb3cebdb28ca100ce1.png) — 25121 bytes, SHA-256 `7d06547f5327c10203e365d4979c52c014d61aea4999fbeb3cebdb28ca100ce1`
+- [artifact_7647ab53-0693-4201-b21f-6c38c717455c_h9](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_77b2763c-8b81-4e2b-b10f-132a6943d524_i8](artifacts/740e31b18f886ebe47a7484ff9e0bd83ac9e1e4346431e3e4e4f8f88ae739a84.zip) — 3537389 bytes, SHA-256 `740e31b18f886ebe47a7484ff9e0bd83ac9e1e4346431e3e4e4f8f88ae739a84`
+- [artifact_7bf795ee-fecd-4907-8767-fefaa1fd8c9b_hk](artifacts/fd0b5caf5b2d93f09c435242901448ebf0d2ca6f16958280fee71cb387f7ce30.bin) — 2678 bytes, SHA-256 `fd0b5caf5b2d93f09c435242901448ebf0d2ca6f16958280fee71cb387f7ce30`
+- [artifact_90a30da9-e24e-4879-bf89-fe62bfdd86ea_h1](artifacts/1d26d6b9b924e758dca7e15491a23903573db87e654073c8d6c8fd0d676aa782.zip) — 259600 bytes, SHA-256 `1d26d6b9b924e758dca7e15491a23903573db87e654073c8d6c8fd0d676aa782`
+- [artifact_97ad426d-f74d-4084-8a99-4185899435bf_hi](artifacts/c8d5f31224898744d49a00f9a3e74f4ea32d924a0130c1ec38e68066611c3043.zip) — 1312034 bytes, SHA-256 `c8d5f31224898744d49a00f9a3e74f4ea32d924a0130c1ec38e68066611c3043`
+- [artifact_9c0b2021-b300-4b7a-b1aa-26734e8680d2_h2](artifacts/f3805d4bc8928af2938685fb9740f60178c510cc71bff6e14491c879f610ccce.bin) — 633 bytes, SHA-256 `f3805d4bc8928af2938685fb9740f60178c510cc71bff6e14491c879f610ccce`
+- [artifact_9f5420f7-1922-4ae5-a58f-74cc89d29360_hn](artifacts/f2c8e8150700e955dce5b06cf0f92c61d72c0fcc8ca6e01d784c839149e1f33e.png) — 31432 bytes, SHA-256 `f2c8e8150700e955dce5b06cf0f92c61d72c0fcc8ca6e01d784c839149e1f33e`
+- [artifact_9fb9475a-0878-43c7-90c5-4bef10c419bb_ia](artifacts/6cb27ff7ab8cca9c30398393d317a3c712610c4390df8ac56b480d6fb1989a4c.bin) — 8640 bytes, SHA-256 `6cb27ff7ab8cca9c30398393d317a3c712610c4390df8ac56b480d6fb1989a4c`
+- [artifact_ac45e1bc-92a5-407b-adad-a26d10b0874b_h7](artifacts/d7dd641653e76f99cdab36306c9003ce56666b5d40d7a3ca965dd341a36e0dd2.bin) — 632 bytes, SHA-256 `d7dd641653e76f99cdab36306c9003ce56666b5d40d7a3ca965dd341a36e0dd2`
+- [artifact_af7f2dbd-21cf-4512-aedd-115a5b46e818_ha](artifacts/ff11781d8ef9aedc142feffb347c27c25af24f5fdc1edfe342214b7b4e7e6770.bin) — 197 bytes, SHA-256 `ff11781d8ef9aedc142feffb347c27c25af24f5fdc1edfe342214b7b4e7e6770`
+- [artifact_b4fb6ab4-3332-4702-be8f-431e63139918_hs](artifacts/b6ca99ccdec3078c399f200cdf0eebb0a809d369937cabc04b4f7098965fcc60.zip) — 3985303 bytes, SHA-256 `b6ca99ccdec3078c399f200cdf0eebb0a809d369937cabc04b4f7098965fcc60`
+- [artifact_b84bec76-cdee-418f-9cc7-fd1c2fb82e06_h4](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_ba1cdcc0-8b24-4782-a594-9c16b64dd7e9_i0](artifacts/8ea26594d642e0384c276368e6db53cb0abd1cf9ecc69f84c5672c394b33a175.zip) — 635643 bytes, SHA-256 `8ea26594d642e0384c276368e6db53cb0abd1cf9ecc69f84c5672c394b33a175`
+- [artifact_ba4770f7-6271-4953-9c95-bd37ebf281a8_gz](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_bb6fe436-a009-4d65-93e0-730e418ffe51_i4](artifacts/6e3fe82a829396a7deb77a021c26221e5750506a94c33831922c079e53f0f58a.png) — 31365 bytes, SHA-256 `6e3fe82a829396a7deb77a021c26221e5750506a94c33831922c079e53f0f58a`
+- [artifact_bcc38acb-16d6-4093-8c68-1fbae836f96f_ho](artifacts/5f0f31c13def74020821c76df22cb43fd86b08ad4ece5f3b2cf1fe4fb7003a25.png) — 43048 bytes, SHA-256 `5f0f31c13def74020821c76df22cb43fd86b08ad4ece5f3b2cf1fe4fb7003a25`
+- [artifact_d88834b8-f7cb-4393-871a-3488d2a54606_h8](artifacts/48ed37a8674ab945677270fa2e2e1ad3fbb80a35cc7b9842094c6dad76976b3f.bin) — 6588 bytes, SHA-256 `48ed37a8674ab945677270fa2e2e1ad3fbb80a35cc7b9842094c6dad76976b3f`
+- [artifact_de063651-538f-4691-bd32-2ef4253251bc_hj](artifacts/6eb42e5a5091a6428ad195920dfbfdb8adf4a3e12cf91e2b60bae979df123451.bin) — 2300 bytes, SHA-256 `6eb42e5a5091a6428ad195920dfbfdb8adf4a3e12cf91e2b60bae979df123451`
+- [artifact_e661031d-6101-47d1-b7c6-f9ccd75930ea_i5](artifacts/8c903477bf31cb49aa7238d38bc116544c0f15838c6d361a4ed8d01d6d9fc7e9.png) — 39341 bytes, SHA-256 `8c903477bf31cb49aa7238d38bc116544c0f15838c6d361a4ed8d01d6d9fc7e9`
+- [artifact_e8fad6ee-d316-4713-b123-11ebbe1c5da4_i9](artifacts/232db031551112793049fc18551575f49e49f6a664951abd8c08341ee126352c.bin) — 1642 bytes, SHA-256 `232db031551112793049fc18551575f49e49f6a664951abd8c08341ee126352c`
+- [artifact_ea3dc9ce-0eca-4cc9-a8a7-8adce9750e57_hh](artifacts/a6bd43bf35aa0721108f673b4820a475df020559d8ef0ecf83151c680bce8fbd.png) — 50835 bytes, SHA-256 `a6bd43bf35aa0721108f673b4820a475df020559d8ef0ecf83151c680bce8fbd`
+- [artifact_edcead33-505c-4297-a255-c2374a0cb977_hr](artifacts/7e8bb984fd8ea6f68e208e0c30b4ca8b8d7a7e39eca78b19f642d56094bd39b1.png) — 63253 bytes, SHA-256 `7e8bb984fd8ea6f68e208e0c30b4ca8b8d7a7e39eca78b19f642d56094bd39b1`
+- [artifact_ee9eb955-dc01-4cfc-8575-d92a3d7d791e_hv](artifacts/5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6.bin) — 586 bytes, SHA-256 `5f835ad915997800d883bbdd5feee65b67f67f8599c0180fa5d200dc5deaf1d6`
+- [artifact_f1f37ce8-67d7-4497-9400-290e7973f441_hu](artifacts/389466d9522ae0d012bd7ba93ddf2868464038382d9da738a4abf02d76c943c9.bin) — 8640 bytes, SHA-256 `389466d9522ae0d012bd7ba93ddf2868464038382d9da738a4abf02d76c943c9`
+- [artifact_f66ed851-eb8c-407b-bc15-35e28c135fca_hz](artifacts/7d6f2797fe3d1159e5bf71875ced5e6d9eaa66e6db9a934e33a8c2694310d0ad.png) — 37106 bytes, SHA-256 `7d6f2797fe3d1159e5bf71875ced5e6d9eaa66e6db9a934e33a8c2694310d0ad`
+- [artifact_f80e669b-bbef-45e6-b72b-e55bcd451f9e_hm](artifacts/21cb92e3c90e15ac7720fabf50caad8420f285f0438c75be13934dbe89eb2521.png) — 30285 bytes, SHA-256 `21cb92e3c90e15ac7720fabf50caad8420f285f0438c75be13934dbe89eb2521`
+- [artifact_fcbbd589-98fd-4226-aee1-cebd9a67ecff_hd](artifacts/2d5eb1abc6691d98c67b2255fe934c96362751f917899c3a59c2b1acc5a0c283.png) — 23738 bytes, SHA-256 `2d5eb1abc6691d98c67b2255fe934c96362751f917899c3a59c2b1acc5a0c283`
+
+These are ASD managed-execution results. This evidence commit is separate from the feature branch.
