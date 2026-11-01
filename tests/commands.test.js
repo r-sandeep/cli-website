@@ -1025,6 +1025,8 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("-r reverse, -n numeric, -u unique");
     expect(output).toContain("COMMAND | %uniq% [-cd]");
     expect(output).toContain("-c count, -d repeated only");
+    expect(output).toContain("COMMAND | %sed% s/OLD/NEW/[gi]");
+    expect(output).toContain("-g all matches, -i case-insensitive");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
   });
 });
@@ -1038,6 +1040,7 @@ describe("pipeline manual pages preserve standalone commands", () => {
     ["wc", "COMMAND | %wc% -l"],
     ["sort", "COMMAND | %sort% [-rnu]"],
     ["uniq", "COMMAND | %uniq% [-cd]"],
+    ["sed", "COMMAND | %sed% s/OLD/NEW/[gi]"],
   ])("documents man %s", (topic, expected) => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
@@ -1061,6 +1064,57 @@ describe("pipeline manual pages preserve standalone commands", () => {
     expect(uniqOutput).toContain("-d keeps only repeated runs");
     expect(uniqOutput).toContain("Flags may be combined as -cd");
     expect(uniqOutput).toContain("ANSI color and escape sequences are ignored");
+  });
+
+  it("publishes complete sed documentation through man, pipe aliases, help, and README", () => {
+    const sedRun = loadCommands();
+    sedRun.commands.man(["sed"]);
+    const sedOutput = sedRun.term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    for (const expected of [
+      "OLD and NEW are literal strings",
+      "first occurrence",
+      "every non-overlapping occurrence from left to right",
+      "case-insensitively",
+      "inserted exactly as written",
+      "gi or ig",
+      "\\/ means a literal /",
+      "\\\\ means a literal backslash",
+      "every other backslash is kept as written",
+      "NEW may be empty to delete a match",
+      "closing / after NEW is always required",
+      "no match retain their original styling",
+      "plain replaced visible text without styling",
+      "missing expression",
+      "not starting with s/",
+      "missing closing /",
+      "empty OLD",
+      "unsupported flag",
+      "repeated g or i flag",
+    ]) {
+      expect(sedOutput).toContain(expected);
+    }
+    expect(sedRun.term.command).not.toHaveBeenCalled();
+    expect(Object.prototype.hasOwnProperty.call(sedRun.commands, "sed")).toBe(false);
+
+    for (const topic of ["pipe", "piping"]) {
+      const pipeRun = loadCommands();
+      pipeRun.commands.man([topic]);
+      const pipeOutput = pipeRun.term.stylePrint.mock.calls.map(([line]) => line);
+      expect(pipeOutput).toContain("Filters: grep, head, tail, wc, sort, uniq, sed.");
+      expect(pipeOutput).toContain("Example: %whois% | %grep% -i root | %head% 3");
+    }
+
+    const helpRun = loadCommands();
+    helpRun.commands.help([]);
+    const helpOutput = helpRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(helpOutput).toContain("COMMAND | %sed% s/OLD/NEW/[gi]");
+    expect(helpOutput).toContain("-g all matches, -i case-insensitive");
+
+    const readme = readFileSync("README.md", "utf8");
+    const pipelineSection = readme.split("## Output pipelines")[1].split("## Terminal editing shortcuts")[0];
+    expect(pipelineSection).toContain("`COMMAND | sed s/OLD/NEW/[gi]`");
+    expect(pipelineSection).toContain("`whois | sed s/Root Ventures/RV/`");
+    expect(pipelineSection).toContain("`man sed`");
   });
 
   it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {

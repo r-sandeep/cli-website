@@ -131,16 +131,25 @@ function runRootTerminal(term) {
     return nextCursor;
   };
 
+  const moveInputCursor = (offset) => {
+    if (typeof term.moveCursor === "function") {
+      term.moveCursor(offset);
+      return;
+    }
+    const direction = offset < 0 ? "D" : "C";
+    term.write(`\x1b[${direction}`.repeat(Math.abs(offset)));
+  };
+
   const updateInput = (line, cursor) => {
     const oldLine = term.currentLine;
     const oldCursor = term.pos();
     if (line === oldLine && cursor === oldCursor) return;
 
-    if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
+    if (oldCursor > 0) moveInputCursor(-oldCursor);
     term.currentLine = line;
     term.write(`${line}\x1b[K`);
     if (cursor < line.length) {
-      term.write("\x1b[D".repeat(line.length - cursor));
+      moveInputCursor(cursor - line.length);
     }
   };
 
@@ -314,11 +323,11 @@ function runRootTerminal(term) {
           term.executeCommandLine(term.currentLine);
           break;
         case "\u0001": // Ctrl+A
-          term.write("\x1b[D".repeat(term.pos()));
+          moveInputCursor(-term.pos());
           break;
         case "\u0005": // Ctrl+E
           if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
+            moveInputCursor(term.currentLine.length - term.pos());
           }
           break;
         case "\u0003": // Ctrl+C
@@ -373,12 +382,12 @@ function runRootTerminal(term) {
           break;
         case "\033[C": // right
           if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C");
+            moveInputCursor(1);
           }
           break;
         case "\033[D": // left
           if (term.pos() > 0) {
-            term.write("\x1b[D");
+            moveInputCursor(-1);
           }
           break;
         case "\t": // tab
@@ -399,7 +408,7 @@ function runRootTerminal(term) {
             term.write(e);
             if (restOfLine.length > 0) {
               term.write(restOfLine);
-              term.write("\x1b[D".repeat(restOfLine.length));
+              moveInputCursor(-restOfLine.length);
             }
           }
           break;

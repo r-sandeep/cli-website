@@ -11,12 +11,49 @@ var Pipeline = (function () {
     };
   }
 
+  function sedExpressionIsOpen(stageSource) {
+    var source = stageSource.replace(/^\s+/, "");
+    if (source.slice(0, 3) !== "sed") return false;
+    if (source.length > 3 && !/\s/.test(source.charAt(3))) return false;
+
+    var expression = source.slice(3).replace(/^\s+/, "");
+    if (expression.slice(0, 2) !== "s/") return false;
+
+    var closingDelimiters = 0;
+    for (var index = 2; index < expression.length; index += 1) {
+      var character = expression.charAt(index);
+      if (character === "\\") {
+        var escaped = expression.charAt(index + 1);
+        if (escaped === "/" || escaped === "\\") index += 1;
+        continue;
+      }
+      if (character === "/") {
+        closingDelimiters += 1;
+        if (closingDelimiters === 2) return false;
+      }
+    }
+    return true;
+  }
+
+  function splitPipeline(commandLine) {
+    var parts = [];
+    var start = 0;
+    for (var index = 0; index < commandLine.length; index += 1) {
+      if (commandLine.charAt(index) !== "|") continue;
+      if (sedExpressionIsOpen(commandLine.slice(start, index))) continue;
+      parts.push(commandLine.slice(start, index));
+      start = index + 1;
+    }
+    parts.push(commandLine.slice(start));
+    return parts;
+  }
+
   function parsePipeline(commandLine) {
     if (typeof commandLine !== "string" || commandLine.indexOf("|") === -1) {
       return null;
     }
 
-    var parts = commandLine.split("|").map(function (part) {
+    var parts = splitPipeline(commandLine).map(function (part) {
       return part.trim();
     });
 
@@ -142,11 +179,81 @@ var Pipeline = (function () {
     };
   }
 
+  function parseSedField(expression, start) {
+    var value = "";
+    for (var index = start; index < expression.length; index += 1) {
+      var character = expression.charAt(index);
+      if (character === "/") {
+        return { closed: true, value: value, nextIndex: index + 1 };
+      }
+      if (character === "\\") {
+        var escaped = expression.charAt(index + 1);
+        if (escaped === "/" || escaped === "\\") {
+          value += escaped;
+          index += 1;
+          continue;
+        }
+      }
+      value += character;
+    }
+    return { closed: false, value: value, nextIndex: expression.length };
+  }
+
+  function compileSed(stage) {
+    var expression = stage.source.slice(stage.name.length).replace(/^\s+/, "");
+    if (!expression) {
+      return preDispatchError(stage.name, "sed: expression required");
+    }
+    if (expression.slice(0, 2) !== "s/") {
+      return preDispatchError(
+        stage.name,
+        "sed: an expression s/OLD/NEW/[gi] is required"
+      );
+    }
+
+    var oldField = parseSedField(expression, 2);
+    if (!oldField.closed) {
+      return preDispatchError(stage.name, "sed: expression is missing a closing /");
+    }
+    if (!oldField.value) {
+      return preDispatchError(stage.name, "sed: OLD cannot be empty");
+    }
+
+    var newField = parseSedField(expression, oldField.nextIndex);
+    if (!newField.closed) {
+      return preDispatchError(stage.name, "sed: expression is missing a closing /");
+    }
+
+    var flags = expression.slice(newField.nextIndex);
+    if (/[^gi]/.test(flags)) {
+      return preDispatchError(stage.name, "sed: flags may contain only g and i");
+    }
+    if (flags.indexOf("g") !== flags.lastIndexOf("g")) {
+      return preDispatchError(stage.name, "sed: flag g may not be repeated");
+    }
+    if (flags.indexOf("i") !== flags.lastIndexOf("i")) {
+      return preDispatchError(stage.name, "sed: flag i may not be repeated");
+    }
+
+    return {
+      ok: true,
+      filter: {
+        type: "sed",
+        name: stage.name,
+        oldText: oldField.value,
+        newText: newField.value,
+        global: flags.indexOf("g") !== -1,
+        ignoreCase: flags.indexOf("i") !== -1,
+      },
+    };
+  }
+
   function compileStage(stage) {
     if (!stage.name) {
       return preDispatchError("", "Pipeline stages cannot be empty");
     }
     if (stage.name === "grep") return compileGrep(stage);
+    if (stage.name === "sed") return compileSed(stage);
     if (stage.name === "head" || stage.name === "tail") {
       return compileCountFilter(stage);
     }
@@ -224,6 +331,23 @@ var Pipeline = (function () {
     }
     if (filter.type === "wc") {
       return { lines: [String(lines.length)], error: null };
+    }
+    if (filter.type === "sed") {
+      var escapedOldText = filter.oldText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      var sedFlags = filter.global ? "g" : "";
+      if (filter.ignoreCase) sedFlags += "i";
+      var matcher = new RegExp(escapedOldText, sedFlags);
+      return {
+        lines: lines.map(function (line) {
+          var matched = false;
+          var replaced = String(getText(line)).replace(matcher, function () {
+            matched = true;
+            return filter.newText;
+          });
+          return matched ? replaced : line;
+        }),
+        error: null,
+      };
     }
     if (filter.type === "sort") {
       var decorated = lines.map(function (line, index) {

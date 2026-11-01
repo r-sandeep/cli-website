@@ -275,8 +275,55 @@ const extend = (term) => {
   term.tabBase = "";
 
   // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // xterm exposes cursorX as a physical column. Walk back through the active
+  // logical line's wrapped rows so editing consumers receive one input offset.
+  term.pos = () => {
+    const activeBuffer = term.buffer?.active;
+    if (activeBuffer && typeof activeBuffer.getLine === "function") {
+      const cursorRow = activeBuffer.baseY + activeBuffer.cursorY;
+      let firstRow = cursorRow;
+      while (firstRow > 0 && activeBuffer.getLine(firstRow)?.isWrapped) {
+        firstRow -= 1;
+      }
+
+      const logicalColumn =
+        (cursorRow - firstRow) * term.cols + activeBuffer.cursorX;
+      return logicalColumn - term._promptRawText().length - 1;
+    }
+
+    // Keep compatibility with the minimal terminal shape used by older callers.
+    return term._core.buffer.x - term._promptRawText().length - 1;
+  };
+
+  // Moves by a logical input offset. Reverse-wrap mode lets Backspace cross a
+  // wrapped row; forward movement crosses a boundary explicitly because CSI C
+  // is otherwise clamped to the current physical row.
+  term.moveCursor = (offset) => {
+    if (offset === 0) return;
+
+    const activeBuffer = term.buffer?.active;
+    if (!activeBuffer || typeof activeBuffer.getLine !== "function") {
+      term.write(`\x1b[${offset < 0 ? "D" : "C"}`.repeat(Math.abs(offset)));
+      return;
+    }
+
+    if (offset < 0) {
+      term.write(`\x1b[?45h${"\b".repeat(-offset)}\x1b[?45l`);
+      return;
+    }
+
+    let absoluteOffset = term._promptRawText().length + 1 + term.pos();
+    let movement = "";
+    for (let step = 0; step < offset; step += 1) {
+      if (absoluteOffset > 0 && absoluteOffset % term.cols === 0) {
+        movement += "\x1b[B\x1b[1G";
+      } else {
+        movement += "\x1b[C";
+      }
+      absoluteOffset += 1;
+    }
+    term.write(movement);
+  };
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -338,7 +385,7 @@ const extend = (term) => {
     term.currentLine = newLine;
     term.write(newLine);
     if (preserveCursor) {
-      term.write("\x1b[D".repeat(length - oldPos));
+      term.moveCursor(oldPos - length);
     }
   };
 
@@ -635,6 +682,9 @@ const extend = (term) => {
   };
 
   term.executeCommandLine = async (line, options = {}) => {
+    // Parsing intentionally trims for command semantics; history keeps the
+    // submitted line byte-for-byte so recall can reproduce its spacing.
+    const submittedLine = String(line);
     const settings = {
       addToHistory: true,
       manageBusy: true,
@@ -665,7 +715,7 @@ const extend = (term) => {
           }
 
           if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(submittedLine);
           }
 
           term.stylePrint(validation.error.message);
@@ -686,7 +736,7 @@ const extend = (term) => {
           }
 
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(submittedLine);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -737,7 +787,7 @@ const extend = (term) => {
 
         if (parsed.line.length > 0) {
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(submittedLine);
           }
 
           // Commands may own an interactive continuation. Await its final
