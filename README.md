@@ -55,6 +55,37 @@ replace the existing standalone commands with the same names.
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
+## Pager
+
+Use `less FILE` or `more FILE` to view a file from the current directory. Both
+commands are the same pager. To page command output, put `less` or `more` at the
+end of a pipeline, after any filters—for example,
+`tldr | grep -i ai | less`. A pipeline pager must be the final stage and takes
+no arguments.
+
+If every visible screen line fits within the terminal height minus one status
+row, the output prints normally and the pager does not open. Longer output
+fills the terminal, wraps long lines at its current width, and uses the last row
+for `lines A-B of T`; the final screen adds `(END)`.
+
+Pager keys:
+
+- **Space**, **f**, or **PageDown** moves forward one screen; **b** or
+  **PageUp** moves back one screen.
+- **ArrowDown**, **j**, or **Enter** moves down one line; **ArrowUp** or **k**
+  moves up one line.
+- **g** or **Home** goes to the first screen; **G** or **End** goes to the last.
+- **q**, **Q**, or **Ctrl+C** closes the pager. Movement stops at either limit,
+  and every other key is inert.
+
+Press **/** to search. Printable keys append to the search and **Backspace**
+deletes its last character. **Enter** searches later content lines literally
+and case-insensitively; **n** repeats the last search, and **Enter** on an empty
+search repeats it too. **Escape** or **Ctrl+C** cancels search editing without
+moving. A miss keeps the current position and shows
+`Pattern not found: TEXT` until the next key. Run `man less` or `man more` for
+the same reference in the terminal.
+
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
 `man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the

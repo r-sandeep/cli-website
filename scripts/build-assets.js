@@ -35,6 +35,7 @@ const vendorScripts = [
 const appBundleSources = [
   "js/terminal.js",
   "js/pipeline.js",
+  "js/pager.js",
   "js/terminal-ext.js",
   "js/ascii-art.js",
   "config/help.js",

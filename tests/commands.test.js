@@ -152,6 +152,7 @@ function loadCommands({
     prompt: vi.fn(),
     clearCurrentLine: vi.fn(),
     collectInput: vi.fn(),
+    pageOutput: vi.fn((_records, fittedWriter) => fittedWriter()),
     cols: 100,
     defineAlias: vi.fn((name, value) => {
       aliases.set(name, value);
@@ -180,6 +181,9 @@ function loadCommands({
     portfolio,
     buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
     colorText: (text) => text,
+    _DIRS: { "~": ["id_rsa", "welcome.htm", "README.md"], home: ["other.htm"] },
+    getFileContents: vi.fn((filename) => `\x1b[35mcontents:${filename}\x1b[0m\r\n`),
+    SpawnRickRollPointers: vi.fn(),
     localStorage: storage,
     window: { location },
   });
@@ -196,6 +200,49 @@ function loadCommands({
   });
   return { commands, location, storage, term };
 }
+
+describe("less and more files", () => {
+  it.each(["less", "more"])("pages %s through the shared fitted-write seam", async (spelling) => {
+    const { commands, term } = loadCommands();
+
+    await commands[spelling](["welcome.htm"]);
+
+    expect(term.pageOutput).toHaveBeenCalledOnce();
+    expect(term.pageOutput.mock.calls[0][0]).toEqual([
+      "\x1b[35mcontents:welcome.htm\x1b[0m\r\n",
+    ]);
+    expect(term.writeln).toHaveBeenCalledOnce();
+    expect(term.writeln).toHaveBeenCalledWith(
+      "\x1b[35mcontents:welcome.htm\x1b[0m\r\n"
+    );
+    expect(term.stylePrint).not.toHaveBeenCalled();
+  });
+
+  it.each(["less", "more"])("rejects %s arity with one spelling-specific diagnostic", async (spelling) => {
+    const { commands, term } = loadCommands();
+
+    await commands[spelling]([]);
+    expect(term.stylePrint).toHaveBeenCalledOnce();
+    expect(term.stylePrint).toHaveBeenCalledWith(`${spelling}: usage: ${spelling} FILE`);
+    expect(term.pageOutput).not.toHaveBeenCalled();
+
+    term.stylePrint.mockClear();
+    await commands[spelling](["welcome.htm", "id_rsa"]);
+    expect(term.stylePrint).toHaveBeenCalledOnce();
+    expect(term.stylePrint).toHaveBeenCalledWith(`${spelling}: usage: ${spelling} FILE`);
+    expect(term.pageOutput).not.toHaveBeenCalled();
+  });
+
+  it.each(["less", "more"])("keeps %s lookup in the current directory", async (spelling) => {
+    const { commands, term } = loadCommands({ cwd: "home" });
+
+    await commands[spelling](["welcome.htm"]);
+
+    expect(term.stylePrint).toHaveBeenCalledOnce();
+    expect(term.stylePrint).toHaveBeenCalledWith("No such file: welcome.htm");
+    expect(term.pageOutput).not.toHaveBeenCalled();
+  });
+});
 
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {
@@ -1026,6 +1073,76 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("COMMAND | %uniq% [-cd]");
     expect(output).toContain("-c count, -d repeated only");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
+  });
+});
+
+describe("pager documentation", () => {
+  it("renders standalone and final-pipeline forms in help", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain("%less% FILE");
+    expect(output).toContain("%more% FILE");
+    expect(output).toContain("COMMAND | %less%");
+    expect(output).toContain("COMMAND | %more%");
+    expect(output).toContain("must be last; no arguments");
+  });
+
+  it.each(["less", "more"])("renders the complete man %s topic without falling back", (topic) => {
+    const { commands, term } = loadCommands();
+
+    commands.man([topic]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    expect(output).toContain(`Usage: %${topic}% FILE`);
+    expect(output).toContain(`COMMAND | %${topic}%`);
+    expect(output).toContain("must be the final stage and takes no arguments");
+    expect(output).toContain("terminal height minus the status row");
+    expect(output).toContain("without opening the pager");
+    expect(output).toContain("lines A-B of T");
+    expect(output).toContain("(END)");
+    for (const key of [
+      "Space", "f", "PageDown", "b", "PageUp", "ArrowDown", "j", "Enter",
+      "ArrowUp", "k", "g", "Home", "G", "End", "q", "Q", "Ctrl+C",
+    ]) {
+      expect(output).toContain(key);
+    }
+    expect(output).toContain("every other key is inert");
+    expect(output).toContain("Printable keys append text");
+    expect(output).toContain("Backspace deletes the last character");
+    expect(output).toContain("literally and case-insensitively");
+    expect(output).toContain("n repeats the last search");
+    expect(output).toContain("Enter on an empty search also repeats it");
+    expect(output).toContain("Escape or Ctrl+C cancels search editing without moving");
+    expect(output).toContain("Pattern not found: TEXT");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it("keeps the README Pager section complete", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const pager = readme.slice(readme.indexOf("## Pager"), readme.indexOf("## Terminal editing shortcuts"));
+
+    expect(pager).toContain("`less FILE` or `more FILE`");
+    expect(pager).toContain("`tldr | grep -i ai | less`");
+    expect(pager).toContain("final stage and takes\nno arguments");
+    expect(pager).toContain("height minus one status\nrow");
+    expect(pager).toContain("`lines A-B of T`");
+    expect(pager).toContain("`(END)`");
+    for (const key of [
+      "Space", "f", "PageDown", "b", "PageUp", "ArrowDown", "j", "Enter",
+      "ArrowUp", "k", "g", "Home", "G", "End", "q", "Q", "Ctrl+C",
+      "Backspace", "Escape",
+    ]) {
+      expect(pager).toContain(`**${key}**`);
+    }
+    expect(pager).toContain("every other key is inert");
+    expect(pager).toContain("literally\nand case-insensitively");
+    expect(pager).toContain("**n** repeats the last search");
+    expect(pager).toContain("**Enter** on an empty\nsearch repeats it too");
+    expect(pager).toContain("`Pattern not found: TEXT`");
+    expect(pager).toContain("`man less` or `man more`");
   });
 });
 

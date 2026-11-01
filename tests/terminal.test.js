@@ -544,6 +544,10 @@ describe("runRootTerminal", () => {
     const { runRootTerminal } = loadTerminalScript();
     let cursor = start;
     const term = createTerm({ currentLine: line, pos: vi.fn(() => cursor) });
+    term.clearCurrentLine = vi.fn(() => {
+      term.currentLine = "";
+      cursor = 0;
+    });
     term.write = vi.fn((output) => {
       for (const match of output.matchAll(/\x1b\[([CD])/g)) {
         cursor += match[1] === "C" ? 1 : -1;
@@ -719,6 +723,57 @@ describe("runRootTerminal", () => {
     expect(editing.term.executeCommandLine).not.toHaveBeenCalled();
   });
 
+  it("clears recalled input through the prompt-redraw seam before later completion", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      _DIRS: { "~": ["welcome.htm"] },
+      _filesHere: () => ["welcome.htm"],
+    });
+    const editing = createEditingTerm({ line: "less welcome.htm" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.clearCurrentLine.mockClear();
+
+    const preventDefault = vi.fn();
+    expect(
+      term._customKeyHandler(
+        keyEvent({ ctrlKey: true, key: "u" }, preventDefault)
+      )
+    ).toBe(false);
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(term.clearCurrentLine).toHaveBeenCalledOnce();
+    expect(term.currentLine).toBe("");
+    expect(editing.cursor()).toBe(0);
+
+    term._onData("m");
+    term._onData("o");
+    term._onData("r");
+    term._onData("e");
+    term._onData(" ");
+    term._onData("w");
+    term._onData("e");
+    term._onData("l");
+    pressTab(term);
+    expect(term.currentLine).toBe("more welcome.htm ");
+  });
+
+  it("tracks a wrapped command as one logical input line before submission", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm({ currentLine: "", _inputCursor: 0 });
+    term.pos = vi.fn(() => term._inputCursor);
+    term.cols = 20;
+    runRootTerminal(term);
+
+    for (const character of "whois | grep -i laelah") term._onData(character);
+
+    expect(term.currentLine).toBe("whois | grep -i laelah");
+    expect(term.pos()).toBe(22);
+
+    term._onData("\r");
+    expect(term.executeCommandLine).toHaveBeenCalledOnce();
+    expect(term.executeCommandLine).toHaveBeenCalledWith("whois | grep -i laelah");
+  });
+
   it("suppresses every empty-input shortcut without any terminal or page side effect", () => {
     const open = vi.fn();
     const { runRootTerminal } = loadTerminalScript({ open });
@@ -868,12 +923,9 @@ describe("runRootTerminal", () => {
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
     expect(term.currentLine).toBe("");
     expect(editing.cursor()).toBe(0);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "\x1b[K",
-    ]);
+    expect(term.write).not.toHaveBeenCalled();
     expect(term.prompt).toHaveBeenCalledTimes(1);
-    expect(term.clearCurrentLine).not.toHaveBeenCalled();
+    expect(term.clearCurrentLine).toHaveBeenCalledOnce();
     expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 

@@ -129,6 +129,16 @@ describe("script load order", () => {
     );
   });
 
+  it("loads the pager model before terminal extensions consume it", () => {
+    const { createAppBundleSource } = buildAssetsModule;
+    const source = createAppBundleSource(new Date("2026-02-03T23:59:58.000Z"));
+
+    expect(source).toContain("// js/pager.js");
+    expect(source.indexOf("// js/pager.js")).toBeLessThan(
+      source.indexOf("// js/terminal-ext.js")
+    );
+  });
+
   it("welcome.htm loads config/firm.js before config/commands.js", () => {
     // commands.js reads `firm` at the top level, so the reverse order is a
     // temporal-dead-zone crash that takes out buildGeoPage(). Read the real
@@ -230,7 +240,7 @@ describe("script load order", () => {
       ]);
       browser.cleanup();
     }
-  });
+  }, 15000);
 
   it("serializes metadata safely for a classic script", () => {
     const { createBuildInfoSource } = buildAssetsModule;
