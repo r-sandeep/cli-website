@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserEnv } from "./helpers/browser-env";
+import { Terminal } from "@xterm/xterm";
 
 const baseGlobals = {
   _DIRS: { "~": [] },
@@ -20,6 +21,93 @@ function loadTerminalScript(globals = {}) {
   });
   env.loadScripts(["js/terminal.js"]);
   return env.exportValues(["runRootTerminal"]);
+}
+
+function loadIntegratedTerminal(cols = 32, { captureDispatch = true } = {}) {
+  env = createBrowserEnv({
+    globals: {
+      ...baseGlobals,
+      commands: { ...baseGlobals.commands, pwd: () => {} },
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      jobs: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+    },
+  });
+  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js", "js/terminal.js"]);
+  const { extend, runRootTerminal } = env.exportValues(["extend", "runRootTerminal"]);
+  const term = new Terminal({ cols, rows: 12, scrollback: 30 });
+  extend(term);
+  term.init = vi.fn();
+  term.runDeepLink = vi.fn();
+  if (captureDispatch) term.executeCommandLine = vi.fn();
+  runRootTerminal(term);
+  return term;
+}
+
+function loadProductionIntegratedTerminal(cols = 32) {
+  const term = new Terminal({ cols, rows: 12, scrollback: 40 });
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      _filesHere: () => [],
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      team: {},
+      term,
+    },
+  });
+  env.loadScripts([
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+    "js/terminal.js",
+  ]);
+  const { extend, runRootTerminal } = env.exportValues(["extend", "runRootTerminal"]);
+  extend(term);
+  term.init = vi.fn();
+  term.runDeepLink = vi.fn();
+  runRootTerminal(term);
+  return term;
+}
+
+function settleTerminal(term) {
+  return new Promise((resolve) => term.write("", resolve));
+}
+
+async function inputText(term, text) {
+  for (const character of text) {
+    term.input(character, true);
+    await settleTerminal(term);
+  }
+}
+
+function integratedBufferText(term) {
+  const buffer = term.buffer.active;
+  const rows = [];
+  for (let row = buffer.baseY; row < buffer.length; row++) {
+    rows.push(buffer.getLine(row)?.translateToString(true) || "");
+  }
+  return rows.join("");
 }
 
 function createTerm(overrides = {}) {
@@ -127,6 +215,224 @@ afterEach(() => {
 });
 
 describe("runRootTerminal", () => {
+  it.each([32, 80])(
+    "dispatches an exact feature-shaped pipeline typed through production handlers at %i columns",
+    async (cols) => {
+      const term = loadIntegratedTerminal(cols);
+      await settleTerminal(term);
+      const line = "pwd | cut -d / -f 3 | sort";
+
+      await inputText(term, line);
+
+      expect(term.currentLine).toBe(line);
+      expect(term.pos()).toBe(line.length);
+      expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+      term.input("\r", true);
+      await settleTerminal(term);
+      expect(term.executeCommandLine).toHaveBeenCalledTimes(1);
+      expect(term.executeCommandLine).toHaveBeenCalledWith(line);
+    }
+  );
+
+  it.each([32, 80])(
+    "retains supplementary delimiters through actual keyboard dispatch at %i columns",
+    async (cols) => {
+      const term = loadIntegratedTerminal(cols);
+      await settleTerminal(term);
+      const lines = [
+        "echo a😀b | cut -d 😀 -f 2",
+        "echo a😀b | cut -d😀 -f 2 | sort",
+      ];
+
+      for (const line of lines) {
+        await inputText(term, line);
+        expect(term.currentLine).toBe(line);
+        expect(term.pos()).toBe(line.length);
+        term.input("\r", true);
+        await settleTerminal(term);
+        expect(term.executeCommandLine).toHaveBeenLastCalledWith(line);
+        term.clearCurrentLine(true);
+        await settleTerminal(term);
+      }
+      expect(term.executeCommandLine).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([32, 80])(
+    "executes real echo-to-cut Unicode pipelines and preserves accounting at %i columns",
+    async (cols) => {
+      const term = loadProductionIntegratedTerminal(cols);
+      await settleTerminal(term);
+      const lines = [
+        "echo a😀b | cut -d 😀 -f 2",
+        "echo a😀b | cut -d😀 -f 2 | sort",
+      ];
+
+      for (const [index, line] of lines.entries()) {
+        await inputText(term, line);
+        expect(term.currentLine).toBe(line);
+        term.input("\r", true);
+        await vi.waitFor(() => expect(term.history).toHaveLength(index + 1));
+        await settleTerminal(term);
+
+        const rendered = integratedBufferText(term);
+        const commandEnd = rendered.lastIndexOf(line) + line.length;
+        expect(commandEnd).toBeGreaterThan(line.length - 1);
+        expect(rendered.slice(commandEnd)).toBe("bguest:rootpc ~ $ ");
+      }
+
+      expect(term.history).toEqual(lines);
+      expect(env.window.dataLayer).toEqual([
+        { args: "a😀b | cut -d 😀 -f 2", command: "echo", event: "commandSent" },
+        { args: "a😀b | cut -d😀 -f 2 | sort", command: "echo", event: "commandSent" },
+      ]);
+
+      term.input("\x1b[A", true);
+      await settleTerminal(term);
+      expect(term.currentLine).toBe(lines[1]);
+      expect(term.history).toEqual(lines);
+      expect(env.window.dataLayer).toHaveLength(2);
+    }
+  );
+
+  it("maps Unicode cell boundaries during movement, insertion, deletion, and wrapped redraw", async () => {
+    const term = loadIntegratedTerminal(32);
+    await settleTerminal(term);
+    const line = "123456789012a😀b界ce\u0301d";
+    await inputText(term, line);
+    expect(term.currentLine).toBe(line);
+    expect(term.pos()).toBe(line.length);
+
+    term.input("\x1b[D", true);
+    term.input("\x1b[D", true);
+    await settleTerminal(term);
+    expect(term.pos()).toBe(line.length - 3);
+
+    term.input("X", true);
+    await settleTerminal(term);
+    const inserted = "123456789012a😀b界cXe\u0301d";
+    expect(term.currentLine).toBe(inserted);
+    expect(term.pos()).toBe(inserted.indexOf("e"));
+    expect(integratedBufferText(term)).toContain(inserted);
+
+    term.input("\u007F", true);
+    term.input("Y", true);
+    expect(term.currentLine).toBe("123456789012a😀b界cYe\u0301d");
+    await settleTerminal(term);
+    expect(term.currentLine).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
+  it("keeps unsupported multi-character escape data inert while accepting one non-BMP point", async () => {
+    const term = loadIntegratedTerminal(32);
+    await settleTerminal(term);
+
+    term.input("\x1b[1;5D", true);
+    expect(term.currentLine).toBe("");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term.input("😀", true);
+    expect(term.currentLine).toBe("😀");
+    expect(term.pos()).toBe(2);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    // A second supplementary code point must advance the UTF-16 cursor by its
+    // full width without splitting either surrogate pair.
+    term.input("𝄞", true);
+    expect(term.currentLine).toBe("😀𝄞");
+    expect(term.pos()).toBe(4);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term.input("\x1b[D", true);
+    expect(term.pos()).toBe(2);
+    expect(term.currentLine).toBe("😀𝄞");
+    term.input("\x1b[C", true);
+    expect(term.pos()).toBe(4);
+    expect(term.currentLine).toBe("😀𝄞");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term.input("\x1b[D", true);
+    term.input("\x7f", true);
+    expect(term.currentLine).toBe("𝄞");
+    expect(term.pos()).toBe(0);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    await settleTerminal(term);
+  });
+
+  it("recalls, clears, edits, completes, and submits after a wrapped pipeline", async () => {
+    const term = loadIntegratedTerminal(32, { captureDispatch: false });
+    env.window.commands.pwd = vi.fn(() => term.writeln("/home/guest"));
+    await settleTerminal(term);
+    const pipeline = "pwd | cut -c 2-5 | grep home";
+    term.history.push(pipeline);
+    const history = [...term.history];
+
+    term.input("\x1b[A", true);
+    await settleTerminal(term);
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+    expect(integratedBufferText(term)).toContain(`guest:rootpc ~ $ ${pipeline}`);
+    expect(term.history).toEqual(history);
+
+    const ctrlU = {
+      altKey: false,
+      ctrlKey: true,
+      key: "u",
+      metaKey: false,
+      preventDefault: vi.fn(),
+      shiftKey: false,
+      type: "keydown",
+    };
+    expect(term._core._customKeyEventHandler(ctrlU)).toBe(false);
+    await settleTerminal(term);
+    expect(ctrlU.preventDefault).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe("");
+    expect(integratedBufferText(term)).not.toContain(pipeline);
+    expect(term.history).toEqual(history);
+
+    await inputText(term, "pwx");
+    term.input("\u007F", true);
+    await settleTerminal(term);
+    await inputText(term, "d");
+    expect(term.currentLine).toBe("pwd");
+    term.input("\r", true);
+    await vi.waitFor(() => expect(integratedBufferText(term)).toContain("/home/guest"));
+    await settleTerminal(term);
+    expect(env.window.commands.pwd).toHaveBeenCalledTimes(1);
+    expect(term.history).toEqual([...history, "pwd"]);
+
+    term.clearCurrentLine(true);
+    await settleTerminal(term);
+    await inputText(term, "pw");
+    const tab = {
+      altKey: false,
+      ctrlKey: false,
+      key: "Tab",
+      metaKey: false,
+      preventDefault: vi.fn(),
+      shiftKey: false,
+      type: "keydown",
+    };
+    expect(term._core._customKeyEventHandler(tab)).toBe(false);
+    await settleTerminal(term);
+    expect(term.currentLine).toBe("pwd ");
+    expect(term.pos()).toBe(4);
+    expect(term.history).toEqual([...history, "pwd"]);
+  });
+
+  it("preserves logical cursor ownership when typing immediately after Backspace redraw", async () => {
+    const term = loadIntegratedTerminal(32);
+    await settleTerminal(term);
+    await inputText(term, "pwx");
+
+    term.input("\u007F", true);
+    term.input("d", true);
+
+    expect(term.currentLine).toBe("pwd");
+    await settleTerminal(term);
+    expect(term.pos()).toBe(3);
+  });
+
   it("initializes once and prompts immediately", () => {
     const { runRootTerminal } = loadTerminalScript();
     const term = createTerm();
