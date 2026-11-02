@@ -1537,6 +1537,316 @@ describe("terminal-ext", () => {
     expect(term.deepLink).toBe(expected);
   });
 
+  it("starts reverse search without selecting history or changing command state", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      _core: { buffer: { x: 22 } },
+      history: ["echo A", "echo B"],
+    });
+    extend(term);
+    const dispatch = vi.spyOn(term, "command");
+    term.history = ["echo A", "echo B"];
+    term.historyCursor = 1;
+    term.currentLine = "echo draft";
+    env.window.dataLayer = [];
+
+    const before = {
+      history: [...term.history],
+      historyCursor: term.historyCursor,
+      currentLine: term.currentLine,
+      analytics: [...env.window.dataLayer],
+    };
+    expect(term.startReverseSearch()).toBe(true);
+
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "",
+      match: "",
+      failed: false,
+    });
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\r\x1b[17C\x1b7\x1b[J(reverse-i-search)`': "
+    );
+    expect(term.backspaceReverseSearchQuery()).toBe(false);
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "",
+      match: "",
+      failed: false,
+    });
+    expect({
+      history: term.history,
+      historyCursor: term.historyCursor,
+      currentLine: term.currentLine,
+      analytics: env.window.dataLayer,
+    }).toEqual(before);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(term.writeln).not.toHaveBeenCalled();
+  });
+
+  it("matches literal case-sensitive queries newest-first and restarts on edits", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.history = [
+      "echo a.b",
+      "echo axb",
+      "echo Alpha",
+      "echo alpha",
+      "echo a.b tail",
+    ];
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("a.b");
+    expect(term.getReverseSearchState().match).toBe("echo a.b tail");
+    term.findOlderReverseSearchMatch();
+    expect(term.getReverseSearchState().match).toBe("echo a.b");
+    term.appendReverseSearchQuery(" tail");
+    expect(term.getReverseSearchState()).toMatchObject({
+      query: "a.b tail",
+      match: "echo a.b tail",
+      failed: false,
+    });
+
+    term.cancelReverseSearch();
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("Alpha");
+    expect(term.getReverseSearchState().match).toBe("echo Alpha");
+    term.cancelReverseSearch();
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("alpha");
+    expect(term.getReverseSearchState().match).toBe("echo alpha");
+  });
+
+  it("skips identical older matches, retains failures, and recovers after Backspace", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.history = ["echo A", "echo B", "echo B", "echo A", "echo A"];
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("echo");
+    expect(term.getReverseSearchState().match).toBe("echo A");
+    term.findOlderReverseSearchMatch();
+    expect(term.getReverseSearchState().match).toBe("echo B");
+    term.findOlderReverseSearchMatch();
+    expect(term.getReverseSearchState().match).toBe("echo A");
+    expect(term.findOlderReverseSearchMatch()).toBe(false);
+    expect(term.getReverseSearchState()).toMatchObject({
+      match: "echo A",
+      failed: true,
+    });
+
+    term.appendReverseSearchQuery("Z");
+    expect(term.getReverseSearchState()).toMatchObject({
+      query: "echoZ",
+      match: "echo A",
+      failed: true,
+    });
+    term.backspaceReverseSearchQuery();
+    expect(term.getReverseSearchState()).toMatchObject({
+      query: "echo",
+      match: "echo A",
+      failed: false,
+    });
+
+    term.cancelReverseSearch();
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("missing");
+    expect(term.getReverseSearchState()).toMatchObject({ match: "", failed: true });
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\x1b8\x1b[J(failed reverse-i-search)`missing': "
+    );
+  });
+
+  it("searches newest-first after Backspace and keeps empty history empty", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.history = ["echo A", "echo AB"];
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("AB");
+    expect(term.getReverseSearchState().match).toBe("echo AB");
+    term.backspaceReverseSearchQuery();
+    expect(term.getReverseSearchState().match).toBe("echo AB");
+    term.backspaceReverseSearchQuery();
+    expect(term.getReverseSearchState().match).toBe("echo AB");
+    expect(term.backspaceReverseSearchQuery()).toBe(false);
+
+    term.cancelReverseSearch();
+    term.history = [];
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("x");
+    expect(term.getReverseSearchState()).toMatchObject({ match: "", failed: true });
+    term.backspaceReverseSearchQuery();
+    expect(term.getReverseSearchState()).toMatchObject({
+      query: "",
+      match: "",
+      failed: true,
+    });
+    expect(term.takeReverseSearchMatchForSubmission()).toBe("");
+    expect(term.currentLine).toBe("");
+    expect(term.isReverseSearchActive()).toBe(false);
+  });
+
+  it("removes complete Unicode code points and restarts Backspace lookup newest-first", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.history = ["echo A old", "echo A newest", "echo B"];
+    env.window.dataLayer = [];
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("A");
+    term.appendReverseSearchQuery("😀");
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "A😀",
+      match: "echo A newest",
+      failed: true,
+    });
+
+    term.backspaceReverseSearchQuery();
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "A",
+      match: "echo A newest",
+      failed: false,
+    });
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\x1b8\x1b[J(reverse-i-search)`A': echo A newest"
+    );
+
+    term.findOlderReverseSearchMatch();
+    expect(term.getReverseSearchState().match).toBe("echo A old");
+    term.backspaceReverseSearchQuery();
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "",
+      match: "echo B",
+      failed: false,
+    });
+
+    const stateAtEmptyQuery = term.getReverseSearchState();
+    const writesAtEmptyQuery = term.write.mock.calls.length;
+    expect(term.backspaceReverseSearchQuery()).toBe(false);
+    expect(term.getReverseSearchState()).toEqual(stateAtEmptyQuery);
+    expect(term.write).toHaveBeenCalledTimes(writesAtEmptyQuery);
+    expect(term.history).toEqual(["echo A old", "echo A newest", "echo B"]);
+    expect(env.window.dataLayer).toEqual([]);
+  });
+
+  it("deletes exactly one supplementary, BMP, or ASCII code point with empty history", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm();
+    extend(term);
+    term.history = [];
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("A😀🚀界");
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "A😀🚀界",
+      match: "",
+      failed: true,
+    });
+
+    for (const query of ["A😀🚀", "A😀", "A", ""]) {
+      term.backspaceReverseSearchQuery();
+      expect(term.getReverseSearchState()).toEqual({
+        active: true,
+        query,
+        match: "",
+        failed: true,
+      });
+    }
+
+    const writesAtEmptyQuery = term.write.mock.calls.length;
+    expect(term.backspaceReverseSearchQuery()).toBe(false);
+    expect(term.getReverseSearchState()).toEqual({
+      active: true,
+      query: "",
+      match: "",
+      failed: true,
+    });
+    expect(term.write).toHaveBeenCalledTimes(writesAtEmptyQuery);
+    expect(term.history).toEqual([]);
+  });
+
+  it("cancels to the saved cursor and accepts or extracts matches without side effects", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({ _core: { buffer: { x: 21 } } });
+    extend(term);
+    const dispatch = vi.spyOn(term, "command");
+    term.history = ["echo A", "echo B"];
+    term.historyCursor = 1;
+    term.currentLine = "echo draft";
+    env.window.dataLayer = [];
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("B");
+    expect(term.cancelReverseSearch()).toEqual({ line: "echo draft", cursor: 4 });
+    expect(term.currentLine).toBe("echo draft");
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\x1b8\x1b[Jecho draft\x1b8\r\x1b[21C"
+    );
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("B");
+    expect(term.acceptReverseSearch()).toEqual({ line: "echo B", cursor: 6 });
+    expect(term.currentLine).toBe("echo B");
+
+    term.startReverseSearch();
+    term.appendReverseSearchQuery("A");
+    expect(term.takeReverseSearchMatchForSubmission()).toBe("echo A");
+    expect(term.currentLine).toBe("echo A");
+    expect(term.history).toEqual(["echo A", "echo B"]);
+    expect(term.historyCursor).toBe(1);
+    expect(env.window.dataLayer).toEqual([]);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("replaces wrapped search displays from a saved input origin", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({
+      cols: 20,
+      _core: { buffer: { x: 2 } },
+      buffer: {
+        active: {
+          baseY: 0,
+          cursorX: 2,
+          cursorY: 1,
+          getLine: (row) => ({ isWrapped: row === 1 }),
+        },
+      },
+    });
+    extend(term);
+    term.history = ["echo this is a deliberately long command"];
+    term.currentLine = "draft";
+
+    term.startReverseSearch();
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\r\x1b[1A\x1b[17C\x1b7\x1b[J(reverse-i-search)`': "
+    );
+    term.appendReverseSearchQuery("long");
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\x1b8\x1b[J(reverse-i-search)`long': echo this is a deliberately long command"
+    );
+    term.appendReverseSearchQuery(" missing");
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\x1b8\x1b[J(failed reverse-i-search)`long missing': echo this is a deliberately long command"
+    );
+    term.cancelReverseSearch();
+    expect(term.cancelReverseSearch()).toBeNull();
+    expect(term.write).toHaveBeenLastCalledWith(
+      "\x1b8\x1b[Jdraft\x1b8\r\x1b[1B\x1b[2C"
+    );
+
+    expect(term.write.mock.calls.flat().join("")).not.toContain("\r\n");
+    expect(term.currentLine).toBe("draft");
+  });
+
   it("prints cached art immediately and falls back to loading on cache miss", () => {
     const { extend } = loadTerminalExt({
       getArt: vi.fn()
