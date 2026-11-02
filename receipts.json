@@ -1,0 +1,803 @@
+[
+  {
+    "version": 1,
+    "source": "tool_result",
+    "workflowRunId": "workflow_run_d9b9db4500ec4a628c9fc01d75c9b2cc",
+    "workflowNodeId": "adversarial_review",
+    "toolName": "run_application_validation",
+    "applicationValidation": {
+      "phase": "scenarios",
+      "runId": "baeb14c8aab0808ecf0610f6a33a143af6bcde477c88e83b48191158dcf7adaa",
+      "status": "passed",
+      "attempt": 1,
+      "recipeId": "recipe_cli_application_v1",
+      "profileId": "cli_website",
+      "scenarios": [
+        {
+          "id": "baseline_narrow",
+          "status": "passed",
+          "assertions": 5,
+          "durationMs": 587,
+          "artifactIds": [
+            "artifact_5bacb39c-4686-45b4-86c7-77bc5faa603c_2l",
+            "artifact_eb21b11a-95cc-4612-9b81-ad8fa2715b0d_2m",
+            "artifact_6f6157ea-6cb7-4c84-9d9e-2d59ebc2d12d_2n"
+          ],
+          "imageCaptures": [
+            {
+              "label": "final",
+              "width": 375,
+              "height": 812,
+              "sha256": "63452ad8c7c0a0d5eddde226fe65d5ca6c624ef64a2e6a43a03f66865be821ec",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 22,
+              "artifactId": "artifact_5bacb39c-4686-45b4-86c7-77bc5faa603c_2l",
+              "byteLength": 25137,
+              "scenarioId": "baseline_narrow"
+            }
+          ],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "baseline_wide",
+          "status": "passed",
+          "assertions": 5,
+          "durationMs": 1604,
+          "artifactIds": [
+            "artifact_5a12f492-eac5-462c-83bd-1932d367c30e_2q",
+            "artifact_f27894c8-3156-4c59-b383-d2ecdf868793_2r",
+            "artifact_e84daed0-b16d-4acb-8984-d8d725c685c8_2s"
+          ],
+          "imageCaptures": [
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "9c10a3b07e655e8ffc76be9e9a3749a49744f026fb1b365712b8c579e192f3d9",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 22,
+              "artifactId": "artifact_5a12f492-eac5-462c-83bd-1932d367c30e_2q",
+              "byteLength": 33186,
+              "scenarioId": "baseline_wide"
+            }
+          ],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "baseline_http",
+          "status": "passed",
+          "assertions": 4,
+          "durationMs": 3,
+          "artifactIds": [],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "interrupt_transcript",
+          "status": "passed",
+          "assertions": 8,
+          "durationMs": 1819,
+          "artifactIds": [
+            "artifact_88ec26e2-82af-47c1-8b92-e1cb9e55c875_2x",
+            "artifact_fca600ad-e221-4447-a643-9ccf4a390d7c_2y",
+            "artifact_619afa39-5a1f-43e8-978f-8b26f7f61dd3_2z",
+            "artifact_7c6d75e5-c8f4-4e5a-8272-038c10282d03_30",
+            "artifact_8221ce0d-6e75-489f-bf72-6c50a9a6d164_31"
+          ],
+          "imageCaptures": [
+            {
+              "label": "interrupt-restored-draft-not-selected-match",
+              "width": 1440,
+              "height": 900,
+              "sha256": "1039c3d2e0b95fee79e7cadd02594350da4f5878e3f8a28c48afbde856454704",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 18,
+              "artifactId": "artifact_88ec26e2-82af-47c1-8b92-e1cb9e55c875_2x",
+              "byteLength": 32592,
+              "scenarioId": "interrupt_transcript"
+            },
+            {
+              "label": "interrupt-next-command",
+              "width": 1440,
+              "height": 900,
+              "sha256": "843a62e080e34ca296dc48cb77a34a88eda407b3b5ce1ee941a1b93b08cd4880",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 22,
+              "artifactId": "artifact_fca600ad-e221-4447-a643-9ccf4a390d7c_2y",
+              "byteLength": 36556,
+              "scenarioId": "interrupt_transcript"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "843a62e080e34ca296dc48cb77a34a88eda407b3b5ce1ee941a1b93b08cd4880",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 23,
+              "artifactId": "artifact_619afa39-5a1f-43e8-978f-8b26f7f61dd3_2z",
+              "byteLength": 36556,
+              "scenarioId": "interrupt_transcript"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_03_ce1fde5be6d6",
+            "requirement_18_aa751e6fe5b5"
+          ]
+        },
+        {
+          "id": "unicode_backspace",
+          "status": "passed",
+          "assertions": 6,
+          "durationMs": 1889,
+          "artifactIds": [
+            "artifact_d274eb98-d0ae-482f-ba72-a47a07dc24f5_34",
+            "artifact_3b517f1b-abd3-4d90-9652-9e871944fce3_35",
+            "artifact_b111ca17-ab5c-4385-8484-103b6989f366_36",
+            "artifact_f1875d6b-7ce1-4d44-ae37-1ad472ea51da_37",
+            "artifact_0e3188e9-e7e2-471f-a456-07ece11703d9_38"
+          ],
+          "imageCaptures": [
+            {
+              "label": "complete-code-point-deletion-and-recovery",
+              "width": 1440,
+              "height": 900,
+              "sha256": "1b9b3e766e5bb956d63747df3a16e2733cc439d8ed65f1c279a993927a044596",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 17,
+              "artifactId": "artifact_d274eb98-d0ae-482f-ba72-a47a07dc24f5_34",
+              "byteLength": 34210,
+              "scenarioId": "unicode_backspace"
+            },
+            {
+              "label": "ordinary-edit-and-execution-after-unicode-backspace",
+              "width": 1440,
+              "height": 900,
+              "sha256": "af34101e91f15898d4226eb38591c6f8abe7df144f466af69126c713d29a3893",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 27,
+              "artifactId": "artifact_3b517f1b-abd3-4d90-9652-9e871944fce3_35",
+              "byteLength": 35408,
+              "scenarioId": "unicode_backspace"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "af34101e91f15898d4226eb38591c6f8abe7df144f466af69126c713d29a3893",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 28,
+              "artifactId": "artifact_b111ca17-ab5c-4385-8484-103b6989f366_36",
+              "byteLength": 35408,
+              "scenarioId": "unicode_backspace"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_03_ce1fde5be6d6",
+            "requirement_11_a674a506e249",
+            "requirement_13_612f23aa70f8"
+          ]
+        },
+        {
+          "id": "unicode_query",
+          "status": "passed",
+          "assertions": 4,
+          "durationMs": 1388,
+          "artifactIds": [
+            "artifact_a6613e2b-0f21-49d5-9e27-ad08d97f0f04_3b",
+            "artifact_ed16ca95-8e53-4617-8a69-925ca6ba8e97_3c",
+            "artifact_968323a3-f739-4519-ad2c-7ff85d6caaf2_3d",
+            "artifact_eddf57fc-a904-4220-b257-61c2f81fe732_3e",
+            "artifact_973a3a89-c482-409f-bc81-b91acdcf9f99_3f"
+          ],
+          "imageCaptures": [
+            {
+              "label": "supplementary-query-failed-form",
+              "width": 1440,
+              "height": 900,
+              "sha256": "38af19b153208490d2811c94f7008fb73b8e9038e69480f9f3ab312b205b020f",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 9,
+              "artifactId": "artifact_a6613e2b-0f21-49d5-9e27-ad08d97f0f04_3b",
+              "byteLength": 32196,
+              "scenarioId": "unicode_query"
+            },
+            {
+              "label": "ascii-execution-after-supplementary-query",
+              "width": 1440,
+              "height": 900,
+              "sha256": "5ebdc7851e453682ec81210eeb3ca25fb665fd5970e387580a257a33461533ba",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 18,
+              "artifactId": "artifact_ed16ca95-8e53-4617-8a69-925ca6ba8e97_3c",
+              "byteLength": 32326,
+              "scenarioId": "unicode_query"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "5ebdc7851e453682ec81210eeb3ca25fb665fd5970e387580a257a33461533ba",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 19,
+              "artifactId": "artifact_968323a3-f739-4519-ad2c-7ff85d6caaf2_3d",
+              "byteLength": 32326,
+              "scenarioId": "unicode_query"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_03_ce1fde5be6d6",
+            "requirement_09_5ae3860669f6",
+            "requirement_10_f02b5f4feccf"
+          ]
+        },
+        {
+          "id": "wide_cancel_cursor",
+          "status": "passed",
+          "assertions": 13,
+          "durationMs": 2179,
+          "artifactIds": [
+            "artifact_17cd6b78-bde4-4def-8696-dfa72c54b065_3i",
+            "artifact_7b401ba1-9c4f-4304-9f96-4372a8e819d7_3j",
+            "artifact_f53f2fe1-9da2-484e-8ee7-5bbeeac3a18e_3k",
+            "artifact_edd17004-21f7-4279-a4a7-ac21406d6f68_3l",
+            "artifact_27a16d73-0c3a-4e0e-9ffb-f439f08d757e_3m",
+            "artifact_b5bc0b2e-f1cd-460c-9ebe-58c1174c53b2_3n"
+          ],
+          "imageCaptures": [
+            {
+              "label": "wide-draft-escape-restored-insertion",
+              "width": 1440,
+              "height": 900,
+              "sha256": "bf68004a3101feb3872c7c29e19197c64102506154ca30d6a5fd44c4d9a9a6d7",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 16,
+              "artifactId": "artifact_17cd6b78-bde4-4def-8696-dfa72c54b065_3i",
+              "byteLength": 27166,
+              "scenarioId": "wide_cancel_cursor"
+            },
+            {
+              "label": "wide-draft-control-g-restored-insertion",
+              "width": 1440,
+              "height": 900,
+              "sha256": "01f99d54d32e29c93a023b747f45bbd5ac3927799c18ee09fa114aec9a692bd9",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 27,
+              "artifactId": "artifact_7b401ba1-9c4f-4304-9f96-4372a8e819d7_3j",
+              "byteLength": 27351,
+              "scenarioId": "wide_cancel_cursor"
+            },
+            {
+              "label": "wide-draft-real-output-and-next-command",
+              "width": 1440,
+              "height": 900,
+              "sha256": "e4a35300e249323c16d73fe19ff772d5b1f77c5f054b3a7b372ca69538814a28",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 33,
+              "artifactId": "artifact_f53f2fe1-9da2-484e-8ee7-5bbeeac3a18e_3k",
+              "byteLength": 34884,
+              "scenarioId": "wide_cancel_cursor"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "e4a35300e249323c16d73fe19ff772d5b1f77c5f054b3a7b372ca69538814a28",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 34,
+              "artifactId": "artifact_edd17004-21f7-4279-a4a7-ac21406d6f68_3l",
+              "byteLength": 34884,
+              "scenarioId": "wide_cancel_cursor"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_03_ce1fde5be6d6",
+            "requirement_16_5d3305832c22"
+          ]
+        },
+        {
+          "id": "canceled_draft_editing",
+          "status": "passed",
+          "assertions": 12,
+          "durationMs": 2052,
+          "artifactIds": [
+            "artifact_580edd5d-bc56-4ccc-95fb-086c36b6d70b_3q",
+            "artifact_38c046bd-8cdd-4cbd-8d33-265b6563a53f_3r",
+            "artifact_dc26d34e-1b58-47dc-b218-2130b7e5261c_3s",
+            "artifact_ee99e6d4-815a-432b-9dc9-cbec8061b115_3t",
+            "artifact_2d47b9b0-efef-474a-b6c1-c67effcde12e_3u"
+          ],
+          "imageCaptures": [
+            {
+              "label": "canceled-draft-arrows-and-backspace",
+              "width": 1440,
+              "height": 900,
+              "sha256": "3fe7e23fed6f2e2b44f12778246e1c81038e02a571ae39389e969243fe61aa55",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 25,
+              "artifactId": "artifact_580edd5d-bc56-4ccc-95fb-086c36b6d70b_3q",
+              "byteLength": 27067,
+              "scenarioId": "canceled_draft_editing"
+            },
+            {
+              "label": "canceled-draft-edited-command-output",
+              "width": 1440,
+              "height": 900,
+              "sha256": "2741b3b772f6043781d041b0ccb59c5eb105b67ea80f61f4578ee0761053b053",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 29,
+              "artifactId": "artifact_38c046bd-8cdd-4cbd-8d33-265b6563a53f_3r",
+              "byteLength": 30155,
+              "scenarioId": "canceled_draft_editing"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "2741b3b772f6043781d041b0ccb59c5eb105b67ea80f61f4578ee0761053b053",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 30,
+              "artifactId": "artifact_dc26d34e-1b58-47dc-b218-2130b7e5261c_3s",
+              "byteLength": 30155,
+              "scenarioId": "canceled_draft_editing"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_03_ce1fde5be6d6",
+            "requirement_16_5d3305832c22"
+          ]
+        },
+        {
+          "id": "acceptance_narrow",
+          "status": "passed",
+          "assertions": 19,
+          "durationMs": 1354,
+          "artifactIds": [
+            "artifact_abbb221f-7505-4772-b70a-a1c5ae81e7fb_3x",
+            "artifact_65ed0a2d-d91f-421e-9c6d-bf57b63831d2_3y",
+            "artifact_51a306b1-13b5-4111-af43-bf10e9750991_3z",
+            "artifact_71bc000b-83bd-4bf4-a993-7d4152a48ae7_40",
+            "artifact_de68a2ed-ccb7-4273-91ca-31426d57f484_41",
+            "artifact_23e96ea9-5ee6-420b-8ab0-a2ec53096832_42"
+          ],
+          "imageCaptures": [
+            {
+              "label": "narrow-search-older-A",
+              "width": 375,
+              "height": 812,
+              "sha256": "40cbf01cecb76e094d89780e304ccc56acb5b587f2237cafc30f6a7926a359a7",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 13,
+              "artifactId": "artifact_abbb221f-7505-4772-b70a-a1c5ae81e7fb_3x",
+              "byteLength": 26753,
+              "scenarioId": "acceptance_narrow"
+            },
+            {
+              "label": "narrow-exhausted-keeps-match",
+              "width": 375,
+              "height": 812,
+              "sha256": "af3d747467d860054d055144749500ff068ad837433777f0d6e88b9abb8df576",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 27,
+              "artifactId": "artifact_65ed0a2d-d91f-421e-9c6d-bf57b63831d2_3y",
+              "byteLength": 29845,
+              "scenarioId": "acceptance_narrow"
+            },
+            {
+              "label": "narrow-edited-search-and-preserved-keys",
+              "width": 375,
+              "height": 812,
+              "sha256": "6d80d589102e6ebb63b89cbe3b245684f58e36f4c1538d3dc00a331b3f35c41b",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 88,
+              "artifactId": "artifact_51a306b1-13b5-4111-af43-bf10e9750991_3z",
+              "byteLength": 36459,
+              "scenarioId": "acceptance_narrow"
+            },
+            {
+              "label": "final",
+              "width": 375,
+              "height": 812,
+              "sha256": "6d80d589102e6ebb63b89cbe3b245684f58e36f4c1538d3dc00a331b3f35c41b",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 89,
+              "artifactId": "artifact_71bc000b-83bd-4bf4-a993-7d4152a48ae7_40",
+              "byteLength": 36459,
+              "scenarioId": "acceptance_narrow"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_01_20666cf3adaf",
+            "requirement_02_d1fce03a50e3",
+            "requirement_03_ce1fde5be6d6",
+            "requirement_05_4f3ae652cd37",
+            "requirement_06_e0acd16f3a37",
+            "requirement_07_f1395ec48eea",
+            "requirement_08_0568b2593ee3",
+            "requirement_09_5ae3860669f6",
+            "requirement_10_f02b5f4feccf",
+            "requirement_12_7a24492df2f8",
+            "requirement_13_612f23aa70f8",
+            "requirement_14_a917046f3b33",
+            "requirement_16_5d3305832c22",
+            "requirement_17_9d1a3e4344d1",
+            "requirement_18_aa751e6fe5b5",
+            "requirement_20_86ae6cb7b2c6",
+            "requirement_24_f52f55e7a92e",
+            "requirement_25_dceaac2b91f8",
+            "requirement_26_a54463e3ef58",
+            "requirement_27_846b9d316b49",
+            "requirement_28_63a128df5580"
+          ]
+        },
+        {
+          "id": "acceptance_wide",
+          "status": "passed",
+          "assertions": 19,
+          "durationMs": 2766,
+          "artifactIds": [
+            "artifact_1ce25d1b-e91a-446c-b05d-ec046d9cd07f_45",
+            "artifact_d1bd176a-90db-46b3-b5f0-16a539e264d5_46",
+            "artifact_bff3f080-2590-4cbc-b174-129f0b573d6b_47",
+            "artifact_26ebe227-647e-4b98-b0ea-5b9315421975_48",
+            "artifact_faa23eb1-7e23-4f4f-a72e-9a5029cc834e_49",
+            "artifact_bd76e031-f619-44f1-8f8b-720200f02093_4a"
+          ],
+          "imageCaptures": [
+            {
+              "label": "wide-search-older-A",
+              "width": 1440,
+              "height": 900,
+              "sha256": "1b9b3e766e5bb956d63747df3a16e2733cc439d8ed65f1c279a993927a044596",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 13,
+              "artifactId": "artifact_1ce25d1b-e91a-446c-b05d-ec046d9cd07f_45",
+              "byteLength": 34210,
+              "scenarioId": "acceptance_wide"
+            },
+            {
+              "label": "wide-exhausted-keeps-match",
+              "width": 1440,
+              "height": 900,
+              "sha256": "7167a166049da8e8cf5ad6c1b393590892cef876a948fc9bda18b907d1b4a4cb",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 27,
+              "artifactId": "artifact_d1bd176a-90db-46b3-b5f0-16a539e264d5_46",
+              "byteLength": 37854,
+              "scenarioId": "acceptance_wide"
+            },
+            {
+              "label": "wide-edited-search-and-preserved-keys",
+              "width": 1440,
+              "height": 900,
+              "sha256": "3ef6623176bf4844f049439d6c94aa566eb59e5dd06bdd2fd7b206cbb51fe97e",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 88,
+              "artifactId": "artifact_bff3f080-2590-4cbc-b174-129f0b573d6b_47",
+              "byteLength": 47416,
+              "scenarioId": "acceptance_wide"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "3ef6623176bf4844f049439d6c94aa566eb59e5dd06bdd2fd7b206cbb51fe97e",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 89,
+              "artifactId": "artifact_26ebe227-647e-4b98-b0ea-5b9315421975_48",
+              "byteLength": 47416,
+              "scenarioId": "acceptance_wide"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_01_20666cf3adaf",
+            "requirement_02_d1fce03a50e3",
+            "requirement_03_ce1fde5be6d6",
+            "requirement_05_4f3ae652cd37",
+            "requirement_06_e0acd16f3a37",
+            "requirement_07_f1395ec48eea",
+            "requirement_08_0568b2593ee3",
+            "requirement_09_5ae3860669f6",
+            "requirement_10_f02b5f4feccf",
+            "requirement_12_7a24492df2f8",
+            "requirement_13_612f23aa70f8",
+            "requirement_14_a917046f3b33",
+            "requirement_16_5d3305832c22",
+            "requirement_17_9d1a3e4344d1",
+            "requirement_18_aa751e6fe5b5",
+            "requirement_20_86ae6cb7b2c6",
+            "requirement_24_f52f55e7a92e",
+            "requirement_25_dceaac2b91f8",
+            "requirement_26_a54463e3ef58",
+            "requirement_27_846b9d316b49",
+            "requirement_28_63a128df5580"
+          ]
+        }
+      ],
+      "startedAt": "2026-11-02T04:48:34.669Z",
+      "finishedAt": "2026-11-02T04:49:52.141Z",
+      "artifactIds": [
+        "artifact_15ef479b-e3e5-4fcc-be1d-826fb2b0d968_2k",
+        "artifact_5bacb39c-4686-45b4-86c7-77bc5faa603c_2l",
+        "artifact_eb21b11a-95cc-4612-9b81-ad8fa2715b0d_2m",
+        "artifact_6f6157ea-6cb7-4c84-9d9e-2d59ebc2d12d_2n",
+        "artifact_d1773d7b-d37f-44d2-ad8d-20bb822779ec_2o",
+        "artifact_2808e048-1d1b-416d-9451-8f64f36a77ef_2p",
+        "artifact_5a12f492-eac5-462c-83bd-1932d367c30e_2q",
+        "artifact_f27894c8-3156-4c59-b383-d2ecdf868793_2r",
+        "artifact_e84daed0-b16d-4acb-8984-d8d725c685c8_2s",
+        "artifact_e418a831-bad6-44cc-855d-a00c080702f0_2t",
+        "artifact_bf5be3a2-5b7f-4fd4-95f1-3a69d252f9fe_2u",
+        "artifact_fd8f05d5-26e2-4cf7-9c7c-0c127cfe5746_2v",
+        "artifact_08c51f94-be17-4ca9-ab14-1684ff85b039_2w",
+        "artifact_88ec26e2-82af-47c1-8b92-e1cb9e55c875_2x",
+        "artifact_fca600ad-e221-4447-a643-9ccf4a390d7c_2y",
+        "artifact_619afa39-5a1f-43e8-978f-8b26f7f61dd3_2z",
+        "artifact_7c6d75e5-c8f4-4e5a-8272-038c10282d03_30",
+        "artifact_8221ce0d-6e75-489f-bf72-6c50a9a6d164_31",
+        "artifact_c41adddf-ac3f-413e-a3b5-79686e1be39a_32",
+        "artifact_c0e54f4a-a1b0-4597-a5d5-30bbf8743da8_33",
+        "artifact_d274eb98-d0ae-482f-ba72-a47a07dc24f5_34",
+        "artifact_3b517f1b-abd3-4d90-9652-9e871944fce3_35",
+        "artifact_b111ca17-ab5c-4385-8484-103b6989f366_36",
+        "artifact_f1875d6b-7ce1-4d44-ae37-1ad472ea51da_37",
+        "artifact_0e3188e9-e7e2-471f-a456-07ece11703d9_38",
+        "artifact_e40888b9-3201-417e-8fef-3ef45a721cc6_39",
+        "artifact_65f1f182-a0f3-453b-b124-e8039b552a54_3a",
+        "artifact_a6613e2b-0f21-49d5-9e27-ad08d97f0f04_3b",
+        "artifact_ed16ca95-8e53-4617-8a69-925ca6ba8e97_3c",
+        "artifact_968323a3-f739-4519-ad2c-7ff85d6caaf2_3d",
+        "artifact_eddf57fc-a904-4220-b257-61c2f81fe732_3e",
+        "artifact_973a3a89-c482-409f-bc81-b91acdcf9f99_3f",
+        "artifact_363a25b5-7b10-4caf-b909-4e354af31cb5_3g",
+        "artifact_ccb75420-2864-4dd8-97f3-f051fdec86b3_3h",
+        "artifact_17cd6b78-bde4-4def-8696-dfa72c54b065_3i",
+        "artifact_7b401ba1-9c4f-4304-9f96-4372a8e819d7_3j",
+        "artifact_f53f2fe1-9da2-484e-8ee7-5bbeeac3a18e_3k",
+        "artifact_edd17004-21f7-4279-a4a7-ac21406d6f68_3l",
+        "artifact_27a16d73-0c3a-4e0e-9ffb-f439f08d757e_3m",
+        "artifact_b5bc0b2e-f1cd-460c-9ebe-58c1174c53b2_3n",
+        "artifact_12d66c3c-ada2-4d84-b063-de1361054165_3o",
+        "artifact_ecd70dcf-e556-4445-9cfb-b0a75fc0fff0_3p",
+        "artifact_580edd5d-bc56-4ccc-95fb-086c36b6d70b_3q",
+        "artifact_38c046bd-8cdd-4cbd-8d33-265b6563a53f_3r",
+        "artifact_dc26d34e-1b58-47dc-b218-2130b7e5261c_3s",
+        "artifact_ee99e6d4-815a-432b-9dc9-cbec8061b115_3t",
+        "artifact_2d47b9b0-efef-474a-b6c1-c67effcde12e_3u",
+        "artifact_201d98fc-b33f-40dc-9c06-03260a940b1e_3v",
+        "artifact_f5b6ebc4-76bb-4e05-b118-62262d232933_3w",
+        "artifact_abbb221f-7505-4772-b70a-a1c5ae81e7fb_3x",
+        "artifact_65ed0a2d-d91f-421e-9c6d-bf57b63831d2_3y",
+        "artifact_51a306b1-13b5-4111-af43-bf10e9750991_3z",
+        "artifact_71bc000b-83bd-4bf4-a993-7d4152a48ae7_40",
+        "artifact_de68a2ed-ccb7-4273-91ca-31426d57f484_41",
+        "artifact_23e96ea9-5ee6-420b-8ab0-a2ec53096832_42",
+        "artifact_31f18430-20a7-4403-9abc-579e7c4065e5_43",
+        "artifact_9b0b9612-bef5-4fd2-8e16-611ddb0f19dc_44",
+        "artifact_1ce25d1b-e91a-446c-b05d-ec046d9cd07f_45",
+        "artifact_d1bd176a-90db-46b3-b5f0-16a539e264d5_46",
+        "artifact_bff3f080-2590-4cbc-b174-129f0b573d6b_47",
+        "artifact_26ebe227-647e-4b98-b0ea-5b9315421975_48",
+        "artifact_faa23eb1-7e23-4f4f-a72e-9a5029cc834e_49",
+        "artifact_bd76e031-f619-44f1-8f8b-720200f02093_4a",
+        "artifact_91237c38-0311-4f29-8e79-303dd3efa072_4b"
+      ],
+      "scenarioIds": [
+        "baseline_narrow",
+        "baseline_wide",
+        "baseline_http",
+        "interrupt_transcript",
+        "unicode_backspace",
+        "unicode_query",
+        "wide_cancel_cursor",
+        "canceled_draft_editing",
+        "acceptance_narrow",
+        "acceptance_wide"
+      ],
+      "candidateTree": "db22a372938aa1dd4cc1d594d323d1918a23b7177b62ad7174106940d5c18b31",
+      "profileSha256": "414e8749b4fa7e1d6991bcbd23133c593f515cff14cb98ece16fd6c3e009b0ee",
+      "recipeVersion": "1.0.7-planning-only.20261023",
+      "cleanupComplete": true,
+      "contractVersion": "application_validation_v1",
+      "environmentIdentity": "{\"runner\":\"application-validation:2026-10-02.1\",\"environment\":\"runtime_local_process_default\",\"version\":\"v1\",\"image\":null,\"node\":\"22.23.3\",\"platform\":\"darwin\",\"architecture\":\"arm64\",\"browserExecutable\":\"/Users/sandeep/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\",\"suite\":\"2026-09-25.1\"}"
+    },
+    "toolCallId": "call_6e98ade5ac8b48d8b97b540212d0bdf5",
+    "idempotencyKey": "tool_call_36b7aac2d24daa1fea989076fc3ab81d",
+    "ok": true,
+    "outputSha256": "f97488830576398277541168be0944a491ed69c532643bf5af69cf56ffb2b20c",
+    "artifactIds": [
+      "artifact_08c51f94-be17-4ca9-ab14-1684ff85b039_2w",
+      "artifact_0e3188e9-e7e2-471f-a456-07ece11703d9_38",
+      "artifact_12d66c3c-ada2-4d84-b063-de1361054165_3o",
+      "artifact_15ef479b-e3e5-4fcc-be1d-826fb2b0d968_2k",
+      "artifact_17cd6b78-bde4-4def-8696-dfa72c54b065_3i",
+      "artifact_1ce25d1b-e91a-446c-b05d-ec046d9cd07f_45",
+      "artifact_201d98fc-b33f-40dc-9c06-03260a940b1e_3v",
+      "artifact_23e96ea9-5ee6-420b-8ab0-a2ec53096832_42",
+      "artifact_26ebe227-647e-4b98-b0ea-5b9315421975_48",
+      "artifact_27a16d73-0c3a-4e0e-9ffb-f439f08d757e_3m",
+      "artifact_2808e048-1d1b-416d-9451-8f64f36a77ef_2p",
+      "artifact_2d47b9b0-efef-474a-b6c1-c67effcde12e_3u",
+      "artifact_31f18430-20a7-4403-9abc-579e7c4065e5_43",
+      "artifact_363a25b5-7b10-4caf-b909-4e354af31cb5_3g",
+      "artifact_38c046bd-8cdd-4cbd-8d33-265b6563a53f_3r",
+      "artifact_3b517f1b-abd3-4d90-9652-9e871944fce3_35",
+      "artifact_51a306b1-13b5-4111-af43-bf10e9750991_3z",
+      "artifact_580edd5d-bc56-4ccc-95fb-086c36b6d70b_3q",
+      "artifact_5a12f492-eac5-462c-83bd-1932d367c30e_2q",
+      "artifact_5bacb39c-4686-45b4-86c7-77bc5faa603c_2l",
+      "artifact_619afa39-5a1f-43e8-978f-8b26f7f61dd3_2z",
+      "artifact_65ed0a2d-d91f-421e-9c6d-bf57b63831d2_3y",
+      "artifact_65f1f182-a0f3-453b-b124-e8039b552a54_3a",
+      "artifact_6f6157ea-6cb7-4c84-9d9e-2d59ebc2d12d_2n",
+      "artifact_71bc000b-83bd-4bf4-a993-7d4152a48ae7_40",
+      "artifact_7b401ba1-9c4f-4304-9f96-4372a8e819d7_3j",
+      "artifact_7c6d75e5-c8f4-4e5a-8272-038c10282d03_30",
+      "artifact_8221ce0d-6e75-489f-bf72-6c50a9a6d164_31",
+      "artifact_88ec26e2-82af-47c1-8b92-e1cb9e55c875_2x",
+      "artifact_91237c38-0311-4f29-8e79-303dd3efa072_4b",
+      "artifact_968323a3-f739-4519-ad2c-7ff85d6caaf2_3d",
+      "artifact_973a3a89-c482-409f-bc81-b91acdcf9f99_3f",
+      "artifact_9b0b9612-bef5-4fd2-8e16-611ddb0f19dc_44",
+      "artifact_a6613e2b-0f21-49d5-9e27-ad08d97f0f04_3b",
+      "artifact_abbb221f-7505-4772-b70a-a1c5ae81e7fb_3x",
+      "artifact_b111ca17-ab5c-4385-8484-103b6989f366_36",
+      "artifact_b5bc0b2e-f1cd-460c-9ebe-58c1174c53b2_3n",
+      "artifact_bd76e031-f619-44f1-8f8b-720200f02093_4a",
+      "artifact_bf5be3a2-5b7f-4fd4-95f1-3a69d252f9fe_2u",
+      "artifact_bff3f080-2590-4cbc-b174-129f0b573d6b_47",
+      "artifact_c0e54f4a-a1b0-4597-a5d5-30bbf8743da8_33",
+      "artifact_c41adddf-ac3f-413e-a3b5-79686e1be39a_32",
+      "artifact_ccb75420-2864-4dd8-97f3-f051fdec86b3_3h",
+      "artifact_d1773d7b-d37f-44d2-ad8d-20bb822779ec_2o",
+      "artifact_d1bd176a-90db-46b3-b5f0-16a539e264d5_46",
+      "artifact_d274eb98-d0ae-482f-ba72-a47a07dc24f5_34",
+      "artifact_dc26d34e-1b58-47dc-b218-2130b7e5261c_3s",
+      "artifact_de68a2ed-ccb7-4273-91ca-31426d57f484_41",
+      "artifact_e40888b9-3201-417e-8fef-3ef45a721cc6_39",
+      "artifact_e418a831-bad6-44cc-855d-a00c080702f0_2t",
+      "artifact_e84daed0-b16d-4acb-8984-d8d725c685c8_2s",
+      "artifact_eb21b11a-95cc-4612-9b81-ad8fa2715b0d_2m",
+      "artifact_ecd70dcf-e556-4445-9cfb-b0a75fc0fff0_3p",
+      "artifact_ed16ca95-8e53-4617-8a69-925ca6ba8e97_3c",
+      "artifact_edd17004-21f7-4279-a4a7-ac21406d6f68_3l",
+      "artifact_eddf57fc-a904-4220-b257-61c2f81fe732_3e",
+      "artifact_ee99e6d4-815a-432b-9dc9-cbec8061b115_3t",
+      "artifact_f1875d6b-7ce1-4d44-ae37-1ad472ea51da_37",
+      "artifact_f27894c8-3156-4c59-b383-d2ecdf868793_2r",
+      "artifact_f53f2fe1-9da2-484e-8ee7-5bbeeac3a18e_3k",
+      "artifact_f5b6ebc4-76bb-4e05-b118-62262d232933_3w",
+      "artifact_faa23eb1-7e23-4f4f-a72e-9a5029cc834e_49",
+      "artifact_fca600ad-e221-4447-a643-9ccf4a390d7c_2y",
+      "artifact_fd8f05d5-26e2-4cf7-9c7c-0c127cfe5746_2v"
+    ],
+    "recordedAt": "2026-11-02T04:49:52.745Z",
+    "repositoryRunId": "repository_run_cf6e286d4ad79d209b04",
+    "workspaceStateSha256": "f3399426438098f0c3656b78ee902419c288c542b6ba9ea46212c3d28dfc6d45",
+    "workspaceContentSha256": "6bda6ceec11d36d8581de8096e10804b5f606c0a4ca244bbf8043cd858a1492b",
+    "headRevisions": {
+      "repos/github_1330417154": "65a9b08655a8d6ccbe66863cbefa21f14577c456"
+    },
+    "runtimeEnvironmentRef": {
+      "id": "runtime_local_process_default",
+      "version": "v1"
+    },
+    "runtimeExecutionMode": "local_process",
+    "runtimeContractVersion": "1",
+    "runtimeCapabilities": [
+      "code:edit",
+      "code:read",
+      "test:run"
+    ],
+    "outputBytes": 18395,
+    "id": "evidence_tool_97eadc0ef98bd143fc18a86204e25376dcb86a7a0355fca860d35aff216dc59e"
+  }
+]
