@@ -11,14 +11,32 @@ var Pipeline = (function () {
     };
   }
 
+  function splitPipeline(commandLine) {
+    var parts = [];
+    var start = 0;
+    var quote = "";
+
+    for (var index = 0; index < commandLine.length; index += 1) {
+      var character = commandLine.charAt(index);
+      if (character === "'" || character === '"') {
+        if (!quote) quote = character;
+        else if (quote === character) quote = "";
+      } else if (character === "|" && !quote) {
+        parts.push(commandLine.slice(start, index).trim());
+        start = index + 1;
+      }
+    }
+    parts.push(commandLine.slice(start).trim());
+    return parts;
+  }
+
   function parsePipeline(commandLine) {
     if (typeof commandLine !== "string" || commandLine.indexOf("|") === -1) {
       return null;
     }
 
-    var parts = commandLine.split("|").map(function (part) {
-      return part.trim();
-    });
+    var parts = splitPipeline(commandLine);
+    if (parts.length === 1) return null;
 
     return {
       producer: parts[0],
@@ -142,10 +160,183 @@ var Pipeline = (function () {
     };
   }
 
+  function tokenizeCutStage(source) {
+    var tokens = [];
+    var token = "";
+    var quote = "";
+    var tokenStarted = false;
+
+    for (var index = 0; index < source.length; index += 1) {
+      var character = source.charAt(index);
+      if (quote) {
+        if (character === quote) quote = "";
+        else token += character;
+        tokenStarted = true;
+      } else if (character === "'" || character === '"') {
+        quote = character;
+        tokenStarted = true;
+      } else if (/\s/.test(character)) {
+        if (tokenStarted) {
+          tokens.push(token);
+          token = "";
+          tokenStarted = false;
+        }
+      } else {
+        token += character;
+        tokenStarted = true;
+      }
+    }
+    if (tokenStarted) tokens.push(token);
+    return tokens;
+  }
+
+  function normalizeDecimal(value) {
+    return value.replace(/^0+(?=\d)/, "");
+  }
+
+  function compareDecimals(left, right) {
+    left = normalizeDecimal(left);
+    right = normalizeDecimal(right);
+    if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
+  function parseCutList(value, stageName) {
+    if (value === "") {
+      return preDispatchError(stageName, "cut: LIST cannot be empty");
+    }
+
+    var items = value.split(",");
+    var intervals = [];
+    for (var index = 0; index < items.length; index += 1) {
+      var item = items[index];
+      if (!item) {
+        return preDispatchError(stageName, "cut: LIST items cannot be empty");
+      }
+
+      var start;
+      var end;
+      if (/^\d+$/.test(item)) {
+        start = item;
+        end = item;
+      } else {
+        var range = item.match(/^(\d*)-(\d*)$/);
+        if (!range || (!range[1] && !range[2])) {
+          return preDispatchError(stageName, "cut: invalid LIST item " + item);
+        }
+        start = range[1] || "1";
+        end = range[2] || null;
+      }
+
+      if (compareDecimals(start, "0") === 0 || (end !== null && compareDecimals(end, "0") === 0)) {
+        return preDispatchError(stageName, "cut: positions must be positive");
+      }
+      start = normalizeDecimal(start);
+      if (end !== null) end = normalizeDecimal(end);
+      if (end !== null && compareDecimals(start, end) > 0) {
+        return preDispatchError(stageName, "cut: range start must not exceed end");
+      }
+      intervals.push({ start: start, end: end });
+    }
+
+    return { ok: true, intervals: intervals };
+  }
+
+  function compileCut(stage) {
+    var tokens = tokenizeCutStage(stage.source).slice(1);
+    var mode = null;
+    var list = null;
+    var delimiter = "\t";
+    var delimiterSet = false;
+    var suppress = false;
+
+    for (var index = 0; index < tokens.length; index += 1) {
+      var arg = tokens[index];
+      if (arg === "-f" || arg === "-c") {
+        var nextMode = arg === "-f" ? "fields" : "characters";
+        if (mode) {
+          return preDispatchError(
+            stage.name,
+            mode === nextMode
+              ? "cut: " + arg + " may only be specified once"
+              : "cut: -f and -c cannot be used together"
+          );
+        }
+        if (index + 1 >= tokens.length) {
+          return preDispatchError(stage.name, "cut: " + arg + " requires a LIST");
+        }
+        mode = nextMode;
+        list = tokens[index + 1];
+        index += 1;
+      } else if (arg === "-d" || arg.indexOf("-d") === 0) {
+        if (delimiterSet) {
+          return preDispatchError(stage.name, "cut: -d may only be specified once");
+        }
+        delimiterSet = true;
+        if (arg === "-d") {
+          if (index + 1 >= tokens.length) {
+            return preDispatchError(stage.name, "cut: -d requires a delimiter");
+          }
+          delimiter = tokens[index + 1];
+          index += 1;
+        } else {
+          delimiter = arg.slice(2);
+        }
+        if (Array.from(delimiter).length !== 1) {
+          return preDispatchError(stage.name, "cut: delimiter must be exactly one character");
+        }
+      } else if (arg === "-s") {
+        if (suppress) {
+          return preDispatchError(stage.name, "cut: -s may only be specified once");
+        }
+        suppress = true;
+      } else {
+        return preDispatchError(stage.name, "cut: unsupported option " + arg);
+      }
+    }
+
+    if (!mode) {
+      return preDispatchError(stage.name, "cut: exactly one of -f or -c is required");
+    }
+    if (mode === "characters" && delimiterSet) {
+      return preDispatchError(stage.name, "cut: -d cannot be used with -c");
+    }
+    if (mode === "characters" && suppress) {
+      return preDispatchError(stage.name, "cut: -s cannot be used with -c");
+    }
+
+    var parsedList = parseCutList(list, stage.name);
+    if (!parsedList.ok) return parsedList;
+    return {
+      ok: true,
+      filter: {
+        type: "cut",
+        name: stage.name,
+        mode: mode,
+        intervals: parsedList.intervals,
+        delimiter: delimiter,
+        suppress: suppress,
+      },
+    };
+  }
+
+  function cutPositionSelected(position, intervals) {
+    var decimalPosition = String(position);
+    for (var index = 0; index < intervals.length; index += 1) {
+      var interval = intervals[index];
+      if (compareDecimals(decimalPosition, interval.start) < 0) continue;
+      if (interval.end === null || compareDecimals(decimalPosition, interval.end) <= 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function compileStage(stage) {
     if (!stage.name) {
       return preDispatchError("", "Pipeline stages cannot be empty");
     }
+    if (stage.name === "cut") return compileCut(stage);
     if (stage.name === "grep") return compileGrep(stage);
     if (stage.name === "head" || stage.name === "tail") {
       return compileCountFilter(stage);
@@ -214,6 +405,27 @@ var Pipeline = (function () {
           message: "Unknown pipeline filter: " + filter.name,
         },
       };
+    }
+
+    if (filter.type === "cut") {
+      var cutLines = [];
+      lines.forEach(function (line) {
+        var text = String(getText(line));
+        if (filter.mode === "fields" && text.indexOf(filter.delimiter) === -1) {
+          if (!filter.suppress) cutLines.push(line);
+          return;
+        }
+
+        var values = filter.mode === "fields" ? text.split(filter.delimiter) : Array.from(text);
+        var selected = [];
+        for (var position = 1; position <= values.length; position += 1) {
+          if (cutPositionSelected(position, filter.intervals)) {
+            selected.push(values[position - 1]);
+          }
+        }
+        cutLines.push(selected.join(filter.mode === "fields" ? filter.delimiter : ""));
+      });
+      return { lines: cutLines, error: null };
     }
 
     if (filter.type === "head") {

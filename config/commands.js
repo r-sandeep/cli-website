@@ -1240,6 +1240,16 @@ for (const [alias, target] of Object.entries(_aliases)) {
 // standalone commands. Give them focused manual pages while retaining tldr as
 // man's fallback for portfolio companies and every other topic.
 const _pipelineManuals = {
+  cut: [
+    "%CUT(1)% — select fields or characters from pipeline output",
+    "Usage: COMMAND | %cut% -f LIST [-d DELIM] [-s]",
+    "       COMMAND | %cut% -c LIST",
+    "-f selects fields split by DELIM; -d sets DELIM to exactly one character (default: tab), and -s drops lines that do not contain DELIM.",
+    "-c selects 1-based character positions. LIST is one or more comma-separated N, N-M, N-, or -M items; positions must be positive and ranges must not decrease.",
+    "Selected fields and characters are plain visible text. A field-mode line without DELIM is printed whole with its original styling unless -s is used.",
+    "Before the command runs, cut rejects a missing or malformed LIST; neither or both of -f and -c; -d or -s with -c; a delimiter not exactly one character; and every unsupported option.",
+    "Each rejected stage prints one cut: diagnostic naming the problem and no command output.",
+  ],
   sort: [
     "%SORT(1)% — sort pipeline output",
     "Usage: COMMAND | %sort% [-rnu]",
@@ -1255,14 +1265,14 @@ const _pipelineManuals = {
   pipe: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
-    "Stages run from left to right. A filter with no input prints nothing.",
-    "Example: %whois% | %grep% -i root | %head% 3",
+    "Stages run from left to right. Filters: grep, head, tail, wc, sort, uniq, and cut. A filter with no input prints nothing.",
+    "Examples: %whois% | %grep% -i root | %head% 3; %pwd% | %cut% -d / -f 2",
   ],
   piping: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
-    "Stages run from left to right. A filter with no input prints nothing.",
-    "Example: %whois% | %grep% -i root | %head% 3",
+    "Stages run from left to right. Filters: grep, head, tail, wc, sort, uniq, and cut. A filter with no input prints nothing.",
+    "Examples: %whois% | %grep% -i root | %head% 3; %pwd% | %cut% -d / -f 2",
   ],
   grep: [
     "%GREP(1)% — retain lines containing a literal substring",

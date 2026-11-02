@@ -136,11 +136,50 @@ function runRootTerminal(term) {
     const oldCursor = term.pos();
     if (line === oldLine && cursor === oldCursor) return;
 
+    if (typeof term.updateCurrentLine === "function") {
+      term.updateCurrentLine(line, cursor);
+      return;
+    }
+
     if (oldCursor > 0) term.write("\x1b[D".repeat(oldCursor));
     term.currentLine = line;
     term.write(`${line}\x1b[K`);
     if (cursor < line.length) {
       term.write("\x1b[D".repeat(line.length - cursor));
+    }
+  };
+
+  const previousInputBoundary = (cursor) =>
+    typeof term.previousInputBoundary === "function"
+      ? term.previousInputBoundary(cursor)
+      : cursor > 0
+        ? cursor - (Array.from(term.currentLine.slice(0, cursor)).pop()?.length || 1)
+        : 0;
+
+  const nextInputBoundary = (cursor) =>
+    typeof term.nextInputBoundary === "function"
+      ? term.nextInputBoundary(cursor)
+      : cursor < term.currentLine.length
+        ? cursor + (Array.from(term.currentLine.slice(cursor))[0]?.length || 1)
+        : term.currentLine.length;
+
+  const isPrintableCodePoint = (text) => {
+    const points = Array.from(text);
+    if (points.length !== 1) return false;
+    const codePoint = points[0].codePointAt(0);
+    return codePoint >= 32 && !(codePoint >= 0x7f && codePoint <= 0x9f);
+  };
+
+  const moveInputCursor = (cursor) => {
+    const current = term.pos();
+    const target = Math.max(0, Math.min(term.currentLine.length, cursor));
+    if (target === current) return;
+    if (typeof term.moveInputCursor === "function") {
+      term.moveInputCursor(target);
+    } else if (target < current) {
+      term.write("\x1b[D".repeat(current - target));
+    } else {
+      term.write("\x1b[C".repeat(target - current));
     }
   };
 
@@ -285,6 +324,7 @@ function runRootTerminal(term) {
       // but consume every Tab phase so focus cannot move and no tab reaches
       // onData as input.
       if (event.type === "keydown" && completeInput()) {
+        if (typeof term.beginInput === "function") term.beginInput();
         term.scrollToBottom();
       }
       return false;
@@ -296,6 +336,7 @@ function runRootTerminal(term) {
 
     event.preventDefault();
     if (term._initialized && !term.locked && !term.busy) {
+      if (typeof term.beginInput === "function") term.beginInput();
       editInput(action);
       term.scrollToBottom();
     }
@@ -304,6 +345,7 @@ function runRootTerminal(term) {
 
   term.onData((e) => {
     if (term._initialized && !term.locked && !term.busy) {
+      if (typeof term.beginInput === "function") term.beginInput();
       if (e !== "\t") resetCompletion();
       switch (e) {
         case "\r": // Enter
@@ -314,12 +356,10 @@ function runRootTerminal(term) {
           term.executeCommandLine(term.currentLine);
           break;
         case "\u0001": // Ctrl+A
-          term.write("\x1b[D".repeat(term.pos()));
+          moveInputCursor(0);
           break;
         case "\u0005": // Ctrl+E
-          if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
-          }
+          moveInputCursor(term.currentLine.length);
           break;
         case "\u0003": // Ctrl+C
           // Reset tab state
@@ -339,10 +379,11 @@ function runRootTerminal(term) {
 
           // Do not delete the prompt
           if (term.pos() > 0) {
+            const cursor = term.pos();
+            const start = previousInputBoundary(cursor);
             const newLine =
-              term.currentLine.slice(0, term.pos() - 1) +
-              term.currentLine.slice(term.pos());
-            term.setCurrentLine(newLine, true);
+              term.currentLine.slice(0, start) + term.currentLine.slice(cursor);
+            term.setCurrentLine(newLine, false, start);
           }
           break;
         case "\033[A": // up
@@ -373,12 +414,12 @@ function runRootTerminal(term) {
           break;
         case "\033[C": // right
           if (term.pos() < term.currentLine.length) {
-            term.write("\x1b[C");
+            moveInputCursor(nextInputBoundary(term.pos()));
           }
           break;
         case "\033[D": // left
           if (term.pos() > 0) {
-            term.write("\x1b[D");
+            moveInputCursor(previousInputBoundary(term.pos()));
           }
           break;
         case "\t": // tab
@@ -391,15 +432,27 @@ function runRootTerminal(term) {
           term.tabOptions = [];
           term.tabBase = "";
 
-          // Optimize: just write the character instead of redrawing entire line
-          if (e.length === 1 && e.charCodeAt(0) >= 32) {
+          // Optimize: write one printable Unicode code point without redrawing
+          // the whole line. UTF-16 strings retain their existing representation,
+          // so supplementary input advances by the admitted text's code-unit length.
+          if (isPrintableCodePoint(e)) {
             const pos = term.pos();
             const restOfLine = term.currentLine.slice(pos);
-            term.currentLine = term.currentLine.slice(0, pos) + e + restOfLine;
-            term.write(e);
-            if (restOfLine.length > 0) {
-              term.write(restOfLine);
-              term.write("\x1b[D".repeat(restOfLine.length));
+            const newLine = term.currentLine.slice(0, pos) + e + restOfLine;
+            const nextPosition = pos + e.length;
+            if (restOfLine.length > 0 && typeof term.updateCurrentLine === "function") {
+              term.updateCurrentLine(newLine, nextPosition);
+            } else {
+              term.currentLine = newLine;
+              if (typeof term.writeInputText === "function") {
+                term.writeInputText(e, nextPosition);
+              } else {
+                term.write(e);
+              }
+              if (restOfLine.length > 0) {
+                term.write(restOfLine);
+                term.write("\x1b[D".repeat(restOfLine.length));
+              }
             }
           }
           break;

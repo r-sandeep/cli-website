@@ -274,9 +274,150 @@ const extend = (term) => {
   term.tabOptions = [];
   term.tabBase = "";
 
-  // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  // Return the physical rows occupied by the prompt and its soft-wrapped input.
+  // xterm exposes cursorY relative to the viewport, while getLine() addresses
+  // the complete active buffer, so baseY must be included here.
+  term._inputRegion = () => {
+    const buffer = term.buffer?.active;
+    if (!buffer || typeof buffer.getLine !== "function") return null;
+
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    let startRow = cursorRow;
+    while (startRow > 0 && buffer.getLine(startRow)?.isWrapped) startRow--;
+
+    let endRow = startRow;
+    while (buffer.getLine(endRow + 1)?.isWrapped) endRow++;
+    return { buffer, cursorRow, startRow, endRow };
+  };
+
+  // Build a transient map between xterm's rendered cell boundaries and the
+  // UTF-16 offsets used by currentLine. A cell can contain a supplementary
+  // character or a combining sequence, and wide characters occupy a second
+  // width-zero continuation cell, so neither string length nor cursorX alone
+  // is a safe coordinate conversion. Buffer cells are intentionally inspected
+  // afresh because xterm invalidates them after writes and reflow.
+  term._inputCursorMap = () => {
+    const region = term._inputRegion();
+    if (!region || typeof region.buffer.getNullCell !== "function") return null;
+
+    const prompt = term._renderedPromptText ?? `${term._promptRawText()} `;
+    const expected = prompt + term.currentLine;
+    const promptEnd = prompt.length;
+    const cell = region.buffer.getNullCell();
+    const clusters = [];
+    let consumed = 0;
+    let inputStartCell = null;
+    let inputEndCell = null;
+
+    for (let row = region.startRow; row <= region.endRow && consumed < expected.length; row++) {
+      const line = region.buffer.getLine(row);
+      if (!line) return null;
+      for (let column = 0; column < term.cols && consumed < expected.length; column++) {
+        const current = line.getCell(column, cell);
+        if (!current) return null;
+        const chars = current.getChars();
+        const width = current.getWidth();
+        if (!chars || width === 0) continue;
+        if (expected.slice(consumed, consumed + chars.length) !== chars) return null;
+
+        const start = consumed;
+        const end = start + chars.length;
+        const cellStart = (row - region.startRow) * term.cols + column;
+        const cellEnd = cellStart + width;
+        if (start <= promptEnd && promptEnd <= end && inputStartCell === null) {
+          inputStartCell = promptEnd === end ? cellEnd : cellStart;
+        }
+        if (end > promptEnd) {
+          clusters.push({
+            stringStart: Math.max(start, promptEnd) - promptEnd,
+            stringEnd: end - promptEnd,
+            cellStart,
+            cellEnd,
+          });
+          inputEndCell = cellEnd;
+        }
+        consumed = end;
+      }
+    }
+
+    if (consumed !== expected.length || inputStartCell === null) return null;
+    return {
+      ...region,
+      clusters,
+      inputStartCell,
+      inputEndCell: inputEndCell ?? inputStartCell,
+    };
+  };
+
+  const previousCodePointBoundary = (line, cursor) => {
+    if (cursor <= 0) return 0;
+    const prefix = line.slice(0, cursor);
+    const last = Array.from(prefix).pop();
+    return cursor - (last ? last.length : 1);
+  };
+
+  const nextCodePointBoundary = (line, cursor) => {
+    if (cursor >= line.length) return line.length;
+    const next = Array.from(line.slice(cursor))[0];
+    return cursor + (next ? next.length : 1);
+  };
+
+  term.previousInputBoundary = (cursor) => {
+    const bounded = Math.max(0, Math.min(term.currentLine.length, cursor));
+    const map = term._pendingInputCursor ? null : term._inputCursorMap();
+    if (!map) return previousCodePointBoundary(term.currentLine, bounded);
+    const boundaries = [0, ...map.clusters.map((cluster) => cluster.stringEnd)];
+    for (let index = boundaries.length - 1; index >= 0; index--) {
+      if (boundaries[index] < bounded) return boundaries[index];
+    }
+    return 0;
+  };
+
+  term.nextInputBoundary = (cursor) => {
+    const bounded = Math.max(0, Math.min(term.currentLine.length, cursor));
+    const map = term._pendingInputCursor ? null : term._inputCursorMap();
+    if (!map) return nextCodePointBoundary(term.currentLine, bounded);
+    for (const boundary of map.clusters.map((cluster) => cluster.stringEnd)) {
+      if (boundary > bounded) return boundary;
+    }
+    return term.currentLine.length;
+  };
+
+  term._cellForInputOffset = (map, offset) => {
+    if (offset <= 0) return map.inputStartCell;
+    for (const cluster of map.clusters) {
+      if (offset <= cluster.stringStart) return cluster.cellStart;
+      if (offset <= cluster.stringEnd) {
+        return offset === cluster.stringEnd ? cluster.cellEnd : cluster.cellStart;
+      }
+    }
+    return map.inputEndCell;
+  };
+
+  // Cursor position relative to the start of the user's input (after the
+  // prompt), expressed as a UTF-16 string offset for compatibility with the
+  // existing currentLine and history representation.
+  term.pos = () => {
+    if (term._pendingInputCursor) {
+      return Math.max(
+        0,
+        Math.min(term.currentLine.length, term._pendingInputCursor.position)
+      );
+    }
+    const map = term._inputCursorMap();
+    if (!map) {
+      return term._core.buffer.x - term._promptRawText().length - 1;
+    }
+
+    const cursorCell =
+      (map.cursorRow - map.startRow) * term.cols + map.buffer.cursorX;
+    for (const cluster of map.clusters) {
+      if (cursorCell <= cluster.cellStart) return cluster.stringStart;
+      if (cursorCell < cluster.cellEnd) return cluster.stringStart;
+      if (cursorCell === cluster.cellEnd) return cluster.stringEnd;
+    }
+    return term.currentLine.length;
+  };
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -313,14 +454,78 @@ const extend = (term) => {
 
   // Writes a newline + prompt (default) or a custom prefix/suffix pair.
   term.prompt = (prefix = "\r\n", suffix = " ") => {
+    // Record the exact plain prompt represented by xterm cells. Commands such
+    // as cd can change cwd before an existing input is replaced, and UTF-16
+    // length is not necessarily the rendered cell width.
+    term._renderedPromptText = `${term._promptRawText()}${suffix}`;
+    term._renderedPromptWidth = term._renderedPromptText.length;
+    term._freshPromptPending = true;
     term.write(`${prefix}${term.promptText()}${suffix}`);
+  };
+
+  term.beginInput = () => {
+    term._freshPromptPending = false;
+  };
+
+  // xterm processes writes asynchronously. Keep the logical cursor available
+  // until the corresponding write settles so a following keyboard event cannot
+  // observe an intermediate erase/redraw position. A later write owns the
+  // cursor state and an older callback must not clear it.
+  term.writeInputText = (text, cursorPosition, restoreCursor = false) => {
+    const version = (term._inputWriteVersion || 0) + 1;
+    term._inputWriteVersion = version;
+    term._pendingInputCursor = { version, position: cursorPosition };
+    term.write(text, () => {
+      if (term._pendingInputCursor?.version !== version) return;
+      if (!restoreCursor) {
+        term._pendingInputCursor = null;
+        return;
+      }
+
+      const map = term._inputCursorMap();
+      if (!map) {
+        term._pendingInputCursor = null;
+        return;
+      }
+      const targetCell = term._cellForInputOffset(map, cursorPosition);
+      const targetRow = map.startRow + Math.floor(targetCell / term.cols);
+      const targetColumn = targetCell % term.cols;
+      let restore = "";
+      if (map.cursorRow > targetRow) restore += `\x1b[${map.cursorRow - targetRow}A`;
+      if (map.cursorRow < targetRow) restore += `\x1b[${targetRow - map.cursorRow}B`;
+      restore += "\r";
+      if (targetColumn > 0) restore += `\x1b[${targetColumn}C`;
+      term.write(restore, () => {
+        if (term._pendingInputCursor?.version === version) {
+          term._pendingInputCursor = null;
+        }
+      });
+    });
   };
 
   // Erases the current input line and redraws the prompt, optionally resetting
   // the history cursor so the next Up arrow starts from the most recent entry.
   term.clearCurrentLine = (goToEndofHistory = false) => {
-    term.write("\x1b[2K\r");
+    // executeCommandLine and Ctrl+C render a fresh prompt immediately before
+    // cleanup. Its queued erase must be relative to that new prompt, not to the
+    // buffer coordinates that existed before xterm processed the prompt write.
+    const region = term._freshPromptPending ? null : term._inputRegion();
+    if (region) {
+      let erase = "";
+      if (region.endRow > region.cursorRow) {
+        erase += `\x1b[${region.endRow - region.cursorRow}B`;
+      }
+      erase += "\r";
+      for (let row = region.endRow; row >= region.startRow; row--) {
+        erase += "\x1b[2K";
+        if (row > region.startRow) erase += "\x1b[1A\r";
+      }
+      term.write(erase);
+    } else {
+      term.write("\x1b[2K\r");
+    }
     term.prompt("", " ");
+    term._freshPromptPending = false;
     term.currentLine = "";
     if (goToEndofHistory) {
       term.historyCursor = -1;
@@ -328,19 +533,32 @@ const extend = (term) => {
     }
   };
 
-  // Replaces the current input with newLine, preserving cursor position if asked.
-  term.setCurrentLine = (newLine, preserveCursor = false) => {
+  // Replaces the complete (possibly wrapped) input. An explicit cursorPosition
+  // is used by shared editing helpers; preserveCursor retains the cursor's
+  // distance from the end for legacy callers such as Backspace.
+  term.setCurrentLine = (newLine, preserveCursor = false, cursorPosition = null) => {
     // Capture position before clearCurrentLine() because the xterm buffer
     // cursor moves during the erase, making pos() unreliable immediately after.
     const oldPos = term.pos();
     const length = term.currentLine.length;
+    const target = Number.isInteger(cursorPosition)
+      ? Math.max(0, Math.min(newLine.length, cursorPosition))
+      : preserveCursor
+        ? Math.max(0, Math.min(newLine.length, newLine.length - (length - oldPos)))
+        : newLine.length;
     term.clearCurrentLine();
     term.currentLine = newLine;
-    term.write(newLine);
-    if (preserveCursor) {
-      term.write("\x1b[D".repeat(length - oldPos));
-    }
+    // Render the complete line before deriving cursor coordinates from xterm's
+    // actual cells. The callback-time map handles supplementary, wide and
+    // combining characters as well as wrap filler without a width table.
+    term.writeInputText(newLine, target, target < newLine.length);
   };
+
+  term.updateCurrentLine = (newLine, cursorPosition) =>
+    term.setCurrentLine(newLine, false, cursorPosition);
+
+  term.moveInputCursor = (cursorPosition) =>
+    term.setCurrentLine(term.currentLine, false, cursorPosition);
 
   // ── Output ─────────────────────────────────────────────────────────────────
 

@@ -29,6 +29,10 @@ describe("pipeline grammar", () => {
     expect(pipeline.parsePipeline("grep needle README.md")).toBeNull();
   });
 
+  it("does not treat a quoted pipe in a standalone command as a pipeline", () => {
+    expect(pipeline.parsePipeline("echo '|'")).toBeNull();
+  });
+
   it("trims a producer and preserves every stage in source order", () => {
     expect(pipeline.parsePipeline("  cmd --flag  | grep a | head 3 | wc -l ")).toEqual({
       producer: "cmd --flag",
@@ -284,6 +288,161 @@ describe("deferred unknown filters", () => {
 
   it("reports the unknown stage when filters are applied", () => {
     expect(run("cmd | mystery", ["producer output"])).toEqual({
+      lines: [],
+      error: {
+        type: "unknown-filter",
+        stageName: "mystery",
+        message: "Unknown pipeline filter: mystery",
+      },
+    });
+  });
+});
+
+describe("cut", () => {
+  it.each([
+    ["singletons are ordered and deduplicated", "3,1,3", "a:c"],
+    ["bounded range", "2-4", "b:c:d"],
+    ["open-ended range", "3-", "c:d:e"],
+    ["range from the first field", "-2", "a:b"],
+    ["overlapping and absent fields", "5,2-3,2,8", "b:c:e"],
+  ])("selects colon-delimited fields: %s", (_name, list, expected) => {
+    expect(run(`cmd | cut -d: -f ${list}`, ["a:b:c:d:e"])).toEqual({
+      lines: [expected],
+      error: null,
+    });
+  });
+
+  it.each([
+    ["3,1,3", "a\tc"],
+    ["2-4", "b\tc\td"],
+    ["3-", "c\td\te"],
+    ["-2", "a\tb"],
+    ["5,2-3,2,8", "b\tc\te"],
+  ])("uses tab as the default delimiter for LIST %s", (list, expected) => {
+    expect(run(`cmd | cut -f ${list}`, ["a\tb\tc\td\te"]).lines).toEqual([expected]);
+  });
+
+  it.each([
+    ["ordered singleton characters", "3,1,3", "ac"],
+    ["bounded character range", "2-4", "bcd"],
+    ["open-ended character range", "4-", "def"],
+    ["character range from the start", "-2", "ab"],
+    ["overlapping and absent characters", "2,4-5,99", "bde"],
+  ])("selects 1-based characters: %s", (_name, list, expected) => {
+    expect(run(`cmd | cut -c ${list}`, ["abcdef"]).lines).toEqual([expected]);
+  });
+
+  it("selects Unicode code points without splitting surrogate pairs", () => {
+    expect(run("cmd | cut -c 2-3", ["A😀BC"]).lines).toEqual(["😀B"]);
+  });
+
+  it("retains an empty selected line for empty and entirely out-of-bounds selections", () => {
+    expect(run("cmd | cut -c 2-3", ["", "a"]).lines).toEqual(["", ""]);
+  });
+
+  it("accepts huge decimal endpoints without rounding or expanding them", () => {
+    expect(
+      run(
+        "cmd | cut -c 2,900719925474099312345678901234567890-",
+        ["abc"]
+      ).lines
+    ).toEqual(["b"]);
+  });
+
+  it("supports attached and separate delimiters with identical results", () => {
+    expect(run("cmd | cut -d: -f 1,3", ["a:b:c"]).lines).toEqual(["a:c"]);
+    expect(run("cmd | cut -d : -f 1,3", ["a:b:c"]).lines).toEqual(["a:c"]);
+  });
+
+  it("preserves empty fields and trailing delimiters", () => {
+    expect(run("cmd | cut -d : -f 1-4", ["a::c:"]).lines).toEqual(["a::c:"]);
+    expect(run("cmd | cut -d : -f 2,4", ["a::c:"]).lines).toEqual([":"]);
+    expect(run("cmd | cut -d : -f 9", ["a::c:"]).lines).toEqual([""]);
+  });
+
+  it.each([
+    ["space", "' '", "a b c", "a c"],
+    ["tab", "'\t'", "a\tb\tc", "a\tc"],
+    ["pipe", "'|'", "a|b|c", "a|c"],
+    ["backslash", "'\\'", "a\\b\\c", "a\\c"],
+    ["emoji", "'😀'", "a😀b😀c", "a😀c"],
+  ])("supports a quoted one-code-point %s delimiter", (_name, delimiter, input, expected) => {
+    expect(run(`cmd | cut -d ${delimiter} -f 1,3`, [input]).lines).toEqual([expected]);
+  });
+
+  it("keeps a nondelimited line unchanged unless -s suppresses it", () => {
+    const styled = { rendered: "\u001b[31mplain\u001b[0m", text: "plain" };
+    const options = { getText: (line) => line.text };
+    expect(run("cmd | cut -d : -f 1", [styled], options).lines[0]).toBe(styled);
+    expect(run("cmd | cut -d : -f 1 -s", [styled], options).lines).toEqual([]);
+    expect(run("cmd | cut -d : -f 1", [""], { getText: String }).lines).toEqual([""]);
+    expect(run("cmd | cut -d : -f 1 -s", [""], { getText: String }).lines).toEqual([]);
+  });
+
+  it("selects projected visible text and emits plain strings", () => {
+    const input = [
+      { rendered: "\u001b[31mred\u001b[0m:blue", text: "red:blue" },
+      { rendered: "\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007:x", text: "link:x" },
+    ];
+    const options = { getText: (line) => line.text };
+    expect(run("cmd | cut -d : -f 1", input, options).lines).toEqual(["red", "link"]);
+    expect(run("cmd | cut -c 1-3", input, options).lines).toEqual(["red", "lin"]);
+  });
+
+  it.each([
+    ["neither selection mode", "cmd | cut", "exactly one of -f or -c"],
+    ["both selection modes", "cmd | cut -f 1 -c 1", "cannot be used together"],
+    ["missing field LIST", "cmd | cut -f", "requires a LIST"],
+    ["missing character LIST", "cmd | cut -c", "requires a LIST"],
+    ["empty LIST", "cmd | cut -f ''", "LIST cannot be empty"],
+    ["zero singleton", "cmd | cut -c 0", "positions must be positive"],
+    ["zero in a list", "cmd | cut -f 1,0", "positions must be positive"],
+    ["nonnumeric item", "cmd | cut -f abc", "invalid LIST item"],
+    ["decreasing range", "cmd | cut -f 2-1", "start must not exceed end"],
+    ["empty middle item", "cmd | cut -f 1,,2", "items cannot be empty"],
+    ["empty trailing item", "cmd | cut -f 1,", "items cannot be empty"],
+    ["range without endpoints", "cmd | cut -f -", "invalid LIST item"],
+    ["range with extra separator", "cmd | cut -f 1-2-3", "invalid LIST item"],
+    ["delimiter in character mode", "cmd | cut -c 1 -d :", "-d cannot be used with -c"],
+    ["suppression in character mode", "cmd | cut -c 1 -s", "-s cannot be used with -c"],
+    ["missing delimiter", "cmd | cut -f 1 -d", "requires a delimiter"],
+    ["empty delimiter", "cmd | cut -f 1 -d ''", "exactly one character"],
+    ["two-character delimiter", "cmd | cut -f 1 -d ::", "exactly one character"],
+    ["unknown option", "cmd | cut -f 1 -x", "unsupported option -x"],
+  ])("rejects %s during compilation", (_name, commandLine, diagnostic) => {
+    const result = compile(commandLine);
+    expect(result.ok).toBe(false);
+    expect(result.error.type).toBe("pre-dispatch");
+    expect(result.error.stageName).toBe("cut");
+    expect(result.error.message).toMatch(/^cut:/);
+    expect(result.error.message).toContain(diagnostic);
+  });
+
+  it("uses the exact zero-position diagnostic required by terminal acceptance", () => {
+    expect(compile("cmd | cut -c 0").error.message).toBe("cut: positions must be positive");
+  });
+
+  it("composes before and after every existing filter and repeated cut stages", () => {
+    expect(run("cmd | grep : | cut -d : -f 2", ["x:beta", "skip", "x:alpha"]).lines)
+      .toEqual(["beta", "alpha"]);
+    expect(run("cmd | cut -d : -f 2 | grep a", ["x:beta", "x:no", "x:alpha"]).lines)
+      .toEqual(["beta", "alpha"]);
+    expect(run("cmd | head 2 | cut -c 2-", ["aa", "bb", "cc"]).lines).toEqual(["a", "b"]);
+    expect(run("cmd | cut -c 2- | head 2", ["aa", "bb", "cc"]).lines).toEqual(["a", "b"]);
+    expect(run("cmd | tail 2 | cut -c 1", ["a1", "b2", "c3"]).lines).toEqual(["b", "c"]);
+    expect(run("cmd | cut -c 1 | tail 2", ["a1", "b2", "c3"]).lines).toEqual(["b", "c"]);
+    expect(run("cmd | cut -c 1 | wc -l", ["aa", "bb"]).lines).toEqual(["2"]);
+    expect(run("cmd | wc -l | cut -c 1", ["aa", "bb"]).lines).toEqual(["2"]);
+    expect(run("cmd | sort | cut -c 1", ["ba", "ab"]).lines).toEqual(["a", "b"]);
+    expect(run("cmd | cut -c 1 | sort", ["ba", "ab"]).lines).toEqual(["a", "b"]);
+    expect(run("cmd | uniq | cut -c 1", ["aa", "aa", "bb"]).lines).toEqual(["a", "b"]);
+    expect(run("cmd | cut -c 1 | uniq", ["aa", "ab", "bb"]).lines).toEqual(["a", "b"]);
+    expect(run("cmd | cut -d : -f 2 | cut -c 2-3", ["x:abcd", "x:bcde"]).lines)
+      .toEqual(["bc", "cd"]);
+  });
+
+  it("retains deferred errors for unknown filters following cut", () => {
+    expect(run("cmd | cut -c 1 | mystery", ["abc"])).toEqual({
       lines: [],
       error: {
         type: "unknown-filter",

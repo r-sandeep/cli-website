@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserEnv } from "./helpers/browser-env";
+import { Terminal } from "@xterm/xterm";
 
 let env;
 
@@ -23,6 +24,21 @@ function loadTerminalExt(globals = {}) {
   });
   env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
   return env.exportValues(["extend"]);
+}
+
+function settleTerminal(term) {
+  return new Promise((resolve) => term.write("", resolve));
+}
+
+function visibleBuffer(term) {
+  const buffer = term.buffer.active;
+  let endRow = buffer.baseY + buffer.cursorY;
+  while (buffer.getLine(endRow + 1)?.isWrapped) endRow++;
+  const rows = [];
+  for (let row = buffer.baseY; row <= endRow; row++) {
+    rows.push(buffer.getLine(row)?.translateToString(true) || "");
+  }
+  return rows.join("");
 }
 
 function createTerm(overrides = {}) {
@@ -64,13 +80,17 @@ function installApplyCommand(term, { inputs, response }) {
   return env.window.fetch;
 }
 
-function loadAliasTerminal() {
+function loadAliasTerminal({
+  team = {},
+  portfolio = {},
+  colorText = (text) => text,
+} = {}) {
   const term = createTerm();
   env = createBrowserEnv({
     globals: {
       LOGO_TYPE: "ROOT",
       _DIRS: { "~": [] },
-      colorText: (text) => text,
+      colorText,
       buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
       ensureASCIIArt: vi.fn(() => Promise.resolve()),
       ensureFileLoaded: vi.fn(() => Promise.resolve()),
@@ -81,10 +101,10 @@ function loadAliasTerminal() {
       getPreloadFileForCommand: vi.fn(() => null),
       help: {},
       jobs: {},
-      portfolio: {},
+      portfolio,
       preloadASCIIArt: vi.fn(() => Promise.resolve()),
       scheduleIdleTask: vi.fn((task) => task()),
-      team: {},
+      team,
       term,
     },
   });
@@ -104,6 +124,65 @@ afterEach(() => {
 
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
+
+  it("tracks and redraws prompt-relative input across actual wrapped xterm rows", async () => {
+    const { extend } = loadTerminalExt();
+    const term = new Terminal({ cols: 32, rows: 10, scrollback: 20 });
+    term.scrollToBottom = vi.fn();
+    extend(term);
+
+    term.prompt("", " ");
+    term.currentLine = "pwd | cut -d / -f 3";
+    term.beginInput();
+    term.write(term.currentLine);
+    await settleTerminal(term);
+
+    expect(term.pos()).toBe(term.currentLine.length);
+    expect(term.buffer.active.cursorY).toBeGreaterThan(0);
+    expect(term.buffer.active.getLine(1).isWrapped).toBe(true);
+
+    term.moveInputCursor(15);
+    await settleTerminal(term);
+    expect(term.pos()).toBe(15);
+
+    term.updateCurrentLine("pwd | cut -d / -f 3 | sort", 15);
+    await settleTerminal(term);
+    expect(term.currentLine).toBe("pwd | cut -d / -f 3 | sort");
+    expect(term.pos()).toBe(15);
+    expect(visibleBuffer(term)).toContain("guest:rootpc ~ $ pwd | cut -d / -f 3 | sort");
+
+    term.clearCurrentLine();
+    await settleTerminal(term);
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+    expect(visibleBuffer(term)).not.toContain("cut -d");
+    expect(visibleBuffer(term)).toContain("guest:rootpc ~ $ ");
+  });
+
+  it("uses the rendered prompt width when prompt fields change before replacement", async () => {
+    const { extend } = loadTerminalExt();
+    const term = new Terminal({ cols: 32, rows: 10, scrollback: 20 });
+    term.scrollToBottom = vi.fn();
+    extend(term);
+
+    term.prompt("", " ");
+    term.currentLine = "pwd | cut -c 2-5 | sort";
+    term.beginInput();
+    term.write(term.currentLine);
+    await settleTerminal(term);
+    term.moveInputCursor(12);
+    await settleTerminal(term);
+    expect(term.pos()).toBe(12);
+
+    term.cwd = "~/portfolio/long-directory";
+    term.setCurrentLine(term.currentLine, true);
+    await settleTerminal(term);
+
+    expect(term.pos()).toBe(12);
+    expect(visibleBuffer(term)).toContain(
+      "guest:rootpc ~/portfolio/long-directory $ pwd | cut -c 2-5 | sort"
+    );
+  });
 
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
@@ -897,6 +976,171 @@ describe("terminal-ext", () => {
     ]);
     expect(term.history).toEqual(["tldr | uniq -c | sort -rn"]);
     expect(term.busy).toBe(false);
+  });
+
+  it("runs production commands with cut before and after existing filters", async () => {
+    const team = {
+      zed: {},
+      amy: {},
+    };
+    const portfolio = {
+      alpha: { name: "Alpha AI", url: "https://alpha.ai", description: "Alpha AI: practical systems" },
+      beta: { name: "Beta", url: "https://beta.example", description: "Beta: ordinary tools" },
+    };
+    const { commands, term } = loadAliasTerminal({ team, portfolio });
+    term.command = vi.fn((line) => {
+      const prepared = term.prepareCommandLine(line);
+      return commands[prepared.cmd](prepared.args);
+    });
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    const run = async (line) => {
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, { promptAfter: false, showLeadingNewline: false });
+      return term.writeln.mock.calls.map(([output]) => output);
+    };
+
+    expect(await run("pwd | head 1 | cut -d / -f 2")).toEqual(["home"]);
+    expect(await run("pwd | cut -c 2-5 | grep home")).toEqual(["home"]);
+
+    const capturedRecords = (writes) => {
+      const records = writes.map((line) => `${line}\r\n`).join("").split(/\r\n|\n|\r/);
+      if (records[records.length - 1] === "") records.pop();
+      return records;
+    };
+    const whoisSource = await run("whois");
+    const whoisExpected = capturedRecords(whoisSource)
+      .map((line) => line.slice(0, 12))
+      .sort();
+    expect(await run("whois | cut -c 1-12 | sort")).toEqual(whoisExpected);
+
+    const tldrSource = await run("tldr");
+    const tldrExpected = capturedRecords(tldrSource)
+      .filter((line) => line.toLowerCase().includes("ai"))
+      .map((line) => line.includes(":") ? line.slice(0, line.indexOf(":")) : line);
+    expect(tldrExpected.length).toBeGreaterThan(0);
+    expect(await run("tldr | grep -i ai | cut -d : -f 1")).toEqual(tldrExpected);
+
+    expect(term.command).toHaveBeenCalledTimes(4);
+    expect(term.history).toEqual([
+      "pwd | head 1 | cut -d / -f 2",
+      "pwd | cut -c 2-5 | grep home",
+      "whois",
+      "whois | cut -c 1-12 | sort",
+      "tldr",
+      "tldr | grep -i ai | cut -d : -f 1",
+    ]);
+    expect(env.window.dataLayer).toHaveLength(6);
+    expect(env.window.dataLayer.every((entry) => entry.event === "commandSent")).toBe(true);
+  });
+
+  it.each([
+    ["neither mode", "pwd | head 1 | cut | sort", "cut: exactly one of -f or -c is required"],
+    ["both modes", "pwd | head 1 | cut -f 1 -c 1 | sort", "cut: -f and -c cannot be used together"],
+    ["missing field LIST", "pwd | head 1 | cut -f | sort", "cut: -f requires a LIST"],
+    ["missing character LIST", "pwd | head 1 | cut -c | sort", "cut: -c requires a LIST"],
+    ["empty LIST", "pwd | head 1 | cut -f '' | sort", "cut: LIST cannot be empty"],
+    ["zero", "pwd | head 1 | cut -c 0 | sort", "cut: positions must be positive"],
+    ["zero in a list", "pwd | head 1 | cut -f 1,0 | sort", "cut: positions must be positive"],
+    ["nonnumeric", "pwd | head 1 | cut -f abc | sort", "cut: invalid LIST item abc"],
+    ["decreasing range", "pwd | head 1 | cut -f 2-1 | sort", "cut: range start must not exceed end"],
+    ["empty middle item", "pwd | head 1 | cut -f 1,,2 | sort", "cut: LIST items cannot be empty"],
+    ["empty trailing item", "pwd | head 1 | cut -f 1, | sort", "cut: LIST items cannot be empty"],
+    ["range without endpoints", "pwd | head 1 | cut -f - | sort", "cut: invalid LIST item -"],
+    ["range with extra separator", "pwd | head 1 | cut -f 1-2-3 | sort", "cut: invalid LIST item 1-2-3"],
+    ["delimiter with characters", "pwd | head 1 | cut -c 1 -d : | sort", "cut: -d cannot be used with -c"],
+    ["suppression with characters", "pwd | head 1 | cut -c 1 -s | sort", "cut: -s cannot be used with -c"],
+    ["missing delimiter", "pwd | head 1 | cut -f 1 -d | sort", "cut: -d requires a delimiter"],
+    ["empty delimiter", "pwd | head 1 | cut -f 1 -d '' | sort", "cut: delimiter must be exactly one character"],
+    ["long delimiter", "pwd | head 1 | cut -f 1 -d :: | sort", "cut: delimiter must be exactly one character"],
+    ["unknown option", "pwd | head 1 | cut -f 1 -x | sort", "cut: unsupported option -x"],
+  ])("rejects invalid cut %s before production preload and dispatch", async (_name, line, message) => {
+    const { commands, term } = loadAliasTerminal();
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    term.writeln.mockClear();
+
+    await term.executeCommandLine(line, { promptAfter: false, showLeadingNewline: false });
+
+    expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([message]);
+    expect(term.history).toEqual([line]);
+    expect(env.window.dataLayer).toEqual([{
+      args: term.prepareCommandLine(line).args.join(" "),
+      command: "pwd",
+      event: "commandSent",
+    }]);
+    expect(term.busy).toBe(false);
+    expect(commands.cut).toBeUndefined();
+  });
+
+  it("rejects a late invalid cut atomically, preserves export state, then runs pwd", async () => {
+    const { commands, term } = loadAliasTerminal();
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const invalid = "export SIDE_EFFECT=changed | head 1 | cut -c 0 | sort";
+
+    await term.executeCommandLine(invalid, { promptAfter: false, showLeadingNewline: false });
+
+    expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(term.environment.get("SIDE_EFFECT")).toBeUndefined();
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+      "cut: positions must be positive",
+    ]);
+    expect(term.history).toEqual([invalid]);
+    expect(env.window.dataLayer).toHaveLength(1);
+    expect(term.busy).toBe(false);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("pwd", { promptAfter: false, showLeadingNewline: false });
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch).toHaveBeenCalledWith("pwd", [], expect.objectContaining({ line: "pwd" }));
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual(["/home/guest"]);
+    expect(term.history).toEqual([invalid, "pwd"]);
+    expect(env.window.dataLayer).toHaveLength(2);
+    expect(commands.cut).toBeUndefined();
+  });
+
+  it("keeps standalone cut missing while production pipelines preserve or strip styling correctly", async () => {
+    const passthrough = "\x1b]8;;https://example.com\x07whois\x1b]8;;\x07";
+    const colorText = (text) => text === "pwd" ? "\x1b[31mleft\x1b[0m" : text === "whois" ? passthrough : text;
+    const { commands, term } = loadAliasTerminal({ colorText });
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("cut", { promptAfter: false, showLeadingNewline: false });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+      "Command not found: cut. Try 'help' to get started.",
+    ]);
+    expect(commands.cut).toBeUndefined();
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("cut ordinary arguments", { promptAfter: false, showLeadingNewline: false });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+      "Command not found: cut. Try 'help' to get started.",
+    ]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo %pwd%:right | cut -d : -f 2", { promptAfter: false, showLeadingNewline: false });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual(["right"]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo %whois% | cut -d : -f 1", { promptAfter: false, showLeadingNewline: false });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([passthrough]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo %pwd%:right | cut -c 1-4", { promptAfter: false, showLeadingNewline: false });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual(["left"]);
+    expect(term.history).toEqual([
+      "cut",
+      "cut ordinary arguments",
+      "echo %pwd%:right | cut -d : -f 2",
+      "echo %whois% | cut -d : -f 1",
+      "echo %pwd%:right | cut -c 1-4",
+    ]);
+    expect(env.window.dataLayer).toHaveLength(5);
   });
 
   it("prints no transformed records when a pipeline producer emits no output", async () => {

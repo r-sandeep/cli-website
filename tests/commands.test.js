@@ -1025,6 +1025,8 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("-r reverse, -n numeric, -u unique");
     expect(output).toContain("COMMAND | %uniq% [-cd]");
     expect(output).toContain("-c count, -d repeated only");
+    expect(output).toContain("COMMAND | %cut% -f LIST [-d DELIM] [-s] | %cut% -c LIST");
+    expect(output).toContain("select fields or 1-based characters");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
   });
 });
@@ -1038,10 +1040,46 @@ describe("pipeline manual pages preserve standalone commands", () => {
     ["wc", "COMMAND | %wc% -l"],
     ["sort", "COMMAND | %sort% [-rnu]"],
     ["uniq", "COMMAND | %uniq% [-cd]"],
+    ["cut", "COMMAND | %cut% -f LIST [-d DELIM] [-s]"],
   ])("documents man %s", (topic, expected) => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
     expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it("documents every cut mode, LIST form, styling rule, and rejection class", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["cut"]);
+
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+    for (const expected of [
+      "-f LIST", "-c LIST", "-d", "-s", "default: tab",
+      "N, N-M, N-, or -M", "plain visible text", "original styling",
+      "missing or malformed LIST", "neither or both of -f and -c",
+      "-d or -s with -c", "delimiter not exactly one character",
+      "unsupported option", "Before the command runs", "one cut: diagnostic",
+    ]) {
+      expect(output).toContain(expected);
+    }
+    expect(term.command).not.toHaveBeenCalled();
+    expect(commands.cut).toBeUndefined();
+  });
+
+  it("lists cut in the pipe manual and documents the README executable example", () => {
+    const { commands, term } = loadCommands();
+    commands.man(["pipe"]);
+    const pipeOutput = term.stylePrint.mock.calls.flat().join("\n");
+    expect(pipeOutput).toContain("Filters: grep, head, tail, wc, sort, uniq, and cut");
+    expect(pipeOutput).toContain("%pwd% | %cut% -d / -f 2");
+
+    const readme = readFileSync("README.md", "utf8");
+    expect(readme).toContain("## Output pipelines");
+    expect(readme).toContain("COMMAND | cut -f LIST [-d DELIM] [-s]");
+    expect(readme).toContain("COMMAND | cut -c LIST");
+    expect(readme).toContain("`N`, `N-M`, `N-`, and `-M`");
+    expect(readme).toContain("pwd | cut -d / -f 2");
+    expect(readme).toContain("man cut");
   });
 
   it("documents every sort and uniq flag", () => {

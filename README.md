@@ -51,14 +51,20 @@ replace the existing standalone commands with the same names.
 - `COMMAND | uniq [-cd]` collapses adjacent lines with identical visible text.
   Add `-c` to prefix each surviving line with its run count and one space, or
   `-d` to keep only repeated runs. Flags may be combined, as in `uniq -cd`.
+- `COMMAND | cut -f LIST [-d DELIM] [-s]` selects 1-based fields, and
+  `COMMAND | cut -c LIST` selects 1-based characters. `LIST` accepts comma-separated
+  `N`, `N-M`, `N-`, and `-M` items. The field delimiter defaults to a tab; `-d`
+  sets exactly one character, and `-s` drops lines without that delimiter. For
+  example, `pwd | cut -d / -f 2` prints `home`. Run `man cut` for the complete
+  validation, styling, and no-delimiter rules.
 
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+`man grep`, `man head`, `man tail`, `man wc`, `man sort`, `man uniq`, or
+`man cut` in the terminal for the corresponding manual page.
 
 ## Terminal editing shortcuts
 
