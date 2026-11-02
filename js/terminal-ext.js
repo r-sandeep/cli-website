@@ -316,9 +316,15 @@ const extend = (term) => {
     term.write(`${prefix}${term.promptText()}${suffix}`);
   };
 
+  // A canceled search can restore a cursor whose physical xterm cell differs
+  // from its JavaScript string offset. This adapter is deliberately scoped to
+  // that resumed draft; ordinary input continues to use the legacy pos().
+  let canceledDraft = null;
+
   // Erases the current input line and redraws the prompt, optionally resetting
   // the history cursor so the next Up arrow starts from the most recent entry.
   term.clearCurrentLine = (goToEndofHistory = false) => {
+    canceledDraft = null;
     term.write("\x1b[2K\r");
     term.prompt("", " ");
     term.currentLine = "";
@@ -334,12 +340,385 @@ const extend = (term) => {
     // cursor moves during the erase, making pos() unreliable immediately after.
     const oldPos = term.pos();
     const length = term.currentLine.length;
+    canceledDraft = null;
     term.clearCurrentLine();
     term.currentLine = newLine;
     term.write(newLine);
     if (preserveCursor) {
       term.write("\x1b[D".repeat(length - oldPos));
     }
+  };
+
+  // Reverse history search owns a temporary display, but deliberately does not
+  // use currentLine for it. Keeping the query label separate means command
+  // execution, history recall, and ordinary editing continue to see only real
+  // command input.
+  let reverseSearch = null;
+
+  const reverseSearchDisplay = () =>
+    `(${reverseSearch.failed ? "failed " : ""}reverse-i-search)\`${
+      reverseSearch.query
+    }': ${reverseSearch.match}`;
+
+  const terminalWidth = () =>
+    Number.isFinite(term.cols) && term.cols > 0 ? Math.floor(term.cols) : 80;
+
+  const inputPosition = (cursor, lineLength, cellOffset = cursor) => {
+    const width = terminalWidth();
+    const promptLength = term._promptRawText().length + 1;
+    const absolute = promptLength + cellOffset;
+    const atPendingWrap =
+      cursor === lineLength && absolute > 0 && absolute % width === 0;
+    return {
+      row: atPendingWrap ? absolute / width - 1 : Math.floor(absolute / width),
+      // xterm exposes cursorX === cols while the final cell is in pending-wrap
+      // state. Preserve that physical coordinate rather than clamping it to the
+      // last occupied cell.
+      column: atPendingWrap ? width : absolute % width,
+    };
+  };
+
+  const inputOriginPosition = () => {
+    const width = terminalWidth();
+    const promptLength = term._promptRawText().length + 1;
+    return {
+      row: Math.floor(promptLength / width),
+      column: promptLength % width,
+    };
+  };
+
+  const moveBetweenInputPositions = (from, to) => {
+    const rowDelta = to.row - from.row;
+    let output = "\r";
+    if (rowDelta < 0) output += `\x1b[${-rowDelta}A`;
+    if (rowDelta > 0) output += `\x1b[${rowDelta}B`;
+    if (to.column > 0) output += `\x1b[${to.column}C`;
+    return output;
+  };
+
+  const moveToScreenPosition = ({ row, column }) =>
+    `\x1b[${row + 1};${column + 1}H`;
+
+  const moveToInputOrigin = (cursor, lineLength) => {
+    const current = inputPosition(cursor, lineLength);
+    const origin = inputOriginPosition();
+    return moveBetweenInputPositions(current, origin);
+  };
+
+  const moveFromInputOrigin = (cursor) => {
+    const width = terminalWidth();
+    const promptLength = term._promptRawText().length + 1;
+    const origin = inputOriginPosition();
+    const target = {
+      row: Math.floor((promptLength + cursor) / width),
+      column: (promptLength + cursor) % width,
+    };
+    return moveBetweenInputPositions(origin, target);
+  };
+
+  const xtermCellWidth = (text) => {
+    const unicodeService =
+      term._core && (term._core.unicodeService || term._core._unicodeService);
+    if (unicodeService && typeof unicodeService.wcwidth === "function") {
+      let width = 0;
+      for (const character of text) {
+        width += Math.max(0, unicodeService.wcwidth(character.codePointAt(0)));
+      }
+      return width;
+    }
+    // Lightweight test terminals do not expose xterm's width service. Their
+    // existing one-cell transport remains valid for the ASCII fixtures.
+    return [...text].length;
+  };
+
+  const positionForLogicalCursor = (line, cursor) => {
+    const prefix = line.slice(0, cursor);
+    return inputPosition(cursor, line.length, xtermCellWidth(prefix));
+  };
+
+  const reverseSearchSnapshot = () => {
+    if (canceledDraft !== null) {
+      return {
+        line: term.currentLine,
+        logicalCursor: canceledDraft.cursor,
+        originPosition: canceledDraft.originPosition,
+        cursorPosition: canceledDraft.cursorPosition,
+      };
+    }
+
+    const width = terminalWidth();
+    const activeBuffer = term.buffer && term.buffer.active;
+    if (
+      activeBuffer &&
+      Number.isFinite(activeBuffer.cursorX) &&
+      Number.isFinite(activeBuffer.cursorY) &&
+      Number.isFinite(activeBuffer.baseY) &&
+      typeof activeBuffer.getLine === "function"
+    ) {
+      const cursorLine = activeBuffer.baseY + activeBuffer.cursorY;
+      let inputLine = cursorLine;
+      while (inputLine > 0 && activeBuffer.getLine(inputLine)?.isWrapped) {
+        inputLine -= 1;
+      }
+
+      const promptLength = term._promptRawText().length + 1;
+      const originPosition = {
+        row: Math.floor(promptLength / width),
+        column: promptLength % width,
+      };
+      const cursorPosition = {
+        row: cursorLine - inputLine,
+        column: activeBuffer.cursorX,
+      };
+      const cursorCell = cursorPosition.row * width + cursorPosition.column;
+      let logicalCursor = 0;
+      let cellOffset = promptLength;
+      const reusableCell =
+        typeof activeBuffer.getNullCell === "function"
+          ? activeBuffer.getNullCell()
+          : undefined;
+
+      while (logicalCursor < term.currentLine.length) {
+        const row = inputLine + Math.floor(cellOffset / width);
+        const column = cellOffset % width;
+        const line = activeBuffer.getLine(row);
+        const cell = line && typeof line.getCell === "function"
+          ? line.getCell(column, reusableCell)
+          : null;
+        if (!cell || typeof cell.getChars !== "function") break;
+
+        const cellWidth = Math.max(0, cell.getWidth());
+        const chars = cell.getChars();
+        if (cellWidth === 0) {
+          cellOffset += 1;
+          continue;
+        }
+        if (chars.length === 0) break;
+
+        const isFinalCell = logicalCursor + chars.length >= term.currentLine.length;
+        const pendingWrap =
+          isFinalCell &&
+          cursorCell === cellOffset &&
+          (cellOffset + cellWidth) % width === 0;
+        if (cursorCell < cellOffset || (cursorCell === cellOffset && !pendingWrap)) {
+          break;
+        }
+
+        logicalCursor += chars.length;
+        cellOffset += cellWidth;
+      }
+
+      if (logicalCursor === 0 && term.currentLine.length > 0) {
+        const cellCursor = Math.max(0, cursorCell - promptLength);
+        logicalCursor = Math.max(0, Math.min(cellCursor, term.currentLine.length));
+      }
+      const hasPhysicalCells =
+        typeof activeBuffer.getLine(cursorLine)?.getCell === "function";
+      return {
+        line: term.currentLine,
+        logicalCursor: Math.max(0, Math.min(logicalCursor, term.currentLine.length)),
+        originPosition,
+        cursorPosition,
+        ...(hasPhysicalCells
+          ? {
+              screenOriginPosition: {
+                row: activeBuffer.cursorY - cursorPosition.row + originPosition.row,
+                column: originPosition.column,
+              },
+              screenCursorPosition: {
+                row: activeBuffer.cursorY,
+                column: activeBuffer.cursorX,
+              },
+            }
+          : {}),
+      };
+    }
+
+    const logicalCursor = Math.max(0, Math.min(term.pos(), term.currentLine.length));
+    return {
+      line: term.currentLine,
+      logicalCursor,
+      originPosition: inputOriginPosition(),
+      cursorPosition: positionForLogicalCursor(term.currentLine, logicalCursor),
+    };
+  };
+
+  const redrawCanceledDraft = (line, cursor) => {
+    if (canceledDraft === null) return false;
+    const nextCursor = Math.max(0, Math.min(cursor, line.length));
+    const endPosition = positionForLogicalCursor(line, line.length);
+    const cursorPosition = positionForLogicalCursor(line, nextCursor);
+    const restoreCursor =
+      endPosition.row === cursorPosition.row &&
+      endPosition.column === cursorPosition.column
+        ? ""
+        : moveBetweenInputPositions(endPosition, cursorPosition);
+    const output =
+      `${moveBetweenInputPositions(canceledDraft.cursorPosition, canceledDraft.originPosition)}` +
+      `\x1b[J${line}${restoreCursor}`;
+    term.currentLine = line;
+    canceledDraft = {
+      ...canceledDraft,
+      cursor: nextCursor,
+      cursorPosition,
+    };
+    term.write(output);
+    return true;
+  };
+
+  term.isCanceledDraftActive = () => canceledDraft !== null;
+  term.getCanceledDraftCursor = () =>
+    canceledDraft === null ? null : canceledDraft.cursor;
+  term.replaceCanceledDraft = (line, cursor) => redrawCanceledDraft(line, cursor);
+  term.clearCanceledDraft = () => {
+    canceledDraft = null;
+  };
+
+  const renderReverseSearch = () => {
+    term.write(`\x1b8\x1b[J${reverseSearchDisplay()}`);
+  };
+
+  const findReverseSearchMatch = (startIndex, skipCurrentMatch = false) => {
+    for (let index = startIndex; index >= 0; index -= 1) {
+      const candidate = term.history[index];
+      if (
+        candidate.includes(reverseSearch.query) &&
+        (!skipCurrentMatch || candidate !== reverseSearch.match)
+      ) {
+        reverseSearch.match = candidate;
+        reverseSearch.matchIndex = index;
+        reverseSearch.failed = false;
+        renderReverseSearch();
+        return true;
+      }
+    }
+
+    reverseSearch.failed = true;
+    renderReverseSearch();
+    return false;
+  };
+
+  const finishReverseSearch = (line, cursor, canceledSnapshot = null) => {
+    if (reverseSearch === null) return null;
+
+    const result = { line, cursor };
+    reverseSearch = null;
+    term.currentLine = line;
+    let output = `\x1b8\x1b[J${line}`;
+    if (canceledSnapshot !== null) {
+      if (
+        canceledSnapshot.screenOriginPosition &&
+        canceledSnapshot.screenCursorPosition
+      ) {
+        // A wrapped search can scroll xterm's saved cursor upward. Repaint the
+        // draft at its captured viewport origin, then restore the captured
+        // viewport cursor. When the cursor is pending at the right margin,
+        // leaving the just-written end position intact is the only way xterm
+        // can represent cursorX === cols; CUP intentionally clamps to cols-1.
+        output =
+          `${moveToScreenPosition(canceledSnapshot.screenOriginPosition)}` +
+          `\x1b[J${line}`;
+        const endPosition = positionForLogicalCursor(line, line.length);
+        const cursorIsNaturalEnd =
+          endPosition.row === canceledSnapshot.cursorPosition.row &&
+          endPosition.column === canceledSnapshot.cursorPosition.column;
+        if (!cursorIsNaturalEnd) {
+          output += moveToScreenPosition(canceledSnapshot.screenCursorPosition);
+        }
+      } else if (canceledSnapshot.cursorPosition.column !== terminalWidth()) {
+        output += `\x1b8${moveBetweenInputPositions(
+          canceledSnapshot.originPosition,
+          canceledSnapshot.cursorPosition
+        )}`;
+      }
+      canceledDraft = {
+        cursor,
+        originPosition: canceledSnapshot.originPosition,
+        cursorPosition: canceledSnapshot.cursorPosition,
+      };
+    } else {
+      canceledDraft = null;
+      if (cursor < line.length) {
+        output += `\x1b8${moveFromInputOrigin(cursor)}`;
+      }
+    }
+    term.write(output);
+    return result;
+  };
+
+  term.isReverseSearchActive = () => reverseSearch !== null;
+
+  term.getReverseSearchState = () =>
+    reverseSearch === null
+      ? { active: false, query: "", match: "", failed: false }
+      : {
+          active: true,
+          query: reverseSearch.query,
+          match: reverseSearch.match,
+          failed: reverseSearch.failed,
+        };
+
+  term.startReverseSearch = () => {
+    if (reverseSearch !== null) return false;
+
+    const snapshot = reverseSearchSnapshot();
+    canceledDraft = null;
+    reverseSearch = {
+      query: "",
+      match: "",
+      matchIndex: term.history.length,
+      failed: false,
+      savedLine: snapshot.line,
+      savedCursor: snapshot.logicalCursor,
+      savedSnapshot: snapshot,
+    };
+    term.write(
+      `${moveBetweenInputPositions(
+        snapshot.cursorPosition,
+        snapshot.originPosition
+      )}\x1b7\x1b[J${reverseSearchDisplay()}`
+    );
+    return true;
+  };
+
+  term.appendReverseSearchQuery = (text) => {
+    if (reverseSearch === null || typeof text !== "string" || text.length === 0) {
+      return false;
+    }
+    reverseSearch.query += text;
+    return findReverseSearchMatch(term.history.length - 1);
+  };
+
+  term.backspaceReverseSearchQuery = () => {
+    if (reverseSearch === null || reverseSearch.query.length === 0) return false;
+    reverseSearch.query = [...reverseSearch.query].slice(0, -1).join("");
+    return findReverseSearchMatch(term.history.length - 1);
+  };
+
+  term.findOlderReverseSearchMatch = () => {
+    if (reverseSearch === null) return false;
+    return findReverseSearchMatch(reverseSearch.matchIndex - 1, true);
+  };
+
+  term.cancelReverseSearch = () => {
+    if (reverseSearch === null) return null;
+    return finishReverseSearch(
+      reverseSearch.savedLine,
+      reverseSearch.savedCursor,
+      reverseSearch.savedSnapshot
+    );
+  };
+
+  term.acceptReverseSearch = () => {
+    if (reverseSearch === null) return null;
+    return finishReverseSearch(reverseSearch.match, reverseSearch.match.length);
+  };
+
+  term.takeReverseSearchMatchForSubmission = () => {
+    if (reverseSearch === null) return null;
+    const match = reverseSearch.match;
+    finishReverseSearch(match, match.length);
+    return match;
   };
 
   // ── Output ─────────────────────────────────────────────────────────────────

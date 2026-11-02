@@ -1121,6 +1121,38 @@ describe("terminal editing documentation", () => {
     expect(manRun.term.command).not.toHaveBeenCalled();
   });
 
+  it("documents Ctrl+R and preserves every previous shortcut description", () => {
+    const previousShortcuts = {
+      "Tab": "complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches",
+      "Alt+Left": "move to the start of the previous word",
+      "Alt+Right": "move to the start of the next word",
+      "Ctrl+W": "delete back to the start of the previous word",
+      "Alt+D": "delete forward to the start of the next word",
+      "Ctrl+A": "move to the start of the line",
+      "Ctrl+E": "move to the end of the line",
+      "Ctrl+U": "clear the whole line",
+    };
+    const reverseSearchDescription = "reverse-search command history; Escape cancels";
+    expect(Object.fromEntries(Object.entries(helpContext.shortcutEntries))).toEqual({
+      ...previousShortcuts,
+      "Ctrl+R": reverseSearchDescription,
+    });
+
+    const { commands, term } = loadCommands();
+    commands.man(["shortcuts"]);
+    const manOutput = term.stylePrint.mock.calls.flat().join("\n");
+    expect(manOutput).toContain(`Ctrl+R: ${reverseSearchDescription}`);
+    expect(manOutput).toContain("Escape cancels");
+    expect(term.command).not.toHaveBeenCalled();
+
+    const readme = readFileSync("README.md", "utf8");
+    const shortcutSection = readme.split("## Terminal editing shortcuts\n")[1]
+      .split("\n## ")[0];
+    expect(shortcutSection).toContain(
+      `**Ctrl+R** — ${reverseSearchDescription}`
+    );
+  });
+
   it("keeps bare man, company man, woman, and tldr on the existing tldr path", () => {
     const { commands, term } = loadCommands();
 
