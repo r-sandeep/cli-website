@@ -1027,6 +1027,19 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("-c count, -d repeated only");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
   });
+
+  it("documents tac through the real help handler without registering a standalone command", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("COMMAND | %tac%");
+    expect(output).toContain("reverse all lines, last line first");
+    expect(output).toContain("takes no arguments");
+    expect(output).toContain("COMMAND | %head% [N] or %head% -n N");
+    expect(commands).not.toHaveProperty("tac");
+  });
 });
 
 describe("pipeline manual pages preserve standalone commands", () => {
@@ -1038,10 +1051,37 @@ describe("pipeline manual pages preserve standalone commands", () => {
     ["wc", "COMMAND | %wc% -l"],
     ["sort", "COMMAND | %sort% [-rnu]"],
     ["uniq", "COMMAND | %uniq% [-cd]"],
+    ["tac", "COMMAND | %tac%"],
   ])("documents man %s", (topic, expected) => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
     expect(term.stylePrint.mock.calls.map(([line]) => line).join("\n")).toContain(expected);
+  });
+
+  it.each(["pipe", "piping"])("lists tac with every filter in man %s", (topic) => {
+    const { commands, term } = loadCommands();
+
+    commands.man([topic]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    for (const filter of ["%grep%", "%head%", "%tail%", "%wc%", "%sort%", "%uniq%", "%tac%"] ) {
+      expect(output).toContain(filter);
+    }
+    expect(output).toContain("tac takes no arguments");
+    expect(output).toContain("last line first");
+    expect(output).toContain("%whois% | %tac% | %head% -n 3");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it("documents both supported head count forms", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["head"]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("COMMAND | %head% [N]");
+    expect(output).toContain("COMMAND | %head% -n N");
+    expect(output).toContain("positional and -n forms are equivalent");
   });
 
   it("documents every sort and uniq flag", () => {
@@ -1062,6 +1102,22 @@ describe("pipeline manual pages preserve standalone commands", () => {
     expect(uniqOutput).toContain("Flags may be combined as -cd");
     expect(uniqOutput).toContain("ANSI color and escape sequences are ignored");
   });
+
+describe("README pipeline documentation", () => {
+  it("documents tac and its executable no-argument reversal example in Output pipelines", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const section = readme.match(/## Output pipelines\n([\s\S]*?)\n## Terminal editing shortcuts/);
+
+    expect(section).not.toBeNull();
+    const outputPipelines = section[1];
+    for (const filter of ["grep", "head", "tail", "wc", "sort", "uniq", "tac"]) {
+      expect(outputPipelines).toContain(`COMMAND | ${filter}`);
+    }
+    expect(outputPipelines).toContain("`COMMAND | tac` takes no arguments");
+    expect(outputPipelines).toContain("reverses all lines, last line first");
+    expect(outputPipelines).toContain("`whois | tac | head -n 3`");
+  });
+});
 
   it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {
     const { commands } = loadCommands();

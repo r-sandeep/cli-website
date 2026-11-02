@@ -64,6 +64,41 @@ function installApplyCommand(term, { inputs, response }) {
   return env.window.fetch;
 }
 
+function loadRealCommandTerminal({
+  team = {},
+  portfolio = {},
+} = {}) {
+  const term = createTerm({ cols: 100 });
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio,
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      shortcuts: {},
+      team,
+      term,
+    },
+  });
+  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  const { extend } = env.exportValues(["extend"]);
+  extend(term);
+  term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+  return { term };
+}
+
 function loadAliasTerminal() {
   const term = createTerm();
   env = createBrowserEnv({
@@ -813,6 +848,182 @@ describe("terminal-ext", () => {
     expect(term.writeln).toBe(originalWriteln);
     expect(term.history).toEqual(["version | grep terminal"]);
     expect(term.busy).toBe(false);
+  });
+
+  it("runs tac before and after other filters through real registered commands", async () => {
+    const team = {
+      ada: { name: "Ada", title: "Partner", description: "Ada bio", linkedin: "https://example.com/ada" },
+      bob: { name: "Bob", title: "Partner", description: "Bob bio", linkedin: "https://example.com/bob" },
+      cy: { name: "Cy", title: "Partner", description: "Cy bio", linkedin: "https://example.com/cy" },
+    };
+    const portfolio = {
+      airship: { name: "Airship", url: "https://airship.ai", description: "Airship builds tools." },
+      daily: { name: "Daily", url: "https://daily.ai", description: "Daily builds tools." },
+      robot: { name: "Robot", url: "https://robot.example", description: "Robot builds tools." },
+    };
+    const { term } = loadRealCommandTerminal({ team, portfolio });
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+    const originalCommand = term.command;
+    const originalDispatchCommand = term.dispatchCommand;
+
+    await term.executeCommandLine("whois", {
+      addToHistory: false,
+      promptAfter: false,
+      showLeadingNewline: false,
+      trackAnalytics: false,
+    });
+    const whoisLines = term.writeln.mock.calls.map(([line]) => line);
+    expect(whoisLines.slice(-3)).toEqual(["whois ada", "whois bob", "whois cy"]);
+    expect(term.command).toBe(originalCommand);
+    expect(term.dispatchCommand).toBe(originalDispatchCommand);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("whois | tac | head -n 3", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "whois cy",
+      "whois bob",
+      "whois ada",
+    ]);
+    expect(term.command).toBe(originalCommand);
+    expect(term.dispatchCommand).toBe(originalDispatchCommand);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("tldr", {
+      addToHistory: false,
+      promptAfter: false,
+      showLeadingNewline: false,
+      trackAnalytics: false,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "tldr: Learn about a portfolio company - usage:\r\n",
+      "tldr airship\t\thttps://airship.ai",
+      "tldr daily\t\thttps://daily.ai",
+      "tldr robot\t\thttps://robot.example",
+    ]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("tldr | grep -i ai | tac", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "tldr daily\t\thttps://daily.ai",
+      "tldr airship\t\thttps://airship.ai",
+    ]);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("whois | head 2", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "whois: Learn about the firm, or a partner - usage:",
+      "",
+    ]);
+    expect(term.history).toEqual([
+      "whois | tac | head -n 3",
+      "tldr | grep -i ai | tac",
+      "whois | head 2",
+    ]);
+    expect(term.command).toBe(originalCommand);
+    expect(term.dispatchCommand).toBe(originalDispatchCommand);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+  });
+
+  it("rejects every tac argument before preload, dispatch, or environment mutation", async () => {
+    const { term } = loadAliasTerminal();
+    const command = vi.spyOn(term, "command");
+    const dispatchCommand = vi.spyOn(term, "dispatchCommand");
+    term.preloadCommandAssets = vi.fn(term.preloadCommandAssets);
+    term.environment.set("A", "one");
+    term.environment.set("B", "two");
+    term.environment.set("C", "tri");
+    const entriesBefore = term.environment.entries();
+    const invalidLines = [
+      "env | tac x",
+      "env | tac -r",
+      "env | tac --",
+      "env | tac 1",
+      "env | head 2 | tac x | tail 1",
+      "export Z=blocked | tac x",
+    ];
+
+    for (const line of invalidLines) {
+      term.preloadCommandAssets.mockClear();
+      command.mockClear();
+      dispatchCommand.mockClear();
+      term.writeln.mockClear();
+
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+
+      expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+      expect(command).not.toHaveBeenCalled();
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+        "tac: takes no arguments",
+      ]);
+      expect(term.environment.entries()).toEqual(entriesBefore);
+    }
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("env | head 3", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "A=one",
+      "B=two",
+      "C=tri",
+    ]);
+    expect(command).toHaveBeenCalledOnce();
+    expect(command).toHaveBeenCalledWith("env");
+    expect(dispatchCommand).toHaveBeenCalledOnce();
+    expect(dispatchCommand).toHaveBeenCalledWith("env", [], expect.any(Object));
+  });
+
+  it("keeps one history and analytics record per tac submission and preserves standalone tac", async () => {
+    const { term } = loadAliasTerminal();
+    term.environment.set("A", "one");
+    term.environment.set("B", "two");
+    term.writeln.mockClear();
+
+    for (const line of ["env | tac | head 1", "env | tac x", "tac", "env | head 1"]) {
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+    }
+
+    expect(term.history).toEqual([
+      "env | tac | head 1",
+      "env | tac x",
+      "tac",
+      "env | head 1",
+    ]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "| tac | head 1", command: "env", event: "commandSent" },
+      { args: "| tac x", command: "env", event: "commandSent" },
+      { args: "", command: "tac", event: "commandSent" },
+      { args: "| head 1", command: "env", event: "commandSent" },
+    ]);
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "B=two",
+      "tac: takes no arguments",
+      "Command not found: tac. Try 'help' to get started.",
+      "A=one",
+    ]);
   });
 
   it("runs whois through reverse sort and head once in source order", async () => {
