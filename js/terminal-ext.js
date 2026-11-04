@@ -384,6 +384,14 @@ const extend = (term) => {
     }
   };
 
+  // Forgets input that was submitted or cancelled. Its rows are transcript now,
+  // so clearCurrentLine must not erase them, or whatever printed below them, as
+  // if they were still the live line.
+  term.discardInput = () => {
+    term.currentLine = "";
+    inputCursor = 0;
+  };
+
   // Replaces the current input with newLine, preserving its logical cursor if
   // asked. The final move is wrap-aware and synchronous.
   term.setCurrentLine = (newLine, preserveCursor = false) => {
@@ -830,6 +838,7 @@ const extend = (term) => {
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
       if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+        term.discardInput();
         term.prompt();
         term.clearCurrentLine(true);
       }

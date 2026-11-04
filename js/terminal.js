@@ -342,6 +342,7 @@ function runRootTerminal(term) {
           term.tabOptions = [];
           term.tabBase = "";
 
+          term.discardInput();
           term.prompt();
           term.clearCurrentLine(true);
           break;

@@ -28,6 +28,7 @@ function createTerm(overrides = {}) {
     busy: false,
     clearCurrentLine: vi.fn(),
     currentLine: "",
+    discardInput: vi.fn(),
     executeCommandLine: vi.fn(),
     history: [],
     historyCursor: -1,
@@ -140,7 +141,89 @@ afterEach(() => {
   }
 });
 
+function loadComposedTerminal(cols) {
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      _filesHere: () => [],
+      buildInfo: Object.freeze({ version: "test", buildDate: "2030-01-01" }),
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      shortcuts: {},
+      team: {},
+    },
+  });
+  const term = createTerm({
+    buffer: { active: { cursorX: 0 } },
+    cols,
+    command: vi.fn(),
+    focus: vi.fn(),
+    loadAddon: vi.fn(),
+    open: vi.fn(),
+    reset: vi.fn(),
+    writeln: vi.fn(),
+  });
+  env.window.term = term;
+  env.loadScripts([
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+    "js/terminal.js",
+  ]);
+  const { extend, runRootTerminal } = env.exportValues([
+    "extend",
+    "runRootTerminal",
+  ]);
+  extend(term);
+  const writes = [];
+  term.write = vi.fn((output) => writes.push(output));
+  term.init = vi.fn();
+  term.runDeepLink = vi.fn();
+  runRootTerminal(term);
+  return { term, writes };
+}
+
 describe("runRootTerminal", () => {
+  // A wrapped line's rows are transcript once it is submitted or cancelled. Moving
+  // up to erase them would wipe the output printed below them, row for row.
+  const CURSOR_UP = /\x1b\[\d+A/;
+
+  it("keeps command output on screen after a wrapped line", async () => {
+    const { term, writes } = loadComposedTerminal(20);
+    for (const character of "pwd | tr [:lower:] [:upper:]") term._onData(character);
+    writes.length = 0;
+
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.writeln).toHaveBeenCalledWith("/HOME/GUEST"));
+    await vi.waitFor(() => expect(term.currentLine).toBe(""));
+
+    expect(writes.join("")).not.toMatch(CURSOR_UP);
+    expect(term.pos()).toBe(0);
+  });
+
+  it("keeps a cancelled wrapped line on screen and starts a fresh prompt", () => {
+    const { term, writes } = loadComposedTerminal(20);
+    for (const character of "pwd | tr [:lower:] [:upper:]") term._onData(character);
+    writes.length = 0;
+
+    term._onData("\u0003");
+
+    expect(writes.join("")).not.toMatch(CURSOR_UP);
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+  });
+
   it("keeps wrapped pipeline input exact while terminal writes remain unapplied", async () => {
     env = createBrowserEnv({
       globals: {
