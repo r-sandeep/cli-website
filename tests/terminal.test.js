@@ -32,6 +32,18 @@ function createTerm(overrides = {}) {
     history: [],
     historyCursor: -1,
     init: vi.fn(),
+    isReverseSearchActive: vi.fn(() => false),
+    startReverseSearch: vi.fn(),
+    findOlderReverseSearchMatch: vi.fn(),
+    appendReverseSearchQuery: vi.fn(),
+    backspaceReverseSearchQuery: vi.fn(),
+    cancelReverseSearch: vi.fn(),
+    acceptReverseSearch: vi.fn(),
+    takeReverseSearchMatchForSubmission: vi.fn(() => ""),
+    isCanceledDraftActive: vi.fn(() => false),
+    getCanceledDraftCursor: vi.fn(() => null),
+    replaceCanceledDraft: vi.fn(),
+    clearCanceledDraft: vi.fn(),
     locked: false,
     pos: vi.fn(() => 0),
     prompt: vi.fn(),
@@ -845,6 +857,187 @@ describe("runRootTerminal", () => {
     expect(term.currentLine).toBe("abc");
     expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
     expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("routes reverse-search keys before ordinary shortcuts without duplicate Ctrl+R data handling", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    let active = false;
+    const editing = createEditingTerm({ line: "echo draft", cursor: 4 });
+    const { term } = editing;
+    term.isReverseSearchActive.mockImplementation(() => active);
+    term.startReverseSearch.mockImplementation(() => {
+      active = true;
+    });
+    term.cancelReverseSearch.mockImplementation(() => {
+      active = false;
+    });
+    term.acceptReverseSearch.mockImplementation(() => {
+      active = false;
+      term.setCurrentLine("echo B");
+    });
+    term.takeReverseSearchMatchForSubmission.mockImplementation(() => {
+      active = false;
+      term.currentLine = "echo A";
+      return "echo A";
+    });
+    runRootTerminal(term);
+
+    const down = vi.fn();
+    expect(
+      term._customKeyHandler(
+        keyEvent({ ctrlKey: true, key: "r", code: "KeyR" }, down)
+      )
+    ).toBe(false);
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(term.startReverseSearch).toHaveBeenCalledTimes(1);
+    expect(term.findOlderReverseSearchMatch).not.toHaveBeenCalled();
+
+    const up = vi.fn();
+    expect(
+      term._customKeyHandler(
+        keyEvent({ ctrlKey: true, key: "r", code: "KeyR", type: "keyup" }, up)
+      )
+    ).toBe(false);
+    term._onData("\u0012");
+    expect(up).toHaveBeenCalledTimes(1);
+    expect(term.findOlderReverseSearchMatch).not.toHaveBeenCalled();
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r", code: "KeyR" }));
+    expect(term.findOlderReverseSearchMatch).toHaveBeenCalledTimes(1);
+    term._onData("A");
+    expect(term.appendReverseSearchQuery).toHaveBeenLastCalledWith("A");
+    term._onData("\u007f");
+    expect(term.backspaceReverseSearchQuery).toHaveBeenCalledTimes(1);
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "e", code: "KeyE" }));
+    expect(term.acceptReverseSearch).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe("echo B");
+    term._onData("C");
+    expect(term.currentLine).toBe("echo BC");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("routes one complete printable Unicode code point and rejects controls and escape payloads", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const term = createTerm();
+    term.isReverseSearchActive.mockReturnValue(true);
+    runRootTerminal(term);
+
+    term._onData("😀");
+    term._onData("界");
+    term._onData("A");
+    expect(term.appendReverseSearchQuery.mock.calls).toEqual([
+      ["😀"],
+      ["界"],
+      ["A"],
+    ]);
+
+    for (const inertInput of [
+      "\u0000",
+      "\u001f",
+      "\u0085",
+      "\u2028",
+      "\u2029",
+      "\ud83d",
+      "AB",
+      "\x1b[D",
+      "\x1b[A",
+    ]) {
+      term._onData(inertInput);
+    }
+    expect(term.appendReverseSearchQuery.mock.calls).toEqual([
+      ["😀"],
+      ["界"],
+      ["A"],
+    ]);
+    expect(term.backspaceReverseSearchQuery).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term._onData("\u007f");
+    expect(term.backspaceReverseSearchQuery).toHaveBeenCalledTimes(1);
+    expect(term.appendReverseSearchQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("routes cancellation, submission, Ctrl+C, and inactive prompts without side effects", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    let active = false;
+    const term = createTerm();
+    term.isReverseSearchActive.mockImplementation(() => active);
+    term.startReverseSearch.mockImplementation(() => {
+      active = true;
+    });
+    term.cancelReverseSearch.mockImplementation(() => {
+      active = false;
+    });
+    term.takeReverseSearchMatchForSubmission.mockImplementation(() => {
+      active = false;
+      return "echo A";
+    });
+    runRootTerminal(term);
+
+    term.locked = true;
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.startReverseSearch).not.toHaveBeenCalled();
+    term.locked = false;
+    term.busy = true;
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.startReverseSearch).not.toHaveBeenCalled();
+    term.busy = false;
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    expect(term.startReverseSearch).toHaveBeenCalledTimes(1);
+    const historyBeforeCancel = [...term.history];
+    term._customKeyHandler(keyEvent({ key: "Escape" }));
+    expect(term.cancelReverseSearch).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.history).toEqual(historyBeforeCancel);
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    term._onData("\r");
+    expect(term.executeCommandLine).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).toHaveBeenLastCalledWith("echo A");
+
+    active = true;
+    term.executeCommandLine.mockClear();
+    term._onData("\u0003");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.cancelReverseSearch).toHaveBeenCalledTimes(2);
+    expect(term.takeReverseSearchMatchForSubmission).toHaveBeenCalledTimes(1);
+    expect(term.prompt).toHaveBeenCalledTimes(2);
+    expect(term.clearCurrentLine).toHaveBeenLastCalledWith(true);
+  });
+
+  it("does not dispatch an empty search match and accepts ArrowRight for editing", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    let active = false;
+    const term = createTerm();
+    term.isReverseSearchActive.mockImplementation(() => active);
+    term.startReverseSearch.mockImplementation(() => {
+      active = true;
+    });
+    term.acceptReverseSearch.mockImplementation(() => {
+      active = false;
+      term.setCurrentLine("echo B");
+    });
+    term.takeReverseSearchMatchForSubmission.mockImplementation(() => {
+      active = false;
+      term.currentLine = "";
+      return "";
+    });
+    runRootTerminal(term);
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    term._onData("\r");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.currentLine).toBe("");
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "r" }));
+    const historyBeforeAccept = [...term.history];
+    term._customKeyHandler(keyEvent({ key: "ArrowRight" }));
+    expect(term.acceptReverseSearch).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe("echo B");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    expect(term.history).toEqual(historyBeforeAccept);
   });
 
   it("redraws middle deletion and complete clearing without disturbing the prompt", () => {

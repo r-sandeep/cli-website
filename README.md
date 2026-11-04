@@ -70,6 +70,7 @@ terminal for the corresponding manual page.
 - **Ctrl+A** — move to the start of the line
 - **Ctrl+E** — move to the end of the line
 - **Ctrl+U** — clear the whole line
+- **Ctrl+R** — reverse-search command history; Escape cancels
 
 Run `man shortcuts` in the terminal to view the same reference.
 

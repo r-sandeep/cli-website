@@ -132,6 +132,10 @@ function runRootTerminal(term) {
   };
 
   const updateInput = (line, cursor) => {
+    if (term.isCanceledDraftActive()) {
+      term.replaceCanceledDraft(line, cursor);
+      return;
+    }
     const oldLine = term.currentLine;
     const oldCursor = term.pos();
     if (line === oldLine && cursor === oldCursor) return;
@@ -146,7 +150,11 @@ function runRootTerminal(term) {
 
   const editInput = (action) => {
     const line = term.currentLine;
-    const cursor = Math.max(0, Math.min(term.pos(), line.length));
+    const resumedCursor = term.getCanceledDraftCursor();
+    const cursor = Math.max(
+      0,
+      Math.min(resumedCursor === null ? term.pos() : resumedCursor, line.length)
+    );
 
     switch (action) {
       case "previousWord":
@@ -223,7 +231,9 @@ function runRootTerminal(term) {
       term.locked ||
       term.busy ||
       term.currentLine.length === 0 ||
-      term.pos() !== term.currentLine.length
+      (term.isCanceledDraftActive()
+        ? term.getCanceledDraftCursor()
+        : term.pos()) !== term.currentLine.length
     ) {
       resetCompletion();
       return false;
@@ -278,7 +288,57 @@ function runRootTerminal(term) {
     return true;
   };
 
+  const promptIsEligible = () =>
+    term._initialized && !term.locked && !term.busy;
+
+  const isControlKey = (event, key) =>
+    event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === key;
+
+  const finishReverseSearchForEditing = () => {
+    term.acceptReverseSearch();
+    resetCompletion();
+    term.scrollToBottom();
+  };
+
   term.attachCustomKeyEventHandler((event) => {
+    // Ctrl+R is handled only in this keyboard phase. Consuming both keydown and
+    // keyup prevents browser refresh and keeps a possible xterm data byte from
+    // advancing the search a second time.
+    if (isControlKey(event, "r")) {
+      event.preventDefault();
+      if (event.type === "keydown" && promptIsEligible()) {
+        resetCompletion();
+        if (term.isReverseSearchActive()) term.findOlderReverseSearchMatch();
+        else term.startReverseSearch();
+        term.scrollToBottom();
+      }
+      return false;
+    }
+
+    if (term.isReverseSearchActive()) {
+      const cancel = event.key === "Escape" || isControlKey(event, "g");
+      const accept = event.key === "ArrowRight" || isControlKey(event, "e");
+      const ordinaryShortcut = shortcutForEvent(event);
+
+      if (cancel || accept || event.key === "Tab" || ordinaryShortcut) {
+        event.preventDefault();
+        if (event.type === "keydown" && promptIsEligible()) {
+          if (cancel) {
+            term.cancelReverseSearch();
+            resetCompletion();
+            term.scrollToBottom();
+          } else if (accept) {
+            finishReverseSearchForEditing();
+          }
+        }
+        return false;
+      }
+    }
+
     if (event.key === "Tab") {
       event.preventDefault();
       // xterm asks about both phases in some browsers. Complete exactly once,
@@ -305,19 +365,71 @@ function runRootTerminal(term) {
   term.onData((e) => {
     if (term._initialized && !term.locked && !term.busy) {
       if (e !== "\t") resetCompletion();
+
+      if (term.isReverseSearchActive()) {
+        switch (e) {
+          case "\u0012": // Ctrl+R is owned by the custom key handler.
+            break;
+          case "\r": { // Enter
+            const match = term.takeReverseSearchMatchForSubmission();
+            if (match.length > 0) term.executeCommandLine(match);
+            break;
+          }
+          case "\u0003": // Ctrl+C: discard search before ordinary prompt clearing.
+            term.cancelReverseSearch();
+            term.tabIndex = 0;
+            term.tabOptions = [];
+            term.tabBase = "";
+            term.prompt();
+            term.clearCurrentLine(true);
+            break;
+          case "\u0007": // Ctrl+G
+          case "\u001b": // Escape
+            term.cancelReverseSearch();
+            break;
+          case "\u0005": // Ctrl+E
+          case "\033[C": // right
+            finishReverseSearchForEditing();
+            return;
+          case "\u0008": // Ctrl+H
+          case "\u007F": // Backspace (DEL)
+            term.backspaceReverseSearchQuery();
+            break;
+          default: {
+            const characters = [...e];
+            const codePoint =
+              characters.length === 1 ? characters[0].codePointAt(0) : -1;
+            const isPrintableCodePoint =
+              characters.length === 1 &&
+              codePoint >= 32 &&
+              !(codePoint >= 127 && codePoint <= 159) &&
+              !(codePoint >= 0xd800 && codePoint <= 0xdfff) &&
+              codePoint !== 0x2028 &&
+              codePoint !== 0x2029;
+            if (isPrintableCodePoint) term.appendReverseSearchQuery(characters[0]);
+            break;
+          }
+        }
+        term.scrollToBottom();
+        return;
+      }
+
       switch (e) {
         case "\r": // Enter
           // Reset tab state
           term.tabIndex = 0;
           term.tabOptions = [];
           term.tabBase = "";
+          term.clearCanceledDraft();
           term.executeCommandLine(term.currentLine);
           break;
         case "\u0001": // Ctrl+A
-          term.write("\x1b[D".repeat(term.pos()));
+          if (term.isCanceledDraftActive()) editInput("lineStart");
+          else term.write("\x1b[D".repeat(term.pos()));
           break;
         case "\u0005": // Ctrl+E
-          if (term.pos() < term.currentLine.length) {
+          if (term.isCanceledDraftActive()) editInput("lineEnd");
+          else if (term.pos() < term.currentLine.length) {
             term.write("\x1b[C".repeat(term.currentLine.length - term.pos()));
           }
           break;
@@ -327,6 +439,7 @@ function runRootTerminal(term) {
           term.tabOptions = [];
           term.tabBase = "";
 
+          term.clearCanceledDraft();
           term.prompt();
           term.clearCurrentLine(true);
           break;
@@ -338,7 +451,15 @@ function runRootTerminal(term) {
           term.tabBase = "";
 
           // Do not delete the prompt
-          if (term.pos() > 0) {
+          if (term.isCanceledDraftActive()) {
+            const cursor = term.getCanceledDraftCursor();
+            if (cursor > 0) {
+              term.replaceCanceledDraft(
+                term.currentLine.slice(0, cursor - 1) + term.currentLine.slice(cursor),
+                cursor - 1
+              );
+            }
+          } else if (term.pos() > 0) {
             const newLine =
               term.currentLine.slice(0, term.pos() - 1) +
               term.currentLine.slice(term.pos());
@@ -372,12 +493,20 @@ function runRootTerminal(term) {
           }
           break;
         case "\033[C": // right
-          if (term.pos() < term.currentLine.length) {
+          if (term.isCanceledDraftActive()) {
+            const cursor = term.getCanceledDraftCursor();
+            if (cursor < term.currentLine.length) {
+              term.replaceCanceledDraft(term.currentLine, cursor + 1);
+            }
+          } else if (term.pos() < term.currentLine.length) {
             term.write("\x1b[C");
           }
           break;
         case "\033[D": // left
-          if (term.pos() > 0) {
+          if (term.isCanceledDraftActive()) {
+            const cursor = term.getCanceledDraftCursor();
+            if (cursor > 0) term.replaceCanceledDraft(term.currentLine, cursor - 1);
+          } else if (term.pos() > 0) {
             term.write("\x1b[D");
           }
           break;
@@ -393,13 +522,20 @@ function runRootTerminal(term) {
 
           // Optimize: just write the character instead of redrawing entire line
           if (e.length === 1 && e.charCodeAt(0) >= 32) {
-            const pos = term.pos();
+            const pos = term.isCanceledDraftActive()
+              ? term.getCanceledDraftCursor()
+              : term.pos();
             const restOfLine = term.currentLine.slice(pos);
-            term.currentLine = term.currentLine.slice(0, pos) + e + restOfLine;
-            term.write(e);
-            if (restOfLine.length > 0) {
-              term.write(restOfLine);
-              term.write("\x1b[D".repeat(restOfLine.length));
+            const nextLine = term.currentLine.slice(0, pos) + e + restOfLine;
+            if (term.isCanceledDraftActive()) {
+              term.replaceCanceledDraft(nextLine, pos + e.length);
+            } else {
+              term.currentLine = nextLine;
+              term.write(e);
+              if (restOfLine.length > 0) {
+                term.write(restOfLine);
+                term.write("\x1b[D".repeat(restOfLine.length));
+              }
             }
           }
           break;
