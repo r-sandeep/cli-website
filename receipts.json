@@ -1,0 +1,382 @@
+[
+  {
+    "version": 1,
+    "source": "tool_result",
+    "workflowRunId": "workflow_run_759fb19b293f4c29a2d928cc953df203",
+    "workflowNodeId": "adversarial_review",
+    "toolName": "run_application_validation",
+    "applicationValidation": {
+      "phase": "scenarios",
+      "runId": "d92733b95d9c9c72644633e604b2f51f17926397751b845528673de841986f14",
+      "status": "passed",
+      "attempt": 1,
+      "recipeId": "recipe_cli_application_v1",
+      "profileId": "cli_website",
+      "scenarios": [
+        {
+          "id": "baseline_narrow",
+          "status": "passed",
+          "assertions": 5,
+          "durationMs": 711,
+          "artifactIds": [
+            "artifact_801a710b-7725-4983-a8d5-b12433d83e99_dm",
+            "artifact_de5f1597-d939-4f03-baad-d36637159276_dn",
+            "artifact_5c6d9d49-c3df-4636-81d0-060ac7f75653_do"
+          ],
+          "imageCaptures": [
+            {
+              "label": "final",
+              "width": 375,
+              "height": 812,
+              "sha256": "c109bc7e82d74cfc383ab2eaa2ec44b2095f905e436c98eb6bd38155f6b2a236",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 22,
+              "artifactId": "artifact_801a710b-7725-4983-a8d5-b12433d83e99_dm",
+              "byteLength": 25214,
+              "scenarioId": "baseline_narrow"
+            }
+          ],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "baseline_wide",
+          "status": "passed",
+          "assertions": 5,
+          "durationMs": 412,
+          "artifactIds": [
+            "artifact_1a36a84a-9275-41b8-b833-847d5a858196_dr",
+            "artifact_38fbb191-d503-4bbf-854c-4f73e871329b_ds",
+            "artifact_0f727bd8-78f1-4bcd-a158-91199f1b4a7a_dt"
+          ],
+          "imageCaptures": [
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "3a3073fd97088c4c35270024666ccd311509846f407f1f8fe7df7452e8d7fc64",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 22,
+              "artifactId": "artifact_1a36a84a-9275-41b8-b833-847d5a858196_dr",
+              "byteLength": 33275,
+              "scenarioId": "baseline_wide"
+            }
+          ],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "baseline_http",
+          "status": "passed",
+          "assertions": 4,
+          "durationMs": 3,
+          "artifactIds": [],
+          "requirementRefs": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "acceptance_narrow",
+          "status": "passed",
+          "assertions": 12,
+          "durationMs": 1165,
+          "artifactIds": [
+            "artifact_f967915c-eb2a-4d43-aff7-ebbe92918e7c_dy",
+            "artifact_930366c4-2b31-4859-85d6-5efb620f4c74_dz",
+            "artifact_448c9ec3-a436-4520-8d7c-b5d96a821f89_e0",
+            "artifact_4c1acf43-f23a-4781-9773-d6656dca67dd_e1",
+            "artifact_f1ca2377-c42e-452c-953e-bae21a54fe72_e2",
+            "artifact_0486a61c-a9a6-42a2-8982-ccf1c2f2141f_e3"
+          ],
+          "imageCaptures": [
+            {
+              "label": "narrow-tr-error-and-results",
+              "width": 375,
+              "height": 812,
+              "sha256": "affef4edfdf7cb3b027c6147fa23177c9edfd680eafa6dd1e1d67385ffdc146e",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 19,
+              "artifactId": "artifact_f967915c-eb2a-4d43-aff7-ebbe92918e7c_dy",
+              "byteLength": 46220,
+              "scenarioId": "acceptance_narrow"
+            },
+            {
+              "label": "narrow-whole-pipeline-recall",
+              "width": 375,
+              "height": 812,
+              "sha256": "e23404f72d48ec368da29cedc85456bfeadac0bad2d2e9dbb989506c4ec74a5c",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 27,
+              "artifactId": "artifact_930366c4-2b31-4859-85d6-5efb620f4c74_dz",
+              "byteLength": 50209,
+              "scenarioId": "acceptance_narrow"
+            },
+            {
+              "label": "narrow-post-feature-keyboard",
+              "width": 375,
+              "height": 812,
+              "sha256": "bf749217e694428b9886da1d36194ae75b9149e136ed47b5bcc0d8cfa6346b4f",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 46,
+              "artifactId": "artifact_448c9ec3-a436-4520-8d7c-b5d96a821f89_e0",
+              "byteLength": 57405,
+              "scenarioId": "acceptance_narrow"
+            },
+            {
+              "label": "final",
+              "width": 375,
+              "height": 812,
+              "sha256": "bf749217e694428b9886da1d36194ae75b9149e136ed47b5bcc0d8cfa6346b4f",
+              "viewport": {
+                "width": 375,
+                "height": 812
+              },
+              "mediaType": "image/png",
+              "stepIndex": 47,
+              "artifactId": "artifact_4c1acf43-f23a-4781-9773-d6656dca67dd_e1",
+              "byteLength": 57405,
+              "scenarioId": "acceptance_narrow"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_01_5a2a86ade436",
+            "requirement_02_0d38f6e4fea7",
+            "requirement_03_c5e9d1114938",
+            "requirement_06_6642249c5e95",
+            "requirement_09_4adf1288dcbd",
+            "requirement_10_57d04230d1d8",
+            "requirement_13_59eda38b4fbc",
+            "requirement_14_e999943b8937",
+            "requirement_28_6328abddf304",
+            "requirement_29_badd2149e52d",
+            "requirement_30_4c8749504757",
+            "requirement_31_f30e9a3da639",
+            "requirement_35_260e58e2f5e3",
+            "requirement_36_f52f55e7a92e",
+            "requirement_37_ec578ae023d8",
+            "requirement_38_4ade9d9c4f06",
+            "requirement_39_846b9d316b49",
+            "requirement_40_63a128df5580"
+          ]
+        },
+        {
+          "id": "acceptance_wide",
+          "status": "passed",
+          "assertions": 12,
+          "durationMs": 1009,
+          "artifactIds": [
+            "artifact_d9ba32f9-91e4-43bf-a7ce-102c32637b5e_e6",
+            "artifact_985333d8-3d39-4a06-baf9-55725bd80d62_e7",
+            "artifact_c3d5c305-fba6-4117-b2c3-3f52d156a683_e8",
+            "artifact_d35a9aea-fc59-4be4-baa3-31c324759578_e9",
+            "artifact_bcb399e6-896a-4554-be6f-7283373e0bbe_ea",
+            "artifact_ddae488b-3e0a-479c-a996-407fd7019fb6_eb"
+          ],
+          "imageCaptures": [
+            {
+              "label": "wide-tr-error-and-results",
+              "width": 1440,
+              "height": 900,
+              "sha256": "72c823bad5ca8d00e7080ba2a6faaf287614b70e8c59d094054e8e0e0289ffaf",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 19,
+              "artifactId": "artifact_d9ba32f9-91e4-43bf-a7ce-102c32637b5e_e6",
+              "byteLength": 57753,
+              "scenarioId": "acceptance_wide"
+            },
+            {
+              "label": "wide-whole-pipeline-recall",
+              "width": 1440,
+              "height": 900,
+              "sha256": "18bc58ee1ef94d53a1bad8a279fcb43b6af9f9de6f84887f02cc00dfe25de2a9",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 27,
+              "artifactId": "artifact_985333d8-3d39-4a06-baf9-55725bd80d62_e7",
+              "byteLength": 62954,
+              "scenarioId": "acceptance_wide"
+            },
+            {
+              "label": "wide-post-feature-keyboard",
+              "width": 1440,
+              "height": 900,
+              "sha256": "6bc03c1856d604ecca8f713df024dec3484549e5a40c6f0dec61af9c6d34a8f6",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 46,
+              "artifactId": "artifact_c3d5c305-fba6-4117-b2c3-3f52d156a683_e8",
+              "byteLength": 70541,
+              "scenarioId": "acceptance_wide"
+            },
+            {
+              "label": "final",
+              "width": 1440,
+              "height": 900,
+              "sha256": "6bc03c1856d604ecca8f713df024dec3484549e5a40c6f0dec61af9c6d34a8f6",
+              "viewport": {
+                "width": 1440,
+                "height": 900
+              },
+              "mediaType": "image/png",
+              "stepIndex": 47,
+              "artifactId": "artifact_d35a9aea-fc59-4be4-baa3-31c324759578_e9",
+              "byteLength": 70541,
+              "scenarioId": "acceptance_wide"
+            }
+          ],
+          "requirementRefs": [
+            "requirement_01_5a2a86ade436",
+            "requirement_02_0d38f6e4fea7",
+            "requirement_03_c5e9d1114938",
+            "requirement_06_6642249c5e95",
+            "requirement_09_4adf1288dcbd",
+            "requirement_10_57d04230d1d8",
+            "requirement_13_59eda38b4fbc",
+            "requirement_14_e999943b8937",
+            "requirement_28_6328abddf304",
+            "requirement_29_badd2149e52d",
+            "requirement_30_4c8749504757",
+            "requirement_31_f30e9a3da639",
+            "requirement_35_260e58e2f5e3",
+            "requirement_36_f52f55e7a92e",
+            "requirement_37_ec578ae023d8",
+            "requirement_38_4ade9d9c4f06",
+            "requirement_39_846b9d316b49",
+            "requirement_40_63a128df5580"
+          ]
+        }
+      ],
+      "startedAt": "2026-11-04T21:58:50.644Z",
+      "finishedAt": "2026-11-04T21:59:14.700Z",
+      "artifactIds": [
+        "artifact_994d5801-d519-4286-a6dd-159733009c9e_dl",
+        "artifact_801a710b-7725-4983-a8d5-b12433d83e99_dm",
+        "artifact_de5f1597-d939-4f03-baad-d36637159276_dn",
+        "artifact_5c6d9d49-c3df-4636-81d0-060ac7f75653_do",
+        "artifact_85bc950b-6574-46d4-88a8-1e8c0a10d130_dp",
+        "artifact_83d7af33-c457-4dce-b388-3d0dcd5e9bb9_dq",
+        "artifact_1a36a84a-9275-41b8-b833-847d5a858196_dr",
+        "artifact_38fbb191-d503-4bbf-854c-4f73e871329b_ds",
+        "artifact_0f727bd8-78f1-4bcd-a158-91199f1b4a7a_dt",
+        "artifact_6b2dbb21-293d-497e-bd67-37132f612cf1_du",
+        "artifact_5a1dc5dd-f5e2-4e30-9585-f4c1cf3a4f23_dv",
+        "artifact_922cad0a-0dba-4d71-a298-4ac6b2d213e0_dw",
+        "artifact_0907f2d2-a5bf-49ab-929f-e64a657046ee_dx",
+        "artifact_f967915c-eb2a-4d43-aff7-ebbe92918e7c_dy",
+        "artifact_930366c4-2b31-4859-85d6-5efb620f4c74_dz",
+        "artifact_448c9ec3-a436-4520-8d7c-b5d96a821f89_e0",
+        "artifact_4c1acf43-f23a-4781-9773-d6656dca67dd_e1",
+        "artifact_f1ca2377-c42e-452c-953e-bae21a54fe72_e2",
+        "artifact_0486a61c-a9a6-42a2-8982-ccf1c2f2141f_e3",
+        "artifact_ad1743b7-1541-49c9-8359-446a08a44763_e4",
+        "artifact_2f284f9d-5505-4ce1-8f54-9af93fcea6d1_e5",
+        "artifact_d9ba32f9-91e4-43bf-a7ce-102c32637b5e_e6",
+        "artifact_985333d8-3d39-4a06-baf9-55725bd80d62_e7",
+        "artifact_c3d5c305-fba6-4117-b2c3-3f52d156a683_e8",
+        "artifact_d35a9aea-fc59-4be4-baa3-31c324759578_e9",
+        "artifact_bcb399e6-896a-4554-be6f-7283373e0bbe_ea",
+        "artifact_ddae488b-3e0a-479c-a996-407fd7019fb6_eb",
+        "artifact_28dff072-0807-4400-a9d9-2997cc7adcc3_ec"
+      ],
+      "scenarioIds": [
+        "baseline_narrow",
+        "baseline_wide",
+        "baseline_http",
+        "acceptance_narrow",
+        "acceptance_wide"
+      ],
+      "candidateTree": "2a4ec784e9e964228a0045517a236710570bddacbf969de82c0509929294b657",
+      "profileSha256": "6cd0a17c2d38ad78d39f0682327ff10bfe0022a996e2ca2ef5b201d18f88b61e",
+      "recipeVersion": "1.0.8-planning-only.20261104",
+      "cleanupComplete": true,
+      "contractVersion": "application_validation_v1",
+      "environmentIdentity": "{\"runner\":\"application-validation:2026-10-02.1\",\"environment\":\"runtime_local_process_default\",\"version\":\"v1\",\"image\":null,\"node\":\"26.13.0\",\"platform\":\"darwin\",\"architecture\":\"arm64\",\"browserExecutable\":\"/Users/sandeep/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\",\"suite\":\"2026-09-25.1\"}"
+    },
+    "toolCallId": "call_c8504b6646a54ef588ce5d25b5c5929a",
+    "idempotencyKey": "tool_call_e0f510ec8220900d2bbd4db6285cf068",
+    "ok": true,
+    "outputSha256": "b0864f7f2dc33c08ff63b37560f9d42ae44996c39da0c7092db08a89736d80f9",
+    "artifactIds": [
+      "artifact_0486a61c-a9a6-42a2-8982-ccf1c2f2141f_e3",
+      "artifact_0907f2d2-a5bf-49ab-929f-e64a657046ee_dx",
+      "artifact_0f727bd8-78f1-4bcd-a158-91199f1b4a7a_dt",
+      "artifact_1a36a84a-9275-41b8-b833-847d5a858196_dr",
+      "artifact_28dff072-0807-4400-a9d9-2997cc7adcc3_ec",
+      "artifact_2f284f9d-5505-4ce1-8f54-9af93fcea6d1_e5",
+      "artifact_38fbb191-d503-4bbf-854c-4f73e871329b_ds",
+      "artifact_448c9ec3-a436-4520-8d7c-b5d96a821f89_e0",
+      "artifact_4c1acf43-f23a-4781-9773-d6656dca67dd_e1",
+      "artifact_5a1dc5dd-f5e2-4e30-9585-f4c1cf3a4f23_dv",
+      "artifact_5c6d9d49-c3df-4636-81d0-060ac7f75653_do",
+      "artifact_6b2dbb21-293d-497e-bd67-37132f612cf1_du",
+      "artifact_801a710b-7725-4983-a8d5-b12433d83e99_dm",
+      "artifact_83d7af33-c457-4dce-b388-3d0dcd5e9bb9_dq",
+      "artifact_85bc950b-6574-46d4-88a8-1e8c0a10d130_dp",
+      "artifact_922cad0a-0dba-4d71-a298-4ac6b2d213e0_dw",
+      "artifact_930366c4-2b31-4859-85d6-5efb620f4c74_dz",
+      "artifact_985333d8-3d39-4a06-baf9-55725bd80d62_e7",
+      "artifact_994d5801-d519-4286-a6dd-159733009c9e_dl",
+      "artifact_ad1743b7-1541-49c9-8359-446a08a44763_e4",
+      "artifact_bcb399e6-896a-4554-be6f-7283373e0bbe_ea",
+      "artifact_c3d5c305-fba6-4117-b2c3-3f52d156a683_e8",
+      "artifact_d35a9aea-fc59-4be4-baa3-31c324759578_e9",
+      "artifact_d9ba32f9-91e4-43bf-a7ce-102c32637b5e_e6",
+      "artifact_ddae488b-3e0a-479c-a996-407fd7019fb6_eb",
+      "artifact_de5f1597-d939-4f03-baad-d36637159276_dn",
+      "artifact_f1ca2377-c42e-452c-953e-bae21a54fe72_e2",
+      "artifact_f967915c-eb2a-4d43-aff7-ebbe92918e7c_dy"
+    ],
+    "recordedAt": "2026-11-04T21:59:15.168Z",
+    "repositoryRunId": "repository_run_727756df1321d27bf30e",
+    "workspaceStateSha256": "f70ff3cdb68ae7d9eceac9896d0708ab06d7a1a6183dc0ad5b7b0e80e5f08986",
+    "workspaceContentSha256": "1ec4fafb77eb96613edd1dd0ffcaa39ff856f93691eaddda61c7f76f3d4e9315",
+    "headRevisions": {
+      "repos/github_1330417154": "2da0b99e8bcaaa43135c7325f4b101813989fd1c"
+    },
+    "runtimeEnvironmentRef": {
+      "id": "runtime_local_process_default",
+      "version": "v1"
+    },
+    "runtimeExecutionMode": "local_process",
+    "runtimeContractVersion": "1",
+    "runtimeCapabilities": [
+      "code:edit",
+      "code:read",
+      "test:run"
+    ],
+    "outputBytes": 8512,
+    "id": "evidence_tool_865d295e4f0bf43264f562c7e6d486fe9e5e25264748380233e86ecff89f5682"
+  }
+]
