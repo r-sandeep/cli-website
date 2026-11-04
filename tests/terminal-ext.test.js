@@ -28,7 +28,7 @@ function loadTerminalExt(globals = {}) {
 function createTerm(overrides = {}) {
   const term = {
     VERSION: 4,
-    _core: { buffer: { x: 0 } },
+    buffer: { active: { cursorX: 0 } },
     cols: 80,
     command: vi.fn(() => 0),
     currentLine: "",
@@ -313,6 +313,8 @@ describe("terminal-ext", () => {
     expect(term.environment.entries()).toEqual([["KEEP", "value"]]);
 
     term.runDeepLink = vi.fn();
+    env.window.__term = term;
+    fitTo(120);
     term.history = ["historical mutation"];
     // Replay now runs each history line through executeCommandLine, so the
     // replayed mutation happens at the dispatch seam.
@@ -494,11 +496,19 @@ describe("terminal-ext", () => {
     expect(term.getAlias("kept")).toBe("echo safe");
   });
 
+  // Simulates fitAddon.fit() changing the column count on the next resize.
+  function fitTo(cols) {
+    env.window.fitAddon.fit.mockImplementation(() => {
+      env.window.__term.cols = cols;
+    });
+  }
 
   it.each(["tui", "launch", "launch | head 1"])("does not reopen the TUI when resizing replays %s", async (line) => {
     const launch = vi.fn();
     const { extend } = loadTerminalExt({ commands: { tui: launch } });
     const term = createTerm(); extend(term);
+    env.window.__term = term;
+    fitTo(120);
     term.defineAlias("launch", "tui");
     term.history = [line];
     term.deepLink = line;
@@ -506,6 +516,77 @@ describe("terminal-ext", () => {
     await term.resizeListener();
     expect(launch).not.toHaveBeenCalled();
     expect(term.prompt).toHaveBeenCalled();
+  });
+
+  it("replays history only when the column count changes", async () => {
+    // Phone keyboards and collapsing address bars fire resize with the same
+    // width. xterm keeps its buffer in that case, so wiping and redrawing the
+    // session was pure disruption.
+    const whois = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { whois } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term); // resets history, so it is set afterwards
+    term.history = ["whois lee"];
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+
+    await term.resizeListener(); // fit leaves cols at 80
+    expect(term.init).not.toHaveBeenCalled();
+    expect(whois).not.toHaveBeenCalled();
+    expect(term.scrollToBottom).toHaveBeenCalled();
+
+    fitTo(40);
+    await term.resizeListener();
+    expect(term.init).toHaveBeenCalledWith("guest", true);
+    expect(whois).toHaveBeenCalledWith(["lee"]);
+  });
+
+  it("echoes but does not rerun animated or interactive commands on replay", async () => {
+    // `upgrade` locks the terminal for its whole animation and `apply` opens a
+    // form; replaying either on a window resize was hostile.
+    const commands = Object.fromEntries(
+      ["upgrade", "apply", "test", "claude", "whois"].map((name) => [name, vi.fn()])
+    );
+    const { extend } = loadTerminalExt({ commands });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+    term.history = ["upgrade", "apply 1", "test", "claude", "whois lee"];
+    fitTo(40);
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+
+    await term.resizeListener();
+
+    for (const name of ["upgrade", "apply", "test", "claude"]) {
+      expect(commands[name]).not.toHaveBeenCalled();
+    }
+    expect(commands.whois).toHaveBeenCalledWith(["lee"]);
+    // Every line is still echoed so the transcript reads as it did.
+    const echoed = term.prompt.mock.calls.map((c) => c[1]).filter(Boolean);
+    expect(echoed).toEqual(expect.arrayContaining([" upgrade\r\n", " apply 1\r\n"]));
+  });
+
+  it("reads the cursor through xterm's public buffer API", () => {
+    const { extend } = loadTerminalExt();
+    const term = createTerm({ buffer: { active: { cursorX: 25 } } });
+    extend(term);
+    // prompt is "guest:rootpc ~ $" (16 chars) plus the space.
+    expect(term.pos()).toBe(25 - "guest:rootpc ~ $".length - 1);
+  });
+
+  it("colorizes every %command% token in a line with one pass", () => {
+    const { extend } = loadTerminalExt({
+      commands: { help: vi.fn(), whois: vi.fn(), "c.d": vi.fn() },
+      colorText: (text, color) => (color === "command" ? `[${text}]` : text),
+    });
+    const term = createTerm();
+    extend(term);
+    term.stylePrint("Try %whois% or %help%; %nope% stays; %c.d% is escaped, %cxd% is not");
+    expect(term.writeln).toHaveBeenCalledWith(
+      "Try [whois] or [help]; %nope% stays; [c.d] is escaped, %cxd% is not"
+    );
   });
   it("fits without resetting the retained CLI while the TUI is active", () => {
     const { extend } = loadTerminalExt({rootTui:{active:true}});
@@ -733,6 +814,8 @@ describe("terminal-ext", () => {
     env.window.commands.unset = (args) => term.environment.unset(args[0]);
     const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
 
+    env.window.__term = term;
+    fitTo(120);
     await term.resizeListener();
 
     expect(term.writeln).toHaveBeenCalledWith("ACTIVE=later value");
@@ -1478,6 +1561,8 @@ describe("terminal-ext", () => {
     term.write.mockClear();
     term.writeln.mockClear();
     term.scrollToBottom.mockClear();
+    env.window.__term = term;
+    fitTo(120);
     await expect(term.resizeListener()).resolves.toBeUndefined();
 
     expect(target).toHaveBeenCalledTimes(1);
@@ -1505,6 +1590,8 @@ describe("terminal-ext", () => {
     const historyBeforeResize = [...term.history];
     const analyticsBeforeResize = [...env.window.dataLayer];
 
+    env.window.__term = term;
+    fitTo(120);
     await expect(term.resizeListener()).resolves.toBeUndefined();
 
     if (command === "help") {

@@ -44,6 +44,7 @@ const help = {
   "%env%": "list all stored variables as NAME=value sorted by name",
   "%unset% NAME": "remove a stored variable",
   "%man% export|env|unset": "command manuals; arguments expand with $NAME or ${NAME}, undefined names become empty, and \\$NAME escapes expansion",
+  "%claude%": "launch Claude Code",
   "%test%": "do not use",
   "%upgrade%": "upgrade to the latest version of Root Ventures",
   "%other%": "try your fav commands (e.g. %ls%, %groups%, %su%)",

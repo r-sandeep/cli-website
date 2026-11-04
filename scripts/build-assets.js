@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { minify } = require("terser");
@@ -52,8 +53,12 @@ const appBundleSources = [
 // Copied into dist/ verbatim. config/*.js is here because welcome.htm loads it
 // with raw <script src> tags rather than through the bundle, and js/geo.js and
 // js/comcastify.js are fetched on demand by the terminal instead of bundled.
+// README.md is served so `cat README.md` reads the deployed copy from this
+// origin instead of GitHub. _headers is the Netlify cache policy.
 const staticAssets = [
+  "_headers",
   "favicon.png",
+  "README.md",
   "welcome.htm",
   "tui.html",
   "css/bootstrap.css",
@@ -158,6 +163,55 @@ async function copyVendorScript(asset) {
   console.log(`${asset.dest}: ${source.length} -> ${output.length} bytes`);
 }
 
+// The homepage's scripts are served under content-hashed names so _headers can
+// cache them immutably: a changed file gets a new name, and index.html (which
+// is always revalidated) points at it. Everything else keeps its plain path.
+const FINGERPRINTED = [
+  "js/xterm.js",
+  "js/addon-fit.js",
+  "js/addon-web-links.js",
+  "js/app.bundle.js",
+];
+
+function fingerprintName(relativePath, content) {
+  const hash = crypto.createHash("sha256").update(content).digest("hex").slice(0, 10);
+  const ext = path.extname(relativePath);
+  const base = path.basename(relativePath, ext);
+  return `static/${base}.${hash}${ext}`;
+}
+
+// Rewrites each <script src="js/x.js"> in the homepage to its hashed path.
+function rewriteScriptSources(html, renames) {
+  let output = html;
+  for (const [from, to] of Object.entries(renames)) {
+    const tag = `src="${from}"`;
+    if (!output.includes(tag)) {
+      throw new Error(`index.html does not load ${from}; cannot fingerprint it`);
+    }
+    output = output.replace(tag, `src="${to}"`);
+  }
+  return output;
+}
+
+function fingerprintHomepageScripts() {
+  const renames = {};
+  for (const relativePath of FINGERPRINTED) {
+    const absolutePath = path.join(outDir, relativePath);
+    const content = fs.readFileSync(absolutePath);
+    const hashed = fingerprintName(relativePath, content);
+    writeText(hashed, content);
+    fs.rmSync(absolutePath);
+    renames[relativePath] = hashed;
+  }
+  const indexPath = path.join(outDir, "index.html");
+  fs.writeFileSync(
+    indexPath,
+    rewriteScriptSources(fs.readFileSync(indexPath, "utf8"), renames)
+  );
+  console.log(`fingerprinted: ${Object.values(renames).join(", ")}`);
+  return renames;
+}
+
 async function buildAppBundle(buildInfo = createBuildInfo()) {
   const source = createAppBundleSource(buildInfo);
   const output = await minifyJavaScript(source, {
@@ -201,7 +255,6 @@ async function main(buildTime = new Date()) {
     await copyVendorScript(asset);
   }
 
-  writeText("js/build-info.js", createBuildInfoSource(buildInfo));
   await buildAppBundle(buildInfo);
   const tuiSource = ["config/firm.js", "config/portfolio.js", "config/team.js", "config/jobs.js", "js/tui-art.js", "js/tui.js"]
     .map(readText).join("\n;\n");
@@ -211,14 +264,19 @@ async function main(buildTime = new Date()) {
   // The crawlable static mirror, plus dist/index.html. Part of `npm run build`
   // so every Netlify deploy regenerates it from the current config/*.js.
   writePages();
+  // Must follow writePages(), which writes the index.html this rewrites.
+  fingerprintHomepageScripts();
 }
 
 module.exports = {
+  FINGERPRINTED,
   appBundleSources,
   createBuildInfo,
   createBuildInfoSource,
   createAppBundleSource,
+  fingerprintName,
   main,
+  rewriteScriptSources,
   staticAssets,
   vendorScripts,
 };

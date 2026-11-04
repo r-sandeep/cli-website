@@ -276,7 +276,8 @@ const extend = (term) => {
 
   // Cursor position relative to the start of the user's input (after the prompt).
   // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () => term._core.buffer.x - term._promptRawText().length - 1;
+  term.pos = () =>
+    term.buffer.active.cursorX - term._promptRawText().length - 1;
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -363,14 +364,11 @@ const extend = (term) => {
       text = _wordWrap(text, Math.min(term.cols, 76));
     }
 
-    // Replace %commandName% tokens with styled command names.
-    const cmds = Object.keys(commands);
-    for (const cmd of cmds) {
-      const cmdMatches = text.matchAll(`%${cmd}%`);
-      for (const match of cmdMatches) {
-        text = text.replace(match[0], colorText(cmd, "command"));
-      }
-    }
+    // Replace %commandName% tokens with styled command names. One alternation
+    // over every command name, built once, rather than a scan per command.
+    text = text.replace(_commandTokenRegex(), (_, cmd) =>
+      colorText(cmd, "command")
+    );
 
     term.writeln(text);
   };
@@ -778,12 +776,27 @@ const extend = (term) => {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  // Called on window resize. xterm clears its buffer on resize, so we
-  // reinitialize the terminal and replay the entire command history to restore
-  // the visible output, then re-render the prompt at the bottom.
+  // Called on window resize. Output was wrapped and art was dithered for the
+  // old column count, so when the width changes the terminal is reinitialized
+  // and the command history replayed to redraw everything at the new width.
+  //
+  // Height-only resizes skip the replay: xterm keeps its buffer, and on phones
+  // the keyboard opening or the address bar collapsing fires resize with the
+  // same column count, which used to wipe and redraw the session every time.
+  //
+  // Commands in NO_REPLAY are animated or interactive — replaying `upgrade`
+  // locked the terminal for its whole animation again, and `apply` would have
+  // restarted the form — so their line is echoed but they are not rerun.
+  term.NO_REPLAY = ["tui", "upgrade", "apply", "test", "claude"];
   term.resizeListener = async () => {
     if (window.rootTui?.active) {
       window.fitAddon.fit();
+      return;
+    }
+    const previousCols = term.cols;
+    window.fitAddon.fit();
+    if (term.cols === previousCols) {
+      term.scrollToBottom();
       return;
     }
     term._initialized = false;
@@ -798,14 +811,16 @@ const extend = (term) => {
     await replayWithoutEnvironmentSideEffects(async () => {
       for (const c of term.history) {
         term.prompt("\r\n", ` ${c}\r\n`);
-        if (expandUserAlias(parseCommandLine(c)).cmd !== "tui") await term.executeCommandLine(c, {
-          addToHistory: false,
-          manageBusy: false,
-          promptAfter: false,
-          showLeadingNewline: false,
-          trackAnalytics: false,
-          scrollAfter: false,
-        });
+        if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
+          await term.executeCommandLine(c, {
+            addToHistory: false,
+            manageBusy: false,
+            promptAfter: false,
+            showLeadingNewline: false,
+            trackAnalytics: false,
+            scrollAfter: false,
+          });
+        }
       }
     });
     term.prompt();
@@ -1026,6 +1041,20 @@ function _visibleTerminalText(text) {
   return String(text)
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b(?:\[[0-?]*[ -\/]*[@-~]|[@-_])/g, "");
+}
+
+// Matches %name% for every registered command. Built on first use and cached;
+// the command set is fixed once config/commands.js has loaded.
+let _commandTokenRegexCache = null;
+function _commandTokenRegex() {
+  if (!_commandTokenRegexCache) {
+    const names = Object.keys(commands).map((cmd) =>
+      cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    );
+    _commandTokenRegexCache = new RegExp(`%(${names.join("|")})%`, "g");
+  }
+  _commandTokenRegexCache.lastIndex = 0;
+  return _commandTokenRegexCache;
 }
 
 // Wraps str at word boundaries to fit within maxWidth characters per line.
