@@ -275,6 +275,155 @@ describe("sort and uniq composition", () => {
   });
 });
 
+describe("tr", () => {
+  it.each([
+    ["ordinary translation", "cmd | tr ab XY", ["cab", "none"], ["cXY", "none"]],
+    ["short SET2 padding", "cmd | tr abcd XY", ["abcda"], ["XYYYX"]],
+    ["extra SET2 ignored", "cmd | tr ab WXYZ", ["ab"], ["WX"]],
+    ["last duplicate SET1 wins", "cmd | tr aba XYZ", ["aba"], ["ZYZ"]],
+    ["ASCII classes only", "cmd | tr [:lower:] [:upper:]", ["Azéz"], ["AZéZ"]],
+    ["equal range", "cmd | tr a-a Z", ["aba"], ["ZbZ"]],
+    ["mixed literals, range, and class", "cmd | tr 0a-c[:upper:] x", ["0aCZ"], ["xxxx"]],
+    ["supplementary range", "cmd | tr 😀-😂 abc", ["😀😁😂"], ["abc"]],
+    ["supplementary literals", "cmd | tr 😀😁 xy", ["a😀😁😀"], ["axyx"]],
+  ])("supports %s", (_name, commandLine, input, expected) => {
+    expect(run(commandLine, input)).toEqual({ lines: expected, error: null });
+  });
+
+  it("supports every escape and literal boundary hyphens", () => {
+    expect(run("cmd | tr \\\\ X", ["a\\b"])).toEqual({ lines: ["aXb"], error: null });
+    expect(run("cmd | tr \\-x Q", ["-x-"])).toEqual({ lines: ["QQQ"], error: null });
+    expect(run("cmd | tr \\t X", ["a\tb"])).toEqual({ lines: ["aXb"], error: null });
+    expect(run("cmd | tr / -", ["/home/guest"])).toEqual({ lines: ["-home-guest"], error: null });
+    expect(run("cmd | tr / -x", ["/x/"])).toEqual({ lines: ["-x-"], error: null });
+    expect(run("cmd | tr a -s", ["a-s"])).toEqual({ lines: ["--s"], error: null });
+    expect(run("cmd | tr -d -", ["a-b-"])).toEqual({ lines: ["ab"], error: null });
+    expect(run("cmd | tr -d \\-x", ["-xray"])).toEqual({ lines: ["ray"], error: null });
+    expect(run("cmd | tr -d a-", ["a-b"])).toEqual({ lines: ["b"], error: null });
+    expect(run("cmd | tr -d \\--", ["--a"])).toEqual({ lines: ["a"], error: null });
+  });
+
+  it("deletes digit and space classes while retaining empty line records", () => {
+    expect(run("cmd | tr -d [:digit:]", ["a1b2", "123", ""])).toEqual({
+      lines: ["ab", "", ""],
+      error: null,
+    });
+    expect(run("cmd | tr -d [:space:]", ["a b\tc", "é d"])).toEqual({
+      lines: ["abc", "éd"],
+      error: null,
+    });
+    expect(run("cmd | tr -d 😀", ["😀a😀", "😁"])).toEqual({
+      lines: ["a", "😁"],
+      error: null,
+    });
+  });
+
+  it("squeezes selected repeated characters independently on every line", () => {
+    expect(run("cmd | tr -s ab", ["ababa", "aabbbaaa", "", "cc", "aa", "abbb"])).toEqual({
+      lines: ["ababa", "aba", "", "cc", "a", "ab"],
+      error: null,
+    });
+    expect(run("cmd | tr -s 😀", ["😀😀", "😀😀a😀😀", "😁😁"])).toEqual({
+      lines: ["😀", "😀a😀", "😁😁"],
+      error: null,
+    });
+  });
+
+  it("translates before squeezing the characters in SET2", () => {
+    expect(run("cmd | tr -s ab X", ["abba", "cc", "baab"])).toEqual({
+      lines: ["X", "cc", "X"],
+      error: null,
+    });
+    expect(run("cmd | tr -s 😀😁 😂", ["😀😁😁😀"])).toEqual({
+      lines: ["😂"],
+      error: null,
+    });
+  });
+
+  it("preserves styled lines only when final visible text is unchanged", () => {
+    const redA = "\u001b[31ma\u001b[0m";
+    const linked = "\u001b]8;;https://example.com\u0007same\u001b]8;;\u0007";
+    const options = {
+      getText: (line) => line
+        .replace(/\u001b\[[0-9;]*m/g, "")
+        .replace(/\u001b\]8;;[^\u0007]*\u0007/g, ""),
+    };
+    expect(run("cmd | tr a a", [redA, linked], options)).toEqual({
+      lines: [redA, linked],
+      error: null,
+    });
+    expect(run("cmd | tr a b", [redA, linked], options)).toEqual({
+      lines: ["b", "sbme"],
+      error: null,
+    });
+    expect(run("cmd | tr -d a", [redA], options)).toEqual({ lines: [""], error: null });
+    expect(run("cmd | tr -s a", [redA], options)).toEqual({ lines: [redA], error: null });
+  });
+
+  it.each([
+    ["no SET", [], "SET1 is required"],
+    ["no SET after -d", ["-d"], "SET1 is required"],
+    ["missing SET2", ["a"], "SET2 is required"],
+    ["SET2 with -d", ["-d", "a", "b"], "SET2 is not allowed"],
+    ["more than two SETs", ["a", "b", "c"], "more than two SETs"],
+    ["combined -d and -s", ["-d", "-s", "a"], "cannot be combined"],
+    ["repeated -d", ["-d", "-d", "a"], "cannot be repeated"],
+    ["repeated -s", ["-s", "-s", "a"], "cannot be repeated"],
+    ["empty SET1", ["", "a"], "SET1 cannot be empty"],
+    ["empty SET2", ["a", ""], "SET2 cannot be empty"],
+    ["descending range", ["z-a", "x"], "descending range"],
+    ["unknown class", ["[:word:]", "x"], "unknown class"],
+    ["digit class in SET2", ["a", "[:digit:]"], "not allowed in SET2"],
+    ["space class in SET2", ["a", "[:space:]"], "not allowed in SET2"],
+    ["unknown escape", ["\\q", "x"], "unknown escape"],
+    ["trailing backslash", ["a", "\\"], "trailing backslash"],
+    ["unsupported -x", ["-x", "X"], "unsupported option -x"],
+    ["unsupported -x after -d", ["-d", "-x"], "unsupported option -x"],
+    ["unsupported -a", ["-a", "X"], "unsupported option -a"],
+    ["unsupported -ds", ["-ds", "a"], "unsupported option -ds"],
+    ["unsupported --", ["--", "a"], "unsupported option --"],
+  ])("rejects %s before invoking commands", (_name, args, problem) => {
+    env.window.commands = { cmd: vi.fn() };
+    const result = pipeline.validatePipeline({
+      producer: "cmd",
+      stages: [{ source: `tr ${args.join(" ")}`, name: "tr", args }],
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        type: "pre-dispatch",
+        stageName: "tr",
+        message: expect.stringMatching(new RegExp(`^tr: .*${problem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)),
+      },
+    });
+    expect(env.window.commands.cmd).not.toHaveBeenCalled();
+  });
+
+  it("composes before and after every existing filter without mutation or retained state", () => {
+    const input = ["ba", "aa", "ca", "ca", "31", "2"];
+    const cases = [
+      ["cmd | tr a z | grep bz", ["bz"]],
+      ["cmd | grep a | tr a z", ["bz", "zz", "cz", "cz"]],
+      ["cmd | tr a z | head 2", ["bz", "zz"]],
+      ["cmd | head 2 | tr a z", ["bz", "zz"]],
+      ["cmd | tr a z | tail 2", ["31", "2"]],
+      ["cmd | tail 2 | tr 123 xyz", ["zx", "y"]],
+      ["cmd | tr -d 123 | wc -l", ["6"]],
+      ["cmd | wc -l | tr 6 X", ["X"]],
+      ["cmd | sort | tr a z", ["2", "31", "zz", "bz", "cz", "cz"]],
+      ["cmd | tr a z | sort", ["2", "31", "bz", "cz", "cz", "zz"]],
+      ["cmd | uniq | tr a z", ["bz", "zz", "cz", "31", "2"]],
+      ["cmd | tr a z | uniq", ["bz", "zz", "cz", "31", "2"]],
+    ];
+    cases.forEach(([commandLine, expected]) => {
+      expect(run(commandLine, input).lines).toEqual(expected);
+      expect(run(commandLine, input).lines).toEqual(expected);
+      expect(input).toEqual(["ba", "aa", "ca", "ca", "31", "2"]);
+    });
+    expect(run("cmd | tr -d a | wc -l", ["a", "ba"]).lines).toEqual(["2"]);
+  });
+});
+
 describe("deferred unknown filters", () => {
   it("retains the exact unknown stage name during validation", () => {
     const validated = compile("cmd | mystery --option");

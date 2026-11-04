@@ -51,14 +51,20 @@ replace the existing standalone commands with the same names.
 - `COMMAND | uniq [-cd]` collapses adjacent lines with identical visible text.
   Add `-c` to prefix each surviving line with its run count and one space, or
   `-d` to keep only repeated runs. Flags may be combined, as in `uniq -cd`.
+- `COMMAND | tr SET1 SET2` translates visible-text characters. A short SET2
+  repeats its last character; `tr -d SET1` deletes characters and
+  `tr -s SET1 [SET2]` squeezes repeated characters (after translation when
+  SET2 is present). SETs support literals, ascending ranges, `\\`, `\-`, `\t`,
+  and the ASCII classes `[:lower:]`, `[:upper:]`, `[:digit:]`, and `[:space:]`.
 
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
-For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
+For example, `whois | grep -i root | head 3`,
+`whois | tr [:lower:] [:upper:] | head 3`, `whois | sort -r | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+`man grep`, `man head`, `man tail`, `man wc`, `man sort`, `man uniq`, or
+`man tr` in the terminal for the corresponding manual page.
 
 ## Terminal editing shortcuts
 

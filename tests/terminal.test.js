@@ -28,11 +28,16 @@ function createTerm(overrides = {}) {
     busy: false,
     clearCurrentLine: vi.fn(),
     currentLine: "",
+    discardInput: vi.fn(),
     executeCommandLine: vi.fn(),
     history: [],
     historyCursor: -1,
     init: vi.fn(),
     locked: false,
+    moveInputCursor: vi.fn(),
+    insertInput: vi.fn((text) => {
+      term.currentLine += text;
+    }),
     pos: vi.fn(() => 0),
     prompt: vi.fn(),
     resizeListener: vi.fn(),
@@ -105,6 +110,16 @@ function createEditingTerm({ line = "", cursor = line.length, history = [] } = {
       ? Math.max(0, newLine.length - (oldLength - oldCursor))
       : newLine.length;
   });
+  term.moveInputCursor = vi.fn((nextCursor) => {
+    visualCursor = Math.max(0, Math.min(nextCursor, term.currentLine.length));
+  });
+  term.insertInput = vi.fn((text) => {
+    term.currentLine =
+      term.currentLine.slice(0, visualCursor) +
+      text +
+      term.currentLine.slice(visualCursor);
+    visualCursor += text.length;
+  });
 
   return { term, cursor: () => visualCursor };
 }
@@ -126,7 +141,342 @@ afterEach(() => {
   }
 });
 
+function loadComposedTerminal(cols) {
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      _filesHere: () => [],
+      buildInfo: Object.freeze({ version: "test", buildDate: "2030-01-01" }),
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      shortcuts: {},
+      team: {},
+    },
+  });
+  const term = createTerm({
+    buffer: { active: { cursorX: 0 } },
+    cols,
+    command: vi.fn(),
+    focus: vi.fn(),
+    loadAddon: vi.fn(),
+    open: vi.fn(),
+    reset: vi.fn(),
+    writeln: vi.fn(),
+  });
+  env.window.term = term;
+  env.loadScripts([
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+    "js/terminal.js",
+  ]);
+  const { extend, runRootTerminal } = env.exportValues([
+    "extend",
+    "runRootTerminal",
+  ]);
+  extend(term);
+  const writes = [];
+  term.write = vi.fn((output) => writes.push(output));
+  term.init = vi.fn();
+  term.runDeepLink = vi.fn();
+  runRootTerminal(term);
+  return { term, writes };
+}
+
 describe("runRootTerminal", () => {
+  // A wrapped line's rows are transcript once it is submitted or cancelled. Moving
+  // up to erase them would wipe the output printed below them, row for row.
+  const CURSOR_UP = /\x1b\[\d+A/;
+
+  it("keeps command output on screen after a wrapped line", async () => {
+    const { term, writes } = loadComposedTerminal(20);
+    for (const character of "pwd | tr [:lower:] [:upper:]") term._onData(character);
+    writes.length = 0;
+
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.writeln).toHaveBeenCalledWith("/HOME/GUEST"));
+    await vi.waitFor(() => expect(term.currentLine).toBe(""));
+
+    expect(writes.join("")).not.toMatch(CURSOR_UP);
+    expect(term.pos()).toBe(0);
+  });
+
+  it("keeps a cancelled wrapped line on screen and starts a fresh prompt", () => {
+    const { term, writes } = loadComposedTerminal(20);
+    for (const character of "pwd | tr [:lower:] [:upper:]") term._onData(character);
+    writes.length = 0;
+
+    term._onData("\u0003");
+
+    expect(writes.join("")).not.toMatch(CURSOR_UP);
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+  });
+
+  it("keeps wrapped pipeline input exact while terminal writes remain unapplied", async () => {
+    env = createBrowserEnv({
+      globals: {
+        LOGO_TYPE: "ROOT",
+        _DIRS: { "~": [] },
+        _filesHere: () => [],
+        buildInfo: Object.freeze({ version: "test", buildDate: "2030-01-01" }),
+        ensureASCIIArt: vi.fn(() => Promise.resolve()),
+        ensureFileLoaded: vi.fn(() => Promise.resolve()),
+        firm: { blurb: "", email: "hello@example.com" },
+        fitAddon: { fit: vi.fn() },
+        getASCIIArtIdForCommand: vi.fn(() => null),
+        getArt: vi.fn(() => ""),
+        getPreloadFileForCommand: vi.fn(() => null),
+        help: {},
+        jobs: {},
+        portfolio: {},
+        preloadASCIIArt: vi.fn(() => Promise.resolve()),
+        scheduleIdleTask: vi.fn((task) => task()),
+        shortcuts: {},
+        team: {},
+      },
+    });
+    const term = createTerm({
+      buffer: { active: { cursorX: 0 } },
+      cols: 20,
+      command: vi.fn(),
+      focus: vi.fn(),
+      loadAddon: vi.fn(),
+      open: vi.fn(),
+      reset: vi.fn(),
+      writeln: vi.fn(),
+    });
+    env.window.term = term;
+    env.loadScripts([
+      "js/pipeline.js",
+      "config/commands.js",
+      "js/terminal-ext.js",
+      "js/terminal.js",
+    ]);
+    const { extend, runRootTerminal } = env.exportValues([
+      "extend",
+      "runRootTerminal",
+    ]);
+    extend(term);
+    const pendingWrites = [];
+    term.write = vi.fn((output) => pendingWrites.push(output));
+    term.init = vi.fn();
+    term.runDeepLink = vi.fn();
+    runRootTerminal(term);
+
+    const pipeline = "pwd | tr [:lower:] [:upper:]";
+    for (const character of pipeline) term._onData(character);
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+    expect(term.buffer.active.cursorX).toBe(0);
+
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.history).toEqual([pipeline]));
+    expect(term.writeln).toHaveBeenCalledWith("/HOME/GUEST");
+    expect(term.currentLine).toBe("");
+
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+    term._onData("\u0001");
+    expect(term.pos()).toBe(0);
+    term._onData("\u0005");
+    expect(term.pos()).toBe(pipeline.length);
+    term._onData("\u007f");
+    term._onData("]");
+    expect(term.currentLine).toBe(pipeline);
+
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.history).toEqual([pipeline, pipeline]));
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe(pipeline);
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
+    expect(term.currentLine).toBe("");
+    expect(term.pos()).toBe(0);
+
+    term._onData("p");
+    term._onData("w");
+    pressTab(term);
+    expect(term.currentLine).toBe("pwd ");
+    term._onData("\r");
+    await vi.waitFor(() =>
+      expect(term.history).toEqual([pipeline, pipeline, "pwd"])
+    );
+    expect(term.writeln).toHaveBeenLastCalledWith("/home/guest");
+    expect(term.pos()).toBe(0);
+    expect(pendingWrites.length).toBeGreaterThan(0);
+    expect(term.buffer.active.cursorX).toBe(0);
+  });
+
+  it("submits and edits a supplementary tr SET as one code point", async () => {
+    env = createBrowserEnv({
+      globals: {
+        LOGO_TYPE: "ROOT",
+        _DIRS: { "~": [] },
+        _filesHere: () => [],
+        buildInfo: Object.freeze({ version: "test", buildDate: "2030-01-01" }),
+        ensureASCIIArt: vi.fn(() => Promise.resolve()),
+        ensureFileLoaded: vi.fn(() => Promise.resolve()),
+        firm: { blurb: "", email: "hello@example.com" },
+        fitAddon: { fit: vi.fn() },
+        getASCIIArtIdForCommand: vi.fn(() => null),
+        getArt: vi.fn(() => ""),
+        getPreloadFileForCommand: vi.fn(() => null),
+        help: {},
+        jobs: {},
+        portfolio: {},
+        preloadASCIIArt: vi.fn(() => Promise.resolve()),
+        scheduleIdleTask: vi.fn((task) => task()),
+        shortcuts: {},
+        team: {},
+      },
+    });
+    const term = createTerm({
+      buffer: { active: { cursorX: 0 } },
+      cols: 80,
+      command: vi.fn(),
+      focus: vi.fn(),
+      loadAddon: vi.fn(),
+      open: vi.fn(),
+      reset: vi.fn(),
+      writeln: vi.fn(),
+    });
+    env.window.term = term;
+    env.loadScripts([
+      "js/pipeline.js",
+      "config/commands.js",
+      "js/terminal-ext.js",
+      "js/terminal.js",
+    ]);
+    const { extend, runRootTerminal } = env.exportValues([
+      "extend",
+      "runRootTerminal",
+    ]);
+    extend(term);
+    term.init = vi.fn();
+    term.runDeepLink = vi.fn();
+    runRootTerminal(term);
+
+    const pipeline = "echo 😀 | tr 😀 X😀";
+    for (const character of pipeline) term._onData(character);
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+
+    term._onData("\x1b[D");
+    expect(term.pos()).toBe(pipeline.length - 2);
+    term._onData("\x1b[C");
+    expect(term.pos()).toBe(pipeline.length);
+    term._onData("\u007f");
+    expect(term.currentLine).toBe(pipeline.slice(0, -2));
+    expect(term.pos()).toBe(pipeline.length - 2);
+    term._onData("😀");
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.history).toEqual([pipeline]));
+    expect(term.writeln).toHaveBeenCalledWith("X");
+    expect(term.currentLine).toBe("");
+  });
+
+  it("keeps supplementary-width cursor geometry exact across wrapping and recall", async () => {
+    env = createBrowserEnv({
+      globals: {
+        LOGO_TYPE: "ROOT",
+        _DIRS: { "~": [] },
+        _filesHere: () => [],
+        buildInfo: Object.freeze({ version: "test", buildDate: "2030-01-01" }),
+        ensureASCIIArt: vi.fn(() => Promise.resolve()),
+        ensureFileLoaded: vi.fn(() => Promise.resolve()),
+        firm: { blurb: "", email: "hello@example.com" },
+        fitAddon: { fit: vi.fn() },
+        getASCIIArtIdForCommand: vi.fn(() => null),
+        getArt: vi.fn(() => ""),
+        getPreloadFileForCommand: vi.fn(() => null),
+        help: {},
+        jobs: {},
+        portfolio: {},
+        preloadASCIIArt: vi.fn(() => Promise.resolve()),
+        scheduleIdleTask: vi.fn((task) => task()),
+        shortcuts: {},
+        team: {},
+      },
+    });
+    const getStringCellWidth = vi.fn((text) => Array.from(text).length);
+    const term = createTerm({
+      _core: { unicodeService: { getStringCellWidth } },
+      buffer: { active: { cursorX: 0 } },
+      cols: 20,
+      command: vi.fn(),
+      focus: vi.fn(),
+      loadAddon: vi.fn(),
+      open: vi.fn(),
+      reset: vi.fn(),
+      writeln: vi.fn(),
+    });
+    env.window.term = term;
+    env.loadScripts([
+      "js/pipeline.js",
+      "config/commands.js",
+      "js/terminal-ext.js",
+      "js/terminal.js",
+    ]);
+    const { extend, runRootTerminal } = env.exportValues([
+      "extend",
+      "runRootTerminal",
+    ]);
+    extend(term);
+    const pendingWrites = [];
+    term.write = vi.fn((output) => pendingWrites.push(output));
+    term.init = vi.fn();
+    term.runDeepLink = vi.fn();
+    runRootTerminal(term);
+
+    const pipeline = "echo 𝒜 | tr 𝒜 X𝒜";
+    for (const character of pipeline) term._onData(character);
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+
+    pendingWrites.length = 0;
+    term._onData("\x1b[D");
+    expect(term.pos()).toBe(pipeline.length - 2);
+    expect(pendingWrites).toEqual(["\r", "\x1b[12C"]);
+    term._onData("\x1b[C");
+    expect(term.pos()).toBe(pipeline.length);
+    expect(pendingWrites.slice(-2)).toEqual(["\r", "\x1b[13C"]);
+
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.history).toEqual([pipeline]));
+    expect(term.writeln).toHaveBeenLastCalledWith("X");
+
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length);
+    term._onData("\x1b[D");
+    term._onData("\u007f");
+    term._onData("X");
+    expect(term.currentLine).toBe(pipeline);
+    expect(term.pos()).toBe(pipeline.length - 2);
+    term._onData("\x1b[C");
+    term._onData("\r");
+
+    await vi.waitFor(() => expect(term.history).toEqual([pipeline, pipeline]));
+    expect(term.writeln).toHaveBeenLastCalledWith("X");
+    expect(getStringCellWidth).toHaveBeenCalledWith("echo 𝒜 | tr 𝒜 X𝒜");
+    expect(term.buffer.active.cursorX).toBe(0);
+  });
+
   it("initializes once and prompts immediately", () => {
     const { runRootTerminal } = loadTerminalScript();
     const term = createTerm();
@@ -544,6 +894,9 @@ describe("runRootTerminal", () => {
     const { runRootTerminal } = loadTerminalScript();
     let cursor = start;
     const term = createTerm({ currentLine: line, pos: vi.fn(() => cursor) });
+    term.moveInputCursor = vi.fn((nextCursor) => {
+      cursor = Math.max(0, Math.min(nextCursor, term.currentLine.length));
+    });
     term.write = vi.fn((output) => {
       for (const match of output.matchAll(/\x1b\[([CD])/g)) {
         cursor += match[1] === "C" ? 1 : -1;
@@ -649,11 +1002,8 @@ describe("runRootTerminal", () => {
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(term.currentLine).toBe("keep tail");
     expect(editing.cursor()).toBe(5);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "keep tail\x1b[K",
-      "\x1b[D".repeat(4),
-    ]);
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("keep tail");
+    expect(term.moveInputCursor).toHaveBeenLastCalledWith(5);
     expect(term.currentLine).not.toContain("∂");
     expect(term.currentLine).not.toMatch(/[\u0000-\u001f\u007f]/);
     expect(term.executeCommandLine).not.toHaveBeenCalled();
@@ -857,21 +1207,16 @@ describe("runRootTerminal", () => {
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "w" }));
     expect(term.currentLine).toBe("keep  tail");
     expect(editing.cursor()).toBe(5);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(11),
-      "keep  tail\x1b[K",
-      "\x1b[D".repeat(5),
-    ]);
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("keep  tail");
+    expect(term.moveInputCursor).toHaveBeenLastCalledWith(5);
     expect(term.prompt).toHaveBeenCalledTimes(1);
 
     term.write.mockClear();
     term._customKeyHandler(keyEvent({ ctrlKey: true, key: "u" }));
     expect(term.currentLine).toBe("");
     expect(editing.cursor()).toBe(0);
-    expect(term.write.mock.calls.map(([output]) => output)).toEqual([
-      "\x1b[D".repeat(5),
-      "\x1b[K",
-    ]);
+    expect(term.setCurrentLine).toHaveBeenLastCalledWith("");
+    expect(term.moveInputCursor).toHaveBeenLastCalledWith(0);
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.clearCurrentLine).not.toHaveBeenCalled();
     expect(term.executeCommandLine).not.toHaveBeenCalled();

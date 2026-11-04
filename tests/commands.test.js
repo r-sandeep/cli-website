@@ -1035,7 +1035,12 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("-r reverse, -n numeric, -u unique");
     expect(output).toContain("COMMAND | %uniq% [-cd]");
     expect(output).toContain("-c count, -d repeated only");
+    expect(output).toContain("COMMAND | %tr% SET1 SET2");
+    expect(output).toContain("%tr% -d SET1");
+    expect(output).toContain("%tr% -s SET1 [SET2]");
+    expect(output).toContain("translate, delete, or squeeze visible-text characters");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
+    expect(output).toContain("%whois% | %tr% [:lower:] [:upper:] | %head% 3");
   });
 });
 
@@ -1048,6 +1053,7 @@ describe("pipeline manual pages preserve standalone commands", () => {
     ["wc", "COMMAND | %wc% -l"],
     ["sort", "COMMAND | %sort% [-rnu]"],
     ["uniq", "COMMAND | %uniq% [-cd]"],
+    ["tr", "COMMAND | %tr% SET1 SET2"],
   ])("documents man %s", (topic, expected) => {
     const { commands, term } = loadCommands();
     commands.man([topic]);
@@ -1071,6 +1077,77 @@ describe("pipeline manual pages preserve standalone commands", () => {
     expect(uniqOutput).toContain("-d keeps only repeated runs");
     expect(uniqOutput).toContain("Flags may be combined as -cd");
     expect(uniqOutput).toContain("ANSI color and escape sequences are ignored");
+  });
+
+  it("documents every tr mode, SET form, option boundary, styling, and rejection rule", () => {
+    const { commands, term } = loadCommands();
+    commands.man(["tr"]);
+    const output = term.stylePrint.mock.calls.flat().join("\n");
+
+    expect(output).toContain("character at the same position in SET2");
+    expect(output).toContain("short SET2 repeats its last character");
+    expect(output).toContain("extra SET2 characters are ignored");
+    expect(output).toContain("last position wins when SET1 repeats a character");
+    expect(output).toContain("-d deletes characters in SET1");
+    expect(output).toContain("preserves a line even when it becomes empty");
+    expect(output).toContain("-s with one SET squeezes");
+    expect(output).toContain("With two SETs it translates first");
+    expect(output).toContain("literal characters, ascending or equal ranges");
+    expect(output).toContain("escapes \\\\, \\-, and \\t");
+    expect(output).toContain("[:lower:]");
+    expect(output).toContain("[:upper:]");
+    expect(output).toContain("[:digit:]");
+    expect(output).toContain("[:space:]");
+    expect(output).toContain("[:digit:] and [:space:] are allowed only in SET1");
+    expect(output).toContain("Unicode code points");
+    expect(output).toContain("only separate, unrepeated -d or -s options");
+    expect(output).toContain("they cannot be combined");
+    expect(output).toContain("A lone - is a hyphen SET");
+    expect(output).toContain("use \\- to start SET1 with a hyphen");
+    expect(output).toContain("dash-prefixed arguments are SET data");
+    expect(output).toContain("Changed visible text is emitted without styling");
+    expect(output).toContain("unchanged visible text keeps its original styling");
+    expect(output).toContain("Pipeline parsing has no quoting");
+    expect(output).toContain("stages split on | and arguments split on whitespace");
+    expect(output).toContain("missing or empty SET");
+    expect(output).toContain("missing SET2 for translation");
+    expect(output).toContain("SET2 with -d");
+    expect(output).toContain("more than two SETs");
+    expect(output).toContain("combined or repeated options");
+    expect(output).toContain("unsupported options");
+    expect(output).toContain("descending ranges");
+    expect(output).toContain("unknown or SET2-forbidden classes");
+    expect(output).toContain("unknown escapes");
+    expect(output).toContain("trailing backslashes");
+    expect(output).toContain("rejects the whole pipeline before its command runs");
+    expect(output).toContain("prints one tr: message naming the problem");
+    expect(output).toContain("%pwd% | %tr% / -");
+  });
+
+  it("keeps tr pipeline-only and preserves manual fallback after man tr", () => {
+    const { commands, term } = loadCommands();
+    commands.tldr = vi.fn();
+
+    commands.man(["tr"]);
+    expect(term.stylePrint.mock.calls.flat().join("\n")).toContain("%TR(1)%");
+    expect(commands.tldr).not.toHaveBeenCalled();
+    expect(commands.tr).toBeUndefined();
+
+    commands.man(["portfolio_company"]);
+    expect(commands.tldr).toHaveBeenLastCalledWith(["portfolio_company"]);
+    commands.man(["unknown_topic"]);
+    expect(commands.tldr).toHaveBeenLastCalledWith(["unknown_topic"]);
+  });
+
+  it("documents tr in README with executable unquoted examples", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const pipelines = readme.split("## Output pipelines")[1].split("## Terminal editing shortcuts")[0];
+
+    expect(pipelines).toContain("`COMMAND | tr SET1 SET2`");
+    expect(pipelines).toContain("`tr -d SET1`");
+    expect(pipelines).toContain("`tr -s SET1 [SET2]`");
+    expect(pipelines).toContain("`whois | tr [:lower:] [:upper:] | head 3`");
+    expect(pipelines).toContain("`man tr`");
   });
 
   it("keeps portfolio and unknown man topics on the existing tldr fallback", () => {

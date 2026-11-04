@@ -51,6 +51,10 @@ const extend = (term) => {
   term.history = [];
   term.historyCursor = -1;
   term.busy = false;
+  // Logical input position is updated synchronously by the keyboard handlers.
+  // xterm applies writes asynchronously, so its buffer cursor cannot safely be
+  // used as the source of truth while a wrapped command is being edited.
+  let inputCursor = 0;
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -275,9 +279,8 @@ const extend = (term) => {
   term.tabBase = "";
 
   // Cursor position relative to the start of the user's input (after the prompt).
-  // Uses the raw xterm buffer position minus the prompt's character length.
-  term.pos = () =>
-    term.buffer.active.cursorX - term._promptRawText().length - 1;
+  // This logical index changes synchronously, independently of xterm rendering.
+  term.pos = () => inputCursor;
 
   // Plain-text prompt string used for length calculations.
   term._promptRawText = () =>
@@ -317,29 +320,106 @@ const extend = (term) => {
     term.write(`${prefix}${term.promptText()}${suffix}`);
   };
 
-  // Erases the current input line and redraws the prompt, optionally resetting
-  // the history cursor so the next Up arrow starts from the most recent entry.
+  const inputCellWidth = (text) => {
+    const unicodeService = term._core && term._core.unicodeService;
+    if (
+      unicodeService &&
+      typeof unicodeService.getStringCellWidth === "function"
+    ) {
+      return unicodeService.getStringCellWidth(text);
+    }
+    // Test doubles and older terminal implementations may not expose xterm's
+    // Unicode service. Counting code points is still a safe fallback: unlike a
+    // UTF-16 length it never places the logical cursor inside a surrogate pair.
+    return Array.from(text).length;
+  };
+
+  const inputOffset = (cursor) =>
+    inputCellWidth(term._promptRawText()) +
+    1 +
+    inputCellWidth(term.currentLine.slice(0, cursor));
+  const inputPosition = (cursor) => {
+    const width = Math.max(1, Number.isFinite(term.cols) ? term.cols : 80);
+    const offset = inputOffset(cursor);
+    return { row: Math.floor(offset / width), column: offset % width };
+  };
+
+  // Move between logical input positions with prompt-relative row/column math.
+  // Explicit row movement is required because CSI D does not cross a soft wrap.
+  term.moveInputCursor = (nextCursor) => {
+    const bounded = Math.max(0, Math.min(nextCursor, term.currentLine.length));
+    if (bounded === inputCursor) return;
+    const from = inputPosition(inputCursor);
+    const to = inputPosition(bounded);
+    if (from.row > to.row) term.write(`\x1b[${from.row - to.row}A`);
+    if (from.row < to.row) term.write(`\x1b[${to.row - from.row}B`);
+    term.write("\r");
+    if (to.column > 0) term.write(`\x1b[${to.column}C`);
+    inputCursor = bounded;
+  };
+
+  const eraseInputRows = () => {
+    const current = inputPosition(inputCursor);
+    const end = inputPosition(term.currentLine.length);
+    if (current.row > 0) term.write(`\x1b[${current.row}A`);
+    term.write("\r");
+    for (let row = 0; row <= end.row; row += 1) {
+      term.write("\x1b[2K");
+      if (row < end.row) term.write("\x1b[1B\r");
+    }
+    if (end.row > 0) term.write(`\x1b[${end.row}A`);
+    term.write("\r");
+  };
+
+  // Erases every wrapped row occupied by the prompt and input, then redraws the
+  // prompt without consulting xterm's asynchronously updated cursor position.
   term.clearCurrentLine = (goToEndofHistory = false) => {
-    term.write("\x1b[2K\r");
-    term.prompt("", " ");
+    eraseInputRows();
     term.currentLine = "";
+    inputCursor = 0;
+    term.prompt("", " ");
     if (goToEndofHistory) {
       term.historyCursor = -1;
       term.scrollToBottom();
     }
   };
 
-  // Replaces the current input with newLine, preserving cursor position if asked.
+  // Forgets input that was submitted or cancelled. Its rows are transcript now,
+  // so clearCurrentLine must not erase them, or whatever printed below them, as
+  // if they were still the live line.
+  term.discardInput = () => {
+    term.currentLine = "";
+    inputCursor = 0;
+  };
+
+  // Replaces the current input with newLine, preserving its logical cursor if
+  // asked. The final move is wrap-aware and synchronous.
   term.setCurrentLine = (newLine, preserveCursor = false) => {
-    // Capture position before clearCurrentLine() because the xterm buffer
-    // cursor moves during the erase, making pos() unreliable immediately after.
-    const oldPos = term.pos();
-    const length = term.currentLine.length;
+    const oldPos = inputCursor;
+    const oldLength = term.currentLine.length;
+    const nextCursor = preserveCursor
+      ? Math.max(0, newLine.length - (oldLength - oldPos))
+      : newLine.length;
     term.clearCurrentLine();
     term.currentLine = newLine;
     term.write(newLine);
-    if (preserveCursor) {
-      term.write("\x1b[D".repeat(length - oldPos));
+    inputCursor = newLine.length;
+    term.moveInputCursor(nextCursor);
+  };
+
+  // Inserts one printable character at the logical cursor. Keeping this state
+  // transition beside pos()/setCurrentLine() lets the input handler advance
+  // synchronously without clearing and redrawing the prompt on every keypress.
+  term.insertInput = (text) => {
+    const restOfLine = term.currentLine.slice(inputCursor);
+    term.currentLine =
+      term.currentLine.slice(0, inputCursor) + text + restOfLine;
+    term.write(text);
+    inputCursor += text.length;
+    if (restOfLine.length > 0) {
+      term.write(restOfLine);
+      inputCursor = term.currentLine.length;
+      term.moveInputCursor(term.currentLine.length - restOfLine.length);
     }
   };
 
@@ -758,6 +838,7 @@ const extend = (term) => {
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
       if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+        term.discardInput();
         term.prompt();
         term.clearCurrentLine(true);
       }
