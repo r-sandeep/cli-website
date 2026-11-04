@@ -94,6 +94,45 @@ function loadAliasTerminal() {
   return { commands, extend, term };
 }
 
+function loadConfiguredTerminal() {
+  const term = createTerm();
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      colorText: (text) => text,
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      shortcuts: {},
+      term,
+    },
+  });
+  env.loadScripts([
+    "config/firm.js",
+    "config/team.js",
+    "config/portfolio.js",
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
+  const { commands, extend, portfolio } = env.exportValues([
+    "commands",
+    "extend",
+    "portfolio",
+  ]);
+  extend(term);
+  return { commands, portfolio, term };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   if (env) {
@@ -568,12 +607,19 @@ describe("terminal-ext", () => {
     expect(echoed).toEqual(expect.arrayContaining([" upgrade\r\n", " apply 1\r\n"]));
   });
 
-  it("reads the cursor through xterm's public buffer API", () => {
+  it("tracks the logical cursor without waiting for xterm buffer writes", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm({ buffer: { active: { cursorX: 25 } } });
     extend(term);
-    // prompt is "guest:rootpc ~ $" (16 chars) plus the space.
-    expect(term.pos()).toBe(25 - "guest:rootpc ~ $".length - 1);
+
+    expect(term.pos()).toBe(0);
+    term.setCurrentLine("pwd | tr [:lower:] [:upper:]");
+    expect(term.pos()).toBe("pwd | tr [:lower:] [:upper:]".length);
+    term.moveInputCursor(8);
+    expect(term.pos()).toBe(8);
+    // A stale renderer cursor never changes the logical editing position.
+    term.buffer.active.cursorX = 1;
+    expect(term.pos()).toBe(8);
   });
 
   it("colorizes every %command% token in a line with one pass", () => {
@@ -895,6 +941,148 @@ describe("terminal-ext", () => {
     expect(term.write).toBe(originalWrite);
     expect(term.writeln).toBe(originalWriteln);
     expect(term.history).toEqual(["version | grep terminal"]);
+    expect(term.busy).toBe(false);
+  });
+
+  it("composes tr through registered pwd and echo dispatch in both directions", async () => {
+    const { term } = loadAliasTerminal();
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+
+    const cases = [
+      ["pwd | tr [:lower:] [:upper:] | head 3", ["/HOME/GUEST"]],
+      ["echo bookkeeper | tr -s oek | sort", ["bokeper"]],
+      ["echo HOME | grep HOME | tr [:upper:] [:lower:]", ["home"]],
+      ["echo banana | tr a-z A-Z | grep BANANA", ["BANANA"]],
+    ];
+
+    for (const [line, expected] of cases) {
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+      expect(term.writeln.mock.calls.map(([output]) => output)).toEqual(expected);
+    }
+
+    expect(dispatch.mock.calls.map(([name]) => name)).toEqual([
+      "pwd",
+      "echo",
+      "echo",
+      "echo",
+    ]);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+    expect(term.history).toEqual(cases.map(([line]) => line));
+    expect(env.window.dataLayer).toHaveLength(cases.length);
+    expect(term.busy).toBe(false);
+  });
+
+  it.each([
+    ["pwd | tr", "tr: SET1 is required"],
+    ["pwd | tr a", "tr: SET2 is required without -d or -s"],
+    ["pwd | tr -d a b", "tr: SET2 is not allowed with -d"],
+    ["pwd | tr a b c", "tr: more than two SETs were provided"],
+    ["pwd | tr -d -s a", "tr: options -d and -s cannot be combined"],
+    ["pwd | tr -d -d a", "tr: option -d cannot be repeated"],
+    ["pwd | tr z-a X", "tr: SET1 has descending range z-a"],
+    ["pwd | tr [:word:] X", "tr: SET1 has unknown class [:word:]"],
+    ["pwd | tr a [:digit:]", "tr: class [:digit:] is not allowed in SET2"],
+    ["pwd | grep guest | tr -x X", "tr: unsupported option -x"],
+  ])("rejects registered dispatch for malformed %s and remains usable", async (line, message) => {
+    const { term } = loadAliasTerminal();
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+    const preload = vi.spyOn(term, "preloadCommandAssets");
+
+    await term.executeCommandLine(line, {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(preload).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([message]);
+    expect(term.history).toEqual([line]);
+    expect(env.window.dataLayer).toEqual([
+      {
+        args: line.slice(4),
+        command: "pwd",
+        event: "commandSent",
+      },
+    ]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("pwd", {
+      promptAfter: false,
+      showLeadingNewline: false,
+      addToHistory: false,
+      trackAnalytics: false,
+    });
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch).toHaveBeenCalledWith("pwd", [], expect.any(Object));
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual(["/home/guest"]);
+    expect(term.busy).toBe(false);
+  });
+
+  it("keeps standalone tr on the ordinary registered-command-not-found path", async () => {
+    const { commands, term } = loadAliasTerminal();
+    expect(commands.tr).toBeUndefined();
+
+    for (const line of ["tr", "tr a b"]) {
+      term.writeln.mockClear();
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+      expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+        "Command not found: tr. Try 'help' to get started.",
+      ]);
+    }
+    expect(term.history).toEqual(["tr", "tr a b"]);
+    expect(env.window.dataLayer).toHaveLength(2);
+  });
+
+  it("runs the required whois and tldr tr pipelines through configured commands", async () => {
+    const { portfolio, term } = loadConfiguredTerminal();
+    const dispatch = vi.spyOn(term, "dispatchCommand");
+    const originalWrite = term.write;
+    const originalWriteln = term.writeln;
+
+    await term.executeCommandLine("whois | tr [:lower:] [:upper:] | head 3", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual([
+      "WHOIS: LEARN ABOUT THE FIRM, OR A PARTNER - USAGE:",
+      "",
+      "WHOIS ROOT",
+    ]);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("tldr | grep -i ai | tr -d [:digit:] | sort", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    const expectedTldr = Object.keys(portfolio)
+      .sort()
+      .map((name) => {
+        const separator = name.length > 10 ? "\t" : "\t\t";
+        return `tldr ${name}${separator}${portfolio[name].url}`;
+      })
+      .filter((line) => line.toLowerCase().includes("ai"))
+      .map((line) => line.replace(/[0-9]/g, ""))
+      .sort((left, right) => left.localeCompare(right));
+    expect(term.writeln.mock.calls.map(([output]) => output)).toEqual(expectedTldr);
+
+    expect(dispatch.mock.calls.map(([name]) => name)).toEqual(["whois", "tldr"]);
+    expect(term.write).toBe(originalWrite);
+    expect(term.writeln).toBe(originalWriteln);
+    expect(term.history).toEqual([
+      "whois | tr [:lower:] [:upper:] | head 3",
+      "tldr | grep -i ai | tr -d [:digit:] | sort",
+    ]);
+    expect(env.window.dataLayer).toHaveLength(2);
     expect(term.busy).toBe(false);
   });
 
