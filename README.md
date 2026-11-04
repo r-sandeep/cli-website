@@ -42,7 +42,8 @@ replace the existing standalone commands with the same names.
   Add `-i` for case-insensitive matching, `-v` to invert the match, or `-n` to
   prefix retained lines with their 1-based incoming line number. Flags may be
   combined, as in `grep -ivn PATTERN`.
-- `COMMAND | head [N]` keeps the first N lines. N defaults to 10.
+- `COMMAND | head [N]` or `COMMAND | head -n N` keeps the first N lines. N
+  defaults to 10.
 - `COMMAND | tail [N]` keeps the last N lines. N defaults to 10.
 - `COMMAND | wc -l` prints the number of output lines.
 - `COMMAND | sort [-rnu]` sorts lines by visible text. Add `-r` to reverse the
@@ -51,14 +52,15 @@ replace the existing standalone commands with the same names.
 - `COMMAND | uniq [-cd]` collapses adjacent lines with identical visible text.
   Add `-c` to prefix each surviving line with its run count and one space, or
   `-d` to keep only repeated runs. Flags may be combined, as in `uniq -cd`.
+- `COMMAND | tac` takes no arguments and reverses all lines, last line first.
 
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
-For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
+For example, `whois | tac | head -n 3`, `whois | grep -i root | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
-`man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
-terminal for the corresponding manual page.
+`man grep`, `man head`, `man tail`, `man wc`, `man sort`, `man uniq`, or
+`man tac` in the terminal for the corresponding manual page.
 
 ## Terminal editing shortcuts
 

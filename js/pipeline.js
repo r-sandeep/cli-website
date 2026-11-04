@@ -85,7 +85,12 @@ var Pipeline = (function () {
   }
 
   function compileCountFilter(stage) {
-    if (stage.args.length > 1) {
+    var args = stage.args;
+    if (stage.name === "head" && args.length === 2 && args[0] === "-n") {
+      args = [args[1]];
+    }
+
+    if (args.length > 1) {
       return preDispatchError(
         stage.name,
         stage.name + ": count must be a positive base-10 integer"
@@ -93,8 +98,8 @@ var Pipeline = (function () {
     }
 
     var count = 10;
-    if (stage.args.length === 1) {
-      var value = stage.args[0];
+    if (args.length === 1) {
+      var value = args[0];
       count = Number(value);
       if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(count) || count <= 0) {
         return preDispatchError(
@@ -152,6 +157,15 @@ var Pipeline = (function () {
     }
     if (stage.name === "sort") return compileFlagFilter(stage, "rnu");
     if (stage.name === "uniq") return compileFlagFilter(stage, "cd");
+    if (stage.name === "tac") {
+      if (stage.args.length !== 0) {
+        return preDispatchError(stage.name, "tac: takes no arguments");
+      }
+      return {
+        ok: true,
+        filter: { type: "tac", name: stage.name },
+      };
+    }
     if (stage.name === "wc") {
       if (stage.args.length !== 1 || stage.args[0] !== "-l") {
         return preDispatchError(stage.name, "wc: only wc -l is supported");
@@ -216,6 +230,9 @@ var Pipeline = (function () {
       };
     }
 
+    if (filter.type === "tac") {
+      return { lines: lines.slice().reverse(), error: null };
+    }
     if (filter.type === "head") {
       return { lines: lines.slice(0, filter.count), error: null };
     }

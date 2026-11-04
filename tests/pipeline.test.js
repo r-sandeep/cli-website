@@ -100,8 +100,23 @@ describe("head and tail", () => {
 
   it("keeps the requested first or last positive number of lines", () => {
     expect(run("cmd | head 1", manyLines).lines).toEqual(["line 1"]);
+    expect(run("cmd | head -n 3", manyLines).lines).toEqual(manyLines.slice(0, 3));
     expect(run("cmd | tail 3", manyLines).lines).toEqual(manyLines.slice(-3));
   });
+
+  it.each(["-n", "-n 0", "-n -1", "-n 1.5", "-n two", "-n 2 3"])(
+    "rejects malformed head -n count %s without changing tail syntax",
+    (count) => {
+      const result = compile(`cmd | head ${count}`);
+      expect(result.ok).toBe(false);
+      expect(result.error).toEqual({
+        type: "pre-dispatch",
+        stageName: "head",
+        message: "head: count must be a positive base-10 integer",
+      });
+      expect(compile("cmd | tail -n 3").ok).toBe(false);
+    }
+  );
 
   it.each(["0", "-1", "1.5", "two", "0x10", "1e2", "2 3"])(
     "classifies invalid count %s as a pre-dispatch error",
@@ -124,6 +139,130 @@ describe("head and tail", () => {
       expect(result.error.message).toContain("positive base-10 integer");
     }
   );
+});
+
+describe("tac", () => {
+  it("compiles a no-argument stage to the normal filter descriptor", () => {
+    expect(compile("cmd | tac")).toEqual({
+      ok: true,
+      producer: "cmd",
+      filters: [{ type: "tac", name: "tac" }],
+    });
+  });
+
+  it("reverses exact line values without mutating or reconstructing them", () => {
+    const strings = Object.freeze([
+      "  leading",
+      "\u001b[31mred\u001b[0m",
+      "",
+      "duplicate",
+      "duplicate",
+      "Unicode π 🚀  ",
+    ]);
+    const expectedStrings = [
+      "Unicode π 🚀  ",
+      "duplicate",
+      "duplicate",
+      "",
+      "\u001b[31mred\u001b[0m",
+      "  leading",
+    ];
+    const first = Object.freeze({ id: "first" });
+    const second = Object.freeze({ id: "second" });
+    const objects = Object.freeze([first, second]);
+
+    expect(run("cmd | tac", strings)).toEqual({
+      lines: expectedStrings,
+      error: null,
+    });
+    const objectResult = run("cmd | tac", objects);
+    expect(objectResult.lines).toEqual([second, first]);
+    expect(objectResult.lines[0]).toBe(second);
+    expect(objectResult.lines[1]).toBe(first);
+    expect(strings).toEqual([
+      "  leading",
+      "\u001b[31mred\u001b[0m",
+      "",
+      "duplicate",
+      "duplicate",
+      "Unicode π 🚀  ",
+    ]);
+    expect(objects).toEqual([first, second]);
+  });
+
+  it("handles empty, singleton, repeated, and double reversal independently", () => {
+    const input = Object.freeze(["first", "second", "third"]);
+    expect(run("cmd | tac", [])).toEqual({ lines: [], error: null });
+    expect(run("cmd | tac", ["only"])).toEqual({ lines: ["only"], error: null });
+    expect(run("cmd | tac", input)).toEqual({
+      lines: ["third", "second", "first"],
+      error: null,
+    });
+    expect(run("cmd | tac", input)).toEqual({
+      lines: ["third", "second", "first"],
+      error: null,
+    });
+    expect(run("cmd | tac | tac", input)).toEqual({ lines: [...input], error: null });
+    expect(input).toEqual(["first", "second", "third"]);
+  });
+
+  it.each(["x", "-r", "--", "1", "x y"])(
+    "rejects argument %s during compilation",
+    (argument) => {
+      expect(compile(`cmd | tac ${argument}`)).toEqual({
+        ok: false,
+        error: {
+          type: "pre-dispatch",
+          stageName: "tac",
+          message: "tac: takes no arguments",
+        },
+      });
+    }
+  );
+
+  it("rejects arguments at every stage position", () => {
+    expect(compile("cmd | head 2 | tac x | tail 1")).toEqual({
+      ok: false,
+      error: {
+        type: "pre-dispatch",
+        stageName: "tac",
+        message: "tac: takes no arguments",
+      },
+    });
+    expect(compile("cmd | tac x | grep value").error.message).toBe(
+      "tac: takes no arguments"
+    );
+  });
+
+  it.each([
+    ["tac then grep", "cmd | tac | grep -i alpha", ["alpha", "Alpha", "Alpha"]],
+    ["grep then tac", "cmd | grep -i alpha | tac", ["alpha", "Alpha", "Alpha"]],
+    ["tac then head", "cmd | tac | head 2", ["gamma", "alpha"]],
+    ["head then tac", "cmd | head 2 | tac", ["Alpha", "beta"]],
+    ["tac then tail", "cmd | tac | tail 2", ["Alpha", "beta"]],
+    ["tail then tac", "cmd | tail 2 | tac", ["gamma", "alpha"]],
+    ["tac then wc", "cmd | tac | wc -l", ["6"]],
+    ["wc then tac", "cmd | wc -l | tac", ["6"]],
+    ["tac then sort", "cmd | tac | sort", ["Alpha", "Alpha", "alpha", "beta", "gamma", "gamma"]],
+    ["sort then tac", "cmd | sort | tac", ["gamma", "gamma", "beta", "alpha", "Alpha", "Alpha"]],
+    ["tac then uniq", "cmd | tac | uniq", ["gamma", "alpha", "gamma", "Alpha", "beta"]],
+    ["uniq then tac", "cmd | uniq | tac", ["gamma", "alpha", "gamma", "Alpha", "beta"]],
+  ])("composes %s", (_name, commandLine, expected) => {
+    const input = ["beta", "Alpha", "Alpha", "gamma", "alpha", "gamma"];
+    expect(run(commandLine, input)).toEqual({ lines: expected, error: null });
+  });
+
+  it("applies an interleaved chain strictly left to right", () => {
+    expect(
+      run("cmd | grep -i a | tac | head -n 3 | sort | tac", [
+        "zero",
+        "Alpha",
+        "beta",
+        "Gamma",
+        "delta",
+      ])
+    ).toEqual({ lines: ["delta", "beta", "Gamma"], error: null });
+  });
 });
 
 describe("wc, empty input, and composition", () => {

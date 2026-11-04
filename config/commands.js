@@ -1282,13 +1282,15 @@ const _pipelineManuals = {
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
-    "Example: %whois% | %grep% -i root | %head% 3",
+    "Filters: %grep%, %head%, %tail%, %wc%, %sort%, %uniq%, and %tac%. tac takes no arguments and reverses all lines, last line first.",
+    "Example: %whois% | %tac% | %head% -n 3",
   ],
   piping: [
     "%PIPE(1)% — filter terminal command output",
     "Usage: COMMAND | FILTER [| FILTER ...]",
     "Stages run from left to right. A filter with no input prints nothing.",
-    "Example: %whois% | %grep% -i root | %head% 3",
+    "Filters: %grep%, %head%, %tail%, %wc%, %sort%, %uniq%, and %tac%. tac takes no arguments and reverses all lines, last line first.",
+    "Example: %whois% | %tac% | %head% -n 3",
   ],
   grep: [
     "%GREP(1)% — retain lines containing a literal substring",
@@ -1297,8 +1299,8 @@ const _pipelineManuals = {
   ],
   head: [
     "%HEAD(1)% — retain the first output lines",
-    "Usage: COMMAND | %head% [N]",
-    "N defaults to 10 and must be a positive base-10 integer.",
+    "Usage: COMMAND | %head% [N] or COMMAND | %head% -n N",
+    "N defaults to 10 and must be a positive base-10 integer. The positional and -n forms are equivalent.",
   ],
   tail: [
     "%TAIL(1)% — retain the last output lines",
@@ -1308,6 +1310,11 @@ const _pipelineManuals = {
   wc: [
     "%WC(1)% — count output lines",
     "Usage: COMMAND | %wc% -l",
+  ],
+  tac: [
+    "%TAC(1)% — reverse pipeline output",
+    "Usage: COMMAND | %tac%",
+    "Reverse all input lines, last line first. tac takes no arguments.",
   ],
 };
 
