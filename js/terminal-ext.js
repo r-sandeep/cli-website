@@ -823,7 +823,13 @@ const extend = (term) => {
         }
       }
     });
-    term.prompt();
+    // A form (collectInput) still owns the keyboard, so put its question and
+    // what has been typed back on screen rather than a misleading shell prompt.
+    if (term.activeInput) {
+      term.write(`\r\n${term.activeInput.label}${term.activeInput.buffer}`);
+    } else {
+      term.prompt();
+    }
     term.scrollToBottom();
     term._initialized = true;
   };
@@ -880,7 +886,10 @@ const extend = (term) => {
   // not be counted again. History replay uses the same execution boundary with
   // its user-visible submission side effects disabled for the same reason.
   term.runDeepLink = ({ replay = false } = {}) => {
-    if (replay && expandUserAlias(parseCommandLine(term.deepLink)).cmd === "tui") return;
+    // Same rule as the history replay in resizeListener: interactive commands
+    // are never rerun. Rerunning `apply` stacked a second form on the live one,
+    // so every keystroke was echoed twice.
+    if (replay && term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(term.deepLink)).cmd)) return;
     if (term.deepLink != "") {
       return term.executeCommandLine(term.deepLink, {
         addToHistory: false,
@@ -907,19 +916,24 @@ const extend = (term) => {
   term.collectInput = (prompt, isOptional = false) => {
     return new Promise((resolve) => {
       term.locked = true;
-      term.write(`\r\n${prompt}${isOptional ? ' (optional)' : ''}: `);
+      const label = `${prompt}${isOptional ? ' (optional)' : ''}: `;
+      term.write(`\r\n${label}`);
       let inputBuffer = '';
+      // Read by resizeListener to redraw this question after a resize.
+      term.activeInput = { label, get buffer() { return inputBuffer; } };
 
       const inputHandler = term.onData((e) => {
         switch (e) {
           case '\r': // Enter — submit
             term.write('\r\n');
+            term.activeInput = null;
             inputHandler.dispose();
             term.locked = false;
             resolve(inputBuffer.trim());
             break;
           case '\u0003': // Ctrl+C — cancel, resolves to null
             term.write('^C\r\n');
+            term.activeInput = null;
             inputHandler.dispose();
             term.locked = false;
             resolve(null);
