@@ -37,6 +37,52 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+const _parseRedirection = (line) => {
+  const source = String(line);
+  let quote = null;
+  let operatorIndex = -1;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote !== null) {
+      if (character === quote) quote = null;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === ">") {
+      operatorIndex = index;
+      break;
+    }
+  }
+
+  if (operatorIndex === -1) return null;
+
+  const append = source[operatorIndex + 1] === ">";
+  const operatorLength = append ? 2 : 1;
+  const command = source.slice(0, operatorIndex).trim();
+  const target = source.slice(operatorIndex + operatorLength).trim();
+
+  if (command.length === 0) {
+    return { error: "redirect: missing command" };
+  }
+  if (target.length === 0) {
+    return { error: "redirect: missing file name" };
+  }
+  if (target.includes(">")) {
+    return { error: "redirect: more than one redirection operator" };
+  }
+  if (target.includes("'") || target.includes('"')) {
+    return { error: "redirect: quoted file names are not supported" };
+  }
+  if (/\s/.test(target)) {
+    return { error: "redirect: expected exactly one file name" };
+  }
+  if (!/^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/.test(target)) {
+    return { error: `redirect: invalid file name ${target}` };
+  }
+
+  return { command, fileName: target, append, error: null };
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -632,7 +678,35 @@ const extend = (term) => {
     }
   };
 
-  term.executeCommandLine = async (line, options = {}) => {
+  // Foreground command execution and destructive width-change replay both
+  // temporarily own terminal writers and mutable session state. Register each
+  // owner synchronously, before either path reaches its first await, and hand
+  // ownership to the next operation only after all cleanup has completed.
+  let lifecyclePending = 0;
+  let lifecycleTail = Promise.resolve();
+  const withTerminalLifecycle = (operation) => {
+    const run = () => {
+      try {
+        return Promise.resolve(operation());
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+    // Preserve the established synchronous start of an uncontended command
+    // (preload begins before executeCommandLine returns). Only displaced work
+    // crosses a promise boundary while waiting for the current owner.
+    const execution = lifecyclePending === 0
+      ? run()
+      : lifecycleTail.then(run);
+    lifecyclePending++;
+    const settled = execution.finally(() => {
+      lifecyclePending--;
+    });
+    lifecycleTail = settled.catch(() => undefined);
+    return settled;
+  };
+
+  const executeCommandLineInternal = async (line, options = {}) => {
     const settings = {
       addToHistory: true,
       manageBusy: true,
@@ -643,10 +717,17 @@ const extend = (term) => {
       ...options,
     };
     const parsed = parseCommandLine(line);
+    const redirection = _parseRedirection(line);
+    const commandLine = redirection && !redirection.error
+      ? redirection.command
+      : line;
+    const commandParsed = parseCommandLine(commandLine);
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
+    const expanded = expandUserAlias(commandParsed);
     const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    const submissionDirectory = term.cwd;
+    const submissionUser = term.user;
     let exitStatus;
 
     try {
@@ -654,7 +735,164 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      if (parsedPipeline) {
+      if (redirection && redirection.error) {
+        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          term.writeln("");
+        }
+
+        if (parsed.line.length > 0 && settings.addToHistory) {
+          term.history.push(parsed.line);
+        }
+
+        term.stylePrint(redirection.error);
+
+        if (settings.trackAnalytics) {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: "commandSent",
+            command: parsed.cmd,
+            args: parsed.args.join(" "),
+          });
+        }
+      } else if (redirection) {
+        const targetConflict = getSessionFileTargetConflict(
+          submissionDirectory,
+          redirection.fileName,
+          term.user
+        );
+
+        if (targetConflict) {
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
+          }
+
+          if (settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
+
+          term.stylePrint(
+            `redirect: target ${redirection.fileName} is a ${targetConflict}`
+          );
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
+        } else if (parsedPipeline) {
+          const validation = Pipeline.validatePipeline(parsedPipeline);
+
+          if (!validation.ok) {
+            if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+              term.writeln("");
+            }
+
+            if (settings.addToHistory) {
+              term.history.push(parsed.line);
+            }
+
+            term.stylePrint(validation.error.message);
+
+            if (settings.trackAnalytics) {
+              window.dataLayer = window.dataLayer || [];
+              window.dataLayer.push({
+                event: "commandSent",
+                command: parsed.cmd,
+                args: parsed.args.join(" "),
+              });
+            }
+          } else {
+            await term.preloadCommandAssets(validation.producer);
+
+            if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+              term.writeln("");
+            }
+
+            if (settings.addToHistory) {
+              term.history.push(parsed.line);
+            }
+
+            const capture = _captureTerminalOutput(term);
+            try {
+              exitStatus = await term.command(validation.producer);
+            } finally {
+              capture.restore();
+            }
+
+            const result = Pipeline.applyPipeline(capture.lines(), validation.filters, {
+              getText: _visibleTerminalText,
+              prefixLine: (outputLine, lineNumber) => `${lineNumber}:${outputLine}`,
+              prefixCount: (outputLine, count) => `${count} ${outputLine}`,
+            });
+
+            if (result.error) {
+              term.stylePrint(result.error.message);
+            } else {
+              writeSessionFile(
+                submissionDirectory,
+                redirection.fileName,
+                result.lines.map(_visibleTerminalText),
+                redirection.append,
+                submissionUser
+              );
+            }
+
+            capture.flushPromptCleanup();
+
+            if (settings.trackAnalytics) {
+              window.dataLayer = window.dataLayer || [];
+              window.dataLayer.push({
+                event: "commandSent",
+                command: parsed.cmd,
+                args: parsed.args.join(" "),
+              });
+            }
+          }
+        } else {
+          const prepared = prepareParsed(expanded);
+          await term.preloadCommandAssets(prepared.cmd, prepared.args);
+
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
+          }
+
+          if (settings.addToHistory) {
+            term.history.push(parsed.line);
+          }
+
+          const capture = _captureTerminalOutput(term);
+          try {
+            exitStatus = await term.dispatchCommand(
+              prepared.cmd,
+              prepared.args,
+              prepared
+            );
+          } finally {
+            capture.restore();
+          }
+
+          writeSessionFile(
+            submissionDirectory,
+            redirection.fileName,
+            capture.lines().map(_visibleTerminalText),
+            redirection.append,
+            submissionUser
+          );
+          capture.flushPromptCleanup();
+
+          if (settings.trackAnalytics) {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+              event: "commandSent",
+              command: parsed.cmd,
+              args: parsed.args.join(" "),
+            });
+          }
+        }
+      } else if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
@@ -774,6 +1012,9 @@ const extend = (term) => {
     return exitStatus;
   };
 
+  term.executeCommandLine = (line, options = {}) =>
+    withTerminalLifecycle(() => executeCommandLineInternal(line, options));
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   // Called on window resize. Output was wrapped and art was dithered for the
@@ -788,6 +1029,76 @@ const extend = (term) => {
   // locked the terminal for its whole animation again, and `apply` would have
   // restarted the form — so their line is echoed but they are not rerun.
   term.NO_REPLAY = ["tui", "upgrade", "apply", "test", "claude"];
+
+  const replayTerminalAtCurrentWidth = async () => {
+    term._initialized = false;
+    try {
+      term.init(term.user, true);
+      if (typeof preloadASCIIArt === "function") {
+        window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
+      }
+      const isolateSessionFiles = typeof withIsolatedSessionFiles === "function"
+        ? withIsolatedSessionFiles
+        : async (replay) => replay();
+      await isolateSessionFiles(async () => {
+        await runDeepLinkInternal(true);
+        // Replay serially through the internal execution boundary. Calling the
+        // public barrier here would make replay wait on its own ownership.
+        await replayWithoutEnvironmentSideEffects(async () => {
+          for (const c of term.history) {
+            term.prompt("\r\n", ` ${c}\r\n`);
+            if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
+              await executeCommandLineInternal(c, {
+                addToHistory: false,
+                manageBusy: false,
+                promptAfter: false,
+                showLeadingNewline: false,
+                trackAnalytics: false,
+                scrollAfter: false,
+              });
+            }
+          }
+        });
+      });
+    } finally {
+      try {
+        // A form (collectInput) still owns the keyboard, so put its question
+        // and entered text back rather than drawing a misleading shell prompt.
+        if (term.activeInput) {
+          term.write(`\r\n${term.activeInput.label}${term.activeInput.buffer}`);
+        } else {
+          term.prompt();
+        }
+        term.scrollToBottom();
+      } finally {
+        term._initialized = true;
+      }
+    }
+  };
+
+  // Multiple width changes waiting behind foreground work collapse into one
+  // redraw at the latest fitted width. A change that arrives during an active
+  // redraw schedules exactly one trailing replay through the generation check.
+  let resizeGeneration = 0;
+  let resizeReplay = null;
+  const requestResizeReplay = () => {
+    resizeGeneration++;
+    if (resizeReplay) return resizeReplay;
+
+    resizeReplay = (async () => {
+      let replayedGeneration;
+      do {
+        await withTerminalLifecycle(async () => {
+          replayedGeneration = resizeGeneration;
+          await replayTerminalAtCurrentWidth();
+        });
+      } while (replayedGeneration !== resizeGeneration);
+    })().finally(() => {
+      resizeReplay = null;
+    });
+    return resizeReplay;
+  };
+
   term.resizeListener = async () => {
     if (window.rootTui?.active) {
       window.fitAddon.fit();
@@ -799,39 +1110,7 @@ const extend = (term) => {
       term.scrollToBottom();
       return;
     }
-    term._initialized = false;
-    term.init(term.user, true);
-    if (typeof preloadASCIIArt === "function") {
-      window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
-    }
-    await term.runDeepLink({ replay: true });
-    // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
-    await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
-        term.prompt("\r\n", ` ${c}\r\n`);
-        if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
-          await term.executeCommandLine(c, {
-            addToHistory: false,
-            manageBusy: false,
-            promptAfter: false,
-            showLeadingNewline: false,
-            trackAnalytics: false,
-            scrollAfter: false,
-          });
-        }
-      }
-    });
-    // A form (collectInput) still owns the keyboard, so put its question and
-    // what has been typed back on screen rather than a misleading shell prompt.
-    if (term.activeInput) {
-      term.write(`\r\n${term.activeInput.label}${term.activeInput.buffer}`);
-    } else {
-      term.prompt();
-    }
-    term.scrollToBottom();
-    term._initialized = true;
+    return requestResizeReplay();
   };
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
@@ -885,13 +1164,16 @@ const extend = (term) => {
   // buffer xterm cleared. That is the same visit, not a new arrival, so it must
   // not be counted again. History replay uses the same execution boundary with
   // its user-visible submission side effects disabled for the same reason.
-  term.runDeepLink = ({ replay = false } = {}) => {
+  const runDeepLinkInternal = (replay = false) => {
     // Same rule as the history replay in resizeListener: interactive commands
     // are never rerun. Rerunning `apply` stacked a second form on the live one,
     // so every keystroke was echoed twice.
     if (replay && term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(term.deepLink)).cmd)) return;
     if (term.deepLink != "") {
-      return term.executeCommandLine(term.deepLink, {
+      const execute = replay
+        ? executeCommandLineInternal
+        : term.executeCommandLine;
+      return execute(term.deepLink, {
         addToHistory: false,
         promptAfter: false,
         showLeadingNewline: false,
@@ -906,6 +1188,26 @@ const extend = (term) => {
 
     return Promise.resolve();
   };
+
+  // Keep the existing public deep-link boundary for initial navigation and
+  // direct callers. Destructive replay uses the closure-private path above so
+  // it cannot enqueue behind the lifecycle ownership it already holds.
+  term.runDeepLink = ({ replay = false } = {}) =>
+    replay ? term.executeCommandLine === executeCommandLineInternal
+      ? runDeepLinkInternal(true)
+      : (() => {
+          if (term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(term.deepLink)).cmd)) return;
+          if (term.deepLink === "") return Promise.resolve();
+          return term.executeCommandLine(term.deepLink, {
+            addToHistory: false,
+            promptAfter: false,
+            showLeadingNewline: false,
+            trackAnalytics: false,
+          }).catch((error) => {
+            console.error("Deep link failed", error);
+          });
+        })()
+      : runDeepLinkInternal(false);
 
   // ── Interactive Input ──────────────────────────────────────────────────────
 

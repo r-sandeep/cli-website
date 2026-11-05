@@ -65,20 +65,17 @@ function installApplyCommand(term, { inputs, response }) {
 }
 
 function loadAliasTerminal() {
-  const term = createTerm();
+  const term = createTerm({ cwd: "~", user: "guest" });
   env = createBrowserEnv({
     globals: {
       LOGO_TYPE: "ROOT",
-      _DIRS: { "~": [] },
       colorText: (text) => text,
       buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
       ensureASCIIArt: vi.fn(() => Promise.resolve()),
-      ensureFileLoaded: vi.fn(() => Promise.resolve()),
       firm: { blurb: "", email: "hello@example.com" },
       fitAddon: { fit: vi.fn() },
       getASCIIArtIdForCommand: vi.fn(() => null),
       getArt: vi.fn(() => ""),
-      getPreloadFileForCommand: vi.fn(() => null),
       help: {},
       jobs: {},
       portfolio: {},
@@ -88,7 +85,12 @@ function loadAliasTerminal() {
       term,
     },
   });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts([
+    "js/pipeline.js",
+    "config/fs.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
   const { commands, extend } = env.exportValues(["commands", "extend"]);
   extend(term);
   return { commands, extend, term };
@@ -1037,6 +1039,24 @@ describe("terminal-ext", () => {
     ]);
     expect(term.history).toEqual(["tldr | uniq -c | sort -rn"]);
     expect(term.busy).toBe(false);
+  });
+
+  it("feeds literal session cat rows through the production pipeline capture", async () => {
+    const { term } = loadAliasTerminal();
+    const { writeSessionFile } = env.exportValues(["writeSessionFile"]);
+    const lines = ["keep <x> &", "drop", "keep 'single' \"double\"", ""];
+    writeSessionFile("~", "notes", lines);
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("cat notes | grep keep", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "keep <x> &",
+      "keep 'single' \"double\"",
+    ]);
   });
 
   it("prints no transformed records when a pipeline producer emits no output", async () => {

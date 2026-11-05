@@ -541,7 +541,12 @@ const commands = {
     const filename = args[0];
 
     if (_filesHere().includes(filename)) {
-      term.writeln(getFileContents(filename));
+      const sessionLines = getSessionFileLines(term.cwd, filename, term.user);
+      if (sessionLines) {
+        for (const line of sessionLines) term.writeln(line);
+      } else {
+        term.writeln(getFileContents(filename));
+      }
     } else {
       term.stylePrint(`No such file: ${filename}`);
     }
@@ -565,12 +570,23 @@ const commands = {
     }
 
     if (_filesHere().includes(filename)) {
-      let file = getFileContents(filename);
-      const matches = file.matchAll(q);
-      for (const match of matches) {
-        file = file.replaceAll(match[0], colorText(match[0], "files"));
+      const sessionLines = getSessionFileLines(term.cwd, filename, term.user);
+      if (sessionLines) {
+        for (let file of sessionLines) {
+          const matches = file.matchAll(q);
+          for (const match of matches) {
+            file = file.replaceAll(match[0], colorText(match[0], "files"));
+          }
+          term.writeln(file);
+        }
+      } else {
+        let file = getFileContents(filename);
+        const matches = file.matchAll(q);
+        for (const match of matches) {
+          file = file.replaceAll(match[0], colorText(match[0], "files"));
+        }
+        term.writeln(file);
       }
-      term.writeln(file);
     } else {
       term.stylePrint(`No such file or directory: ${filename}`);
     }
@@ -1211,7 +1227,12 @@ for (const [key, val] of Object.entries(portfolio)) {
 // Returns the list of files visible in the current directory.
 // README.md is hidden from guest — root can see everything.
 function _filesHere() {
-  return _DIRS[term.cwd].filter((e) => e != "README.md" || term.user == "root");
+  const builtIns = _DIRS[term.cwd].filter(
+    (entry) => entry != "README.md" || term.user == "root"
+  );
+  return builtIns.concat(
+    getSessionFileNames(term.cwd, term.user).filter((name) => !builtIns.includes(name))
+  );
 }
 
 // Draws a rounded box like the Claude Code welcome banner. Lines are padded
@@ -1265,6 +1286,18 @@ for (const [alias, target] of Object.entries(_aliases)) {
 // Pipeline filters are stages rather than replacements for the similarly named
 // standalone commands. Give them focused manual pages while retaining tldr as
 // man's fallback for portfolio companies and every other topic.
+const _redirectionManual = [
+  "%REDIRECT(1)% — save command output in a session file",
+  "Usage: COMMAND > FILE",
+  "       COMMAND >> FILE",
+  "> replaces FILE; >> appends to FILE or creates it. Redirection captures the final output of a command or pipeline, removes ANSI styling, prints nothing on success, and returns to the normal prompt.",
+  "The first > outside single or double quotes starts redirection; spaces around it are optional. A > inside quotes is ordinary command text. Quoted FILE names are not supported.",
+  "FILE must be 1 to 64 ASCII letters, digits, dots, underscores, or hyphens, and must not start with a dot or hyphen.",
+  "Session files belong to the current directory, exist only in page memory until reload, and are never saved to browser storage or a server.",
+  "Before COMMAND runs, redirect rejects a missing command, missing file name, more than one file name, any second >, a quoted or invalid file name, or a target that is a visible directory or built-in file.",
+  "A rejected redirect prints one redirect: message naming the problem and creates or changes no file. Pipeline validation errors keep their normal message and also leave files unchanged.",
+];
+
 const _pipelineManuals = {
   sort: [
     "%SORT(1)% — sort pipeline output",
@@ -1312,8 +1345,8 @@ const _pipelineManuals = {
 };
 
 // Keep `man` compatible with its long-standing `tldr` alias while providing focused
-// manual pages for the bookmark commands, the environment commands, the pipeline
-// filters, and terminal editing shortcuts.
+// manual pages for the bookmark commands, the environment commands, output
+// redirection, pipeline filters, and terminal editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
   if (args.length === 1 && topic === "shortcuts") {
@@ -1361,9 +1394,11 @@ commands.man = function (args) {
     );
     return;
   }
-  const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
-    ? _environmentManuals[topic]
-    : _pipelineManuals[topic];
+  const manual = topic === "redirect"
+    ? _redirectionManual
+    : Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
+      ? _environmentManuals[topic]
+      : _pipelineManuals[topic];
   if (!manual) {
     return term.command(["tldr", ...args].join(" ").trim());
   }

@@ -308,6 +308,51 @@ describe("runRootTerminal", () => {
     }
   );
 
+  it("completes grep PATTERN session filenames from the current directory", () => {
+    const filesHere = vi.fn(() => ["notes", "next"]);
+    const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+    const editing = createEditingTerm({ line: "GrEp match no" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+
+    expect(filesHere).toHaveBeenCalledTimes(1);
+    expect(term.currentLine).toBe("GrEp match notes ");
+    expect(editing.cursor()).toBe(term.currentLine.length);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("refreshes ambiguous grep filename candidates without leaking a prior directory", () => {
+    let entries = ["notes", "notebook"];
+    const filesHere = vi.fn(() => entries);
+    const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+    const editing = createEditingTerm({ line: "grep hit no" });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe("grep hit note");
+    expect(term.write).not.toHaveBeenCalled();
+
+    term.setCurrentLine("grep hit no");
+    entries = ["north", "novel"];
+    pressTab(term);
+    expect(term.currentLine).toBe("grep hit no");
+    expect(term.write).not.toHaveBeenCalled();
+    pressTab(term);
+
+    expect(filesHere).toHaveBeenCalledTimes(3);
+    expect(term.write.mock.calls[0][0]).toContain("north");
+    expect(term.write.mock.calls[0][0]).toContain("novel");
+    expect(term.write.mock.calls[0][0]).not.toContain("notes");
+    expect(term.write.mock.calls[0][0]).not.toContain("notebook");
+    expect(term.write.mock.calls[1][0]).toBe("grep hit no");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
   it("refreshes filesystem candidates after a cwd change before arming and listing", () => {
     let entries = ["alpha", "alpine"];
     const filesHere = vi.fn(() => entries);
