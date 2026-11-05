@@ -3,6 +3,7 @@ import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 const commandSource = readFileSync("config/commands.js", "utf8");
+const fsSource = readFileSync("config/fs.js", "utf8");
 const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
@@ -133,6 +134,7 @@ function loadCommands({
   storage = createMemoryStorage(),
   help = {},
   portfolio = {},
+  colorText = (text) => text,
 } = {}) {
   const aliases = new Map();
   const location = {
@@ -179,13 +181,18 @@ function loadCommands({
     shortcuts: helpContext.shortcutEntries,
     portfolio,
     buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
-    colorText: (text) => text,
+    colorText,
     localStorage: storage,
     window: { location },
   });
+  vm.runInContext(fsSource, context);
   vm.runInContext(bookmarkSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
+  const sessionFiles = vm.runInContext(
+    "({ getSessionFileLines, getSessionFileNames, writeSessionFile })",
+    context
+  );
   // Redirecting commands preserve their prepared argument arrays when they
   // recurse; the raw-line seam remains available for compatibility (cd recurses
   // through term.command for the paths that resolve via another cd).
@@ -194,8 +201,91 @@ function loadCommands({
     const [name, ...args] = line.split(" ");
     return term.dispatchCommand(name, args);
   });
-  return { commands, location, storage, term };
+  return { commands, location, sessionFiles, storage, term };
 }
+
+describe("session file commands", () => {
+  it("lists built-ins before ordered session files and keeps directories isolated", () => {
+    const { commands, sessionFiles, term } = loadCommands();
+    sessionFiles.writeSessionFile("~", "notes", ["home"]);
+    sessionFiles.writeSessionFile("~", "next", ["second"]);
+    sessionFiles.writeSessionFile("/", "notes", ["root"]);
+
+    commands.ls([]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "id_rsa   welcome.htm   notes   next"
+    );
+
+    term.cwd = "/";
+    commands.ls([]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("bin   home   notes");
+    expect(sessionFiles.getSessionFileLines("/", "notes")).toEqual(["root"]);
+  });
+
+  it.each(["cat", "head", "tail", "less", "more"])(
+    "reads raw session rows through %s while preserving empty-file semantics",
+    (command) => {
+      const { commands, sessionFiles, term } = loadCommands();
+      const lines = ["A", "", "<x> & 'single' \"double\""];
+      sessionFiles.writeSessionFile("~", "notes", lines);
+
+      commands[command](["notes"]);
+      expect(term.writeln.mock.calls.map(([line]) => line)).toEqual(lines);
+
+      term.writeln.mockClear();
+      sessionFiles.writeSessionFile("~", "empty", []);
+      commands[command](["empty"]);
+      expect(term.writeln).not.toHaveBeenCalled();
+
+      sessionFiles.writeSessionFile("~", "blank", [""]);
+      commands[command](["blank"]);
+      expect(term.writeln).toHaveBeenCalledOnce();
+      expect(term.writeln).toHaveBeenCalledWith("");
+    }
+  );
+
+  it("greps a session file as complete raw rows with existing highlighting semantics", () => {
+    const colorText = vi.fn((text) => `<hit>${text}</hit>`);
+    const { commands, sessionFiles, term } = loadCommands({ colorText });
+    sessionFiles.writeSessionFile("~", "notes", ["match & <x>", "", "no match"]);
+
+    commands.grep(["match", "notes"]);
+
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "<hit>match</hit> & <x>",
+      "",
+      "no <hit>match</hit>",
+    ]);
+    expect(colorText).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps rm and touch messages without deleting or creating session files", () => {
+    const { commands, sessionFiles, term } = loadCommands();
+    sessionFiles.writeSessionFile("~", "notes", ["keep"]);
+
+    commands.rm(["notes"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith(
+      "I'm sorry Dave, I'm afraid I can't do that."
+    );
+    expect(sessionFiles.getSessionFileLines("~", "notes")).toEqual(["keep"]);
+
+    commands.touch(["fresh"]);
+    expect(term.stylePrint).toHaveBeenLastCalledWith("You can't %touch% this");
+    expect(sessionFiles.getSessionFileNames("~")).toEqual(["notes"]);
+  });
+
+  it("retains files through clear and zsh shell initialization", () => {
+    const { commands, sessionFiles, term } = loadCommands();
+    sessionFiles.writeSessionFile("~", "notes", ["keep"]);
+
+    commands.clear([]);
+    commands.zsh([]);
+
+    expect(term.init).toHaveBeenNthCalledWith(1);
+    expect(term.init).toHaveBeenNthCalledWith(2, "guest");
+    expect(sessionFiles.getSessionFileLines("~", "notes")).toEqual(["keep"]);
+  });
+});
 
 describe("version", () => {
   it("prints the injected metadata as exactly one unwrapped plain line", () => {
@@ -866,6 +956,48 @@ describe("man", () => {
     commands.man(["go"]);
     expect(term.stylePrint).toHaveBeenLastCalledWith(expect.stringContaining("Usage: go NAME"));
     expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it("documents redirection completely through man and help without delegating", () => {
+    const manRun = loadCommands();
+    manRun.commands.man(["redirect"]);
+    const manual = manRun.term.stylePrint.mock.calls.flat().join("\n");
+
+    for (const expected of [
+      "Usage: COMMAND > FILE",
+      "COMMAND >> FILE",
+      "final output of a command or pipeline",
+      "removes ANSI styling",
+      "prints nothing on success",
+      "first > outside single or double quotes",
+      "> inside quotes is ordinary command text",
+      "Quoted FILE names are not supported",
+      "1 to 64 ASCII letters, digits, dots, underscores, or hyphens",
+      "must not start with a dot or hyphen",
+      "current directory",
+      "page memory until reload",
+      "missing command",
+      "missing file name",
+      "more than one file name",
+      "any second >",
+      "quoted or invalid file name",
+      "visible directory or built-in file",
+      "one redirect: message",
+      "creates or changes no file",
+      "Pipeline validation errors keep their normal message",
+    ]) {
+      expect(manual).toContain(expected);
+    }
+    expect(manRun.term.command).not.toHaveBeenCalled();
+
+    const helpRun = loadCommands({ help: helpContext.helpEntries });
+    helpRun.commands.help([]);
+    const helpOutput = helpRun.term.stylePrint.mock.calls.flat().join("\n");
+    expect(helpOutput).toContain("REDIRECTION");
+    expect(helpOutput).toContain("COMMAND > FILE");
+    expect(helpOutput).toContain("COMMAND >> FILE");
+    expect(helpOutput).toContain("man redirect");
+    expect(helpOutput).toContain("grep PATTERN FILE");
   });
 
   it("delegates every unrelated target through the pre-feature tldr path", () => {

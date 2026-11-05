@@ -24,6 +24,15 @@ function _completionForLine(line) {
     return { prefix: "", token: firstWord[1], candidates: Object.keys(commands) };
   }
 
+  const grepArgument = line.match(/^(grep)(\s+)(\S+)(\s+)(\S*)$/i);
+  if (grepArgument) {
+    return {
+      prefix: `${grepArgument[1]}${grepArgument[2]}${grepArgument[3]}${grepArgument[4]}`,
+      token: grepArgument[5],
+      candidates: _filesHere(),
+    };
+  }
+
   const argument = line.match(/^(\S+)(\s+)(\S*)$/);
   if (!argument) return null;
 

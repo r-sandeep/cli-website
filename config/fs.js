@@ -41,6 +41,82 @@ const _DIRS = {
 // Pre-compute absolute paths for every known file, used by `find`.
 let _FULL_PATHS = {};
 let _LOADING_FILES = {};
+
+// Files created during this page session stay in memory, grouped by the cwd in
+// which they were written. Maps preserve creation order and safely accept file
+// names such as "__proto__" without sharing state with the built-in maps.
+let _SESSION_FILES = new Map();
+
+function _sessionDirectoryKey(directory, user = "guest") {
+  if (directory !== "~") return directory;
+  // `~` is only a display path: resolve it through the shell's closed user set
+  // so an arbitrary caller-supplied identity cannot create or select a home
+  // scope, and guest/root can never alias the same session-file directory.
+  return user === "root" ? "/root" : "/home/guest";
+}
+
+function _sessionFilesForDirectory(directory, create = false, user = "guest") {
+  const key = _sessionDirectoryKey(directory, user);
+  let files = _SESSION_FILES.get(key);
+  if (!files && create) {
+    files = new Map();
+    _SESSION_FILES.set(key, files);
+  }
+  return files;
+}
+
+function getSessionFileNames(directory, user = "guest") {
+  const files = _sessionFilesForDirectory(directory, false, user);
+  return files ? Array.from(files.keys()) : [];
+}
+
+function hasSessionFile(directory, name, user = "guest") {
+  const files = _sessionFilesForDirectory(directory, false, user);
+  return files ? files.has(name) : false;
+}
+
+function getSessionFileLines(directory, name, user = "guest") {
+  const files = _sessionFilesForDirectory(directory, false, user);
+  if (!files || !files.has(name)) return null;
+  return files.get(name).slice();
+}
+
+function writeSessionFile(directory, name, lines, append = false, user = "guest") {
+  const files = _sessionFilesForDirectory(directory, true, user);
+  const incoming = Array.from(lines);
+  const contents = append && files.has(name)
+    ? files.get(name).concat(incoming)
+    : incoming;
+  files.set(name, contents);
+  return contents.slice();
+}
+
+// Returns why a visible built-in entry cannot be replaced by a session file.
+// Hidden entries (README.md for guest) remain legal session targets, and an
+// existing session file is intentionally not a conflict because it may be
+// overwritten or appended.
+function getSessionFileTargetConflict(directory, name, user = "guest") {
+  const entries = _DIRS[directory] || [];
+  const visible = entries.includes(name) &&
+    (name !== "README.md" || user === "root");
+  if (!visible) return null;
+  return Object.prototype.hasOwnProperty.call(_DIRS, name)
+    ? "directory"
+    : "built-in file";
+}
+
+// Resize redraw reconstructs terminal output by replaying history. Rebuild
+// session files in an isolated store so historical > and >> operations render
+// normally without overwriting or appending to the page's live files.
+async function withIsolatedSessionFiles(replay) {
+  const liveFiles = _SESSION_FILES;
+  _SESSION_FILES = new Map();
+  try {
+    return await replay();
+  } finally {
+    _SESSION_FILES = liveFiles;
+  }
+}
 for (const [key, values] of Object.entries(_DIRS)) {
   for (const value of values) {
     switch (key) {
@@ -67,6 +143,13 @@ function preloadFiles() {
 
 // Fetches a remote file and inserts it into the DOM when ready.
 function _loadFile(name) {
+  if (
+    typeof term !== "undefined" &&
+    hasSessionFile(term.cwd, name, term.user)
+  ) {
+    return Promise.resolve();
+  }
+
   if (document.getElementById(name)) {
     return Promise.resolve();
   }
@@ -86,6 +169,13 @@ function _loadFile(name) {
 }
 
 function ensureFileLoaded(name) {
+  if (
+    typeof term !== "undefined" &&
+    hasSessionFile(term.cwd, name, term.user)
+  ) {
+    return Promise.resolve();
+  }
+
   if (!_FILES[name]) {
     return Promise.resolve();
   }
@@ -106,12 +196,16 @@ function ensureFileLoaded(name) {
 }
 
 function getPreloadFileForCommand(cmd, args) {
-  const filename = args[0];
+  const filename = cmd === "grep" ? (args[1] || args[0]) : args[0];
   if (!filename) {
     return null;
   }
 
-  if (["cat", "grep"].includes(cmd) && _REMOTE_FILES[filename]) {
+  if (
+    ["cat", "grep"].includes(cmd) &&
+    _REMOTE_FILES[filename] &&
+    !(typeof term !== "undefined" && hasSessionFile(term.cwd, filename, term.user))
+  ) {
     return filename;
   }
 

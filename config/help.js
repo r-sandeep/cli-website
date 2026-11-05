@@ -1,5 +1,5 @@
 const shortcuts = {
-  "Tab": "complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches",
+  "Tab": "complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, more, or grep PATTERN FILE; press twice to list ambiguous matches",
   "Alt+Left": "move to the start of the previous word",
   "Alt+Right": "move to the start of the next word",
   "Ctrl+W": "delete back to the start of the previous word",
@@ -19,6 +19,9 @@ const help = {
   "%bookmark% list": "list saved directory bookmarks",
   "%bookmark% remove NAME": "remove a saved directory bookmark",
   "%go% NAME": "go to the directory saved as NAME",
+  "REDIRECTION": "save the final output of a command or pipeline in a session file",
+  "  COMMAND > FILE": "replace FILE; success is silent (run man redirect for syntax and errors)",
+  "  COMMAND >> FILE": "append to FILE, creating it when needed",
   "PIPELINES": "pipe command output through filters from left to right",
   "  COMMAND | %grep% [-ivn] PATTERN": "keep literal matching lines (-i case-insensitive, -v invert, -n number)",
   "  COMMAND | %head% [N]": "keep the first N lines (default: 10; N must be positive)",

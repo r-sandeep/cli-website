@@ -55,6 +55,34 @@ replace the existing standalone commands with the same names.
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
+## Output redirection
+
+Save the final visible output of a command or pipeline in a session file with
+`COMMAND > FILE`, or append it with `COMMAND >> FILE`. Successful redirection is
+silent. For example, these commands replace, read, append, and read again:
+
+```
+echo first > notes.txt
+cat notes.txt
+echo second >> notes.txt
+cat notes.txt
+```
+
+The final `cat` prints `first` and then `second`. Redirection uses the first `>`
+outside single or double quotes, with or without surrounding spaces, so a `>`
+inside quotes remains ordinary text. Quoted target names are not supported.
+`FILE` must be 1–64 ASCII letters, digits, dots, underscores, or hyphens and
+must not start with `.` or `-`.
+
+Session files are directory-local and live only in page memory until reload;
+they are not written to browser storage or sent to a server. Before running the
+command, redirection rejects a missing command, a missing file name, multiple
+file names, any second `>`, a quoted or invalid file name, or a visible directory
+or built-in file target. It prints one `redirect:` message naming the problem and
+creates or changes no file. Invalid pipeline stages keep their usual diagnostic
+and likewise leave files unchanged. Run `man redirect` for the same rules in the
+terminal.
+
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
 `man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the
@@ -62,7 +90,7 @@ terminal for the corresponding manual page.
 
 ## Terminal editing shortcuts
 
-- **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches
+- **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, more, or grep PATTERN FILE; press twice to list ambiguous matches
 - **Alt+Left** — move to the start of the previous word
 - **Alt+Right** — move to the start of the next word
 - **Ctrl+W** — delete back to the start of the previous word
