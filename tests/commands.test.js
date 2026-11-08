@@ -101,6 +101,38 @@ describe("apply", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("keeps the application command pending until the interactive workflow settles", async () => {
+    let releaseName;
+    const namePending = new Promise((resolve) => {
+      releaseName = resolve;
+    });
+    const { apply, term, fetch } = loadApply();
+    term.collectInput
+      .mockReturnValueOnce(namePending)
+      .mockResolvedValueOnce("ada@example.com")
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("");
+
+    let settled = false;
+    const workflow = apply(["1"]);
+    workflow.finally(() => { settled = true; });
+    await Promise.resolve();
+
+    expect(typeof workflow.then).toBe("function");
+    expect(settled).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(term.locked).toBe(true);
+
+    releaseName("Ada");
+    await expect(workflow).resolves.toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(term.stylePrint).toHaveBeenCalledWith(
+      "\r\n✓ Application submitted successfully!"
+    );
+    expect(term.locked).toBe(false);
+  });
+
   it("restores the terminal after successful and failed server submissions", async () => {
     for (const [response, output] of [
       [
@@ -1036,6 +1068,79 @@ describe("help output (pipelines)", () => {
     expect(output).toContain("COMMAND | %uniq% [-cd]");
     expect(output).toContain("-c count, -d repeated only");
     expect(output).toContain("%whois% | %grep% -i root | %head% 3");
+  });
+});
+
+describe("redirection documentation", () => {
+  it("prints the complete redirect manual through the production man command", () => {
+    const { commands, term } = loadCommands();
+
+    commands.man(["redirect"]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("REDIRECT(1)");
+    expect(output).toContain("Usage: COMMAND > FILE");
+    expect(output).toContain("COMMAND >> FILE");
+    expect(output).toContain("> replaces FILE");
+    expect(output).toContain(">> appends");
+    expect(output).toContain("COMMAND may be one command or a pipeline");
+    expect(output).toContain("Pipeline validation errors");
+    expect(output).toContain("1–64 ASCII letters, digits, dots, underscores, or hyphens");
+    expect(output).toContain("cannot start with . or -");
+    expect(output).toContain("Quotes around FILE are not supported");
+    expect(output).toContain("directory current when written");
+    expect(output).toContain("page memory until reload");
+    expect(output).toContain("never saved to browser storage or sent to a server");
+    expect(output).toContain("COMMAND or FILE is missing");
+    expect(output).toContain("more than one filename or another > follows FILE");
+    expect(output).toContain("FILE is invalid");
+    expect(output).toContain("visible built-in file or directory");
+    expect(output).toContain("one redirect: message naming the problem");
+    expect(output).toContain("runs no command, and creates or changes no file");
+    expect(output).toContain("Examples (submit each line separately):");
+    expect(output).toContain("echo hello > notes.txt");
+    expect(output).toContain("echo again >> notes.txt");
+    expect(output).toContain("cat notes.txt");
+    expect(output).not.toContain("echo hello > notes.txt; echo again >> notes.txt; cat notes.txt");
+    expect(term.command).not.toHaveBeenCalled();
+  });
+
+  it("lists redirection and its manual through the production help command", () => {
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+    expect(output).toContain("OUTPUT REDIRECTION");
+    expect(output).toContain("COMMAND > FILE");
+    expect(output).toContain("COMMAND >> FILE");
+    expect(output).toContain("save final command or pipeline output");
+    expect(output).toContain("%man% redirect");
+    expect(output).toContain("filename, lifetime, atomic error, and pipeline validation rules");
+  });
+
+  it("keeps README examples, lifetime, and atomic error rules aligned with the manual", () => {
+    const readme = readFileSync("README.md", "utf8");
+
+    expect(readme).toContain("## Output redirection");
+    expect(readme).toContain("echo first > notes.txt");
+    expect(readme).toContain("echo second >> notes.txt");
+    expect(readme).toContain("cat notes.txt");
+    expect(readme).toContain("whois | grep -i partner > team.txt");
+    expect(readme).toContain("`>` replaces any earlier content");
+    expect(readme).toContain("`>>` appends and creates the file");
+    expect(readme).toContain("one unquoted name of 1–64 ASCII letters");
+    expect(readme).toContain("must not start with `.` or `-`");
+    expect(readme).toContain("current when they were written");
+    expect(readme).toContain("only in page memory until reload");
+    expect(readme).toContain("not written to localStorage, disk, or a server");
+    expect(readme).toContain("a missing command or filename");
+    expect(readme).toContain("multiple filenames");
+    expect(readme).toContain("another `>`");
+    expect(readme).toContain("an invalid or quoted filename");
+    expect(readme).toContain("visible built-in file or directory target");
+    expect(readme).toContain("Pipeline validation errors retain their normal message");
+    expect(readme).toContain("Run `man redirect`");
   });
 });
 

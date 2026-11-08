@@ -18,10 +18,62 @@ function _longestCommonCompletionPrefix(candidates) {
   return first.slice(0, length);
 }
 
+function _lexicalTokenSpans(line) {
+  const spans = [];
+  let quote = null;
+  let start = -1;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote !== null) {
+      if (character === quote) quote = null;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      if (start === -1) start = index;
+    } else if (/\s/.test(character)) {
+      if (start !== -1) {
+        spans.push({ start, end: index });
+        start = -1;
+      }
+    } else if (start === -1) {
+      start = index;
+    }
+  }
+
+  if (start !== -1) spans.push({ start, end: line.length });
+  return { spans, quote };
+}
+
+function _grepFilenameCompletion(line) {
+  const { spans, quote } = _lexicalTokenSpans(line);
+  if (spans.length < 2 || spans.length > 3) return null;
+
+  const command = line.slice(spans[0].start, spans[0].end);
+  if (spans[0].start !== 0 || command.toLowerCase() !== "grep") return null;
+
+  if (spans.length === 3) {
+    const filename = spans[2];
+    if (filename.end !== line.length) return null;
+    return {
+      prefix: line.slice(0, filename.start),
+      token: line.slice(filename.start),
+    };
+  }
+
+  const pattern = spans[1];
+  if (quote !== null || pattern.end === line.length) return null;
+  return { prefix: line, token: "" };
+}
+
 function _completionForLine(line) {
   const firstWord = line.match(/^(\S*)$/);
   if (firstWord) {
     return { prefix: "", token: firstWord[1], candidates: Object.keys(commands) };
+  }
+
+  const grepArgument = _grepFilenameCompletion(line);
+  if (grepArgument) {
+    return { ...grepArgument, candidates: _filesHere() };
   }
 
   const argument = line.match(/^(\S+)(\s+)(\S*)$/);
@@ -31,7 +83,8 @@ function _completionForLine(line) {
   let candidates;
   if (command === "whois") candidates = Object.keys(team);
   else if (command === "tldr") candidates = Object.keys(portfolio);
-  else if (["cd", "ls", "cat", "head", "tail", "less", "more"].includes(command)) {
+  else if (command === "cd") candidates = _builtInFilesHere();
+  else if (["ls", "cat", "head", "tail", "less", "more"].includes(command)) {
     candidates = _filesHere();
   } else {
     return null;

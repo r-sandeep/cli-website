@@ -72,6 +72,24 @@ function _printEnvironment() {
     .forEach(([name, value]) => term.stylePrint(`${name}=${value}`));
 }
 
+const _redirectionManuals = {
+  redirect: [
+    "REDIRECT(1) — save command output in a session file",
+    "Usage: COMMAND > FILE",
+    "       COMMAND >> FILE",
+    "> replaces FILE with the final visible output lines; >> appends them and creates FILE when it does not exist. Successful redirection prints no command output.",
+    "COMMAND may be one command or a pipeline. Pipeline validation errors are reported normally and leave every session file unchanged.",
+    "FILE is 1–64 ASCII letters, digits, dots, underscores, or hyphens, and cannot start with . or -. Quotes around FILE are not supported.",
+    "Files belong to the directory current when written. They exist only in page memory until reload and are never saved to browser storage or sent to a server.",
+    "Redirection is rejected atomically when COMMAND or FILE is missing, more than one filename or another > follows FILE, FILE is invalid, or FILE names a visible built-in file or directory.",
+    "Every rejection prints one redirect: message naming the problem, runs no command, and creates or changes no file.",
+    "Examples (submit each line separately):",
+    "echo hello > notes.txt",
+    "echo again >> notes.txt",
+    "cat notes.txt",
+  ],
+};
+
 const _environmentManuals = {
   export: [
     "export — store or list environment variables",
@@ -539,8 +557,14 @@ const commands = {
   // Reading id_rsa triggers the RickRoll easter egg.
   cat: function (args) {
     const filename = args[0];
+    const sessionLines = getSessionFileLines(
+      resolveSessionDirectory(term.cwd, term.user),
+      filename
+    );
 
-    if (_filesHere().includes(filename)) {
+    if (sessionLines !== null) {
+      sessionLines.forEach((line) => term.writeln(line));
+    } else if (_filesHere().includes(filename)) {
       term.writeln(getFileContents(filename));
     } else {
       term.stylePrint(`No such file: ${filename}`);
@@ -564,7 +588,20 @@ const commands = {
       return;
     }
 
-    if (_filesHere().includes(filename)) {
+    const sessionLines = getSessionFileLines(
+      resolveSessionDirectory(term.cwd, term.user),
+      filename
+    );
+    if (sessionLines !== null) {
+      sessionLines.forEach((line) => {
+        let output = line;
+        const matches = output.matchAll(q);
+        for (const match of matches) {
+          output = output.replaceAll(match[0], colorText(match[0], "files"));
+        }
+        term.writeln(output);
+      });
+    } else if (_filesHere().includes(filename)) {
       let file = getFileContents(filename);
       const matches = file.matchAll(q);
       for (const match of matches) {
@@ -1208,10 +1245,20 @@ for (const [key, val] of Object.entries(portfolio)) {
   }
 }
 
-// Returns the list of files visible in the current directory.
+// Returns the built-in entries visible in the current directory.
 // README.md is hidden from guest — root can see everything.
+function _builtInFilesHere() {
+  return _DIRS[term.cwd].filter(
+    (e) => e != "README.md" || term.user == "root"
+  );
+}
+
+// Session files extend listings and reader completion, but not directory
+// completion: a writable file must never compete with cd's built-in candidates.
 function _filesHere() {
-  return _DIRS[term.cwd].filter((e) => e != "README.md" || term.user == "root");
+  return _builtInFilesHere().concat(
+    getSessionFileNames(resolveSessionDirectory(term.cwd, term.user))
+  );
 }
 
 // Draws a rounded box like the Claude Code welcome banner. Lines are padded
@@ -1312,8 +1359,8 @@ const _pipelineManuals = {
 };
 
 // Keep `man` compatible with its long-standing `tldr` alias while providing focused
-// manual pages for the bookmark commands, the environment commands, the pipeline
-// filters, and terminal editing shortcuts.
+// manual pages for the bookmark commands, redirection, the environment commands,
+// pipeline filters, and terminal editing shortcuts.
 commands.man = function (args) {
   const topic = (args[0] || "").toLowerCase();
   if (args.length === 1 && topic === "shortcuts") {
@@ -1361,9 +1408,11 @@ commands.man = function (args) {
     );
     return;
   }
-  const manual = Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
-    ? _environmentManuals[topic]
-    : _pipelineManuals[topic];
+  const manual = Object.prototype.hasOwnProperty.call(_redirectionManuals, topic)
+    ? _redirectionManuals[topic]
+    : Object.prototype.hasOwnProperty.call(_environmentManuals, topic)
+      ? _environmentManuals[topic]
+      : _pipelineManuals[topic];
   if (!manual) {
     return term.command(["tldr", ...args].join(" ").trim());
   }
