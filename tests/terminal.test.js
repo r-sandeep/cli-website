@@ -3,6 +3,7 @@ import { createBrowserEnv } from "./helpers/browser-env";
 
 const baseGlobals = {
   _DIRS: { "~": [] },
+  _builtInFilesHere: () => [],
   _filesHere: () => [],
   commands: { help: () => {} },
   portfolio: {},
@@ -292,7 +293,10 @@ describe("runRootTerminal", () => {
     "completes mixed-case current-directory entries for %s",
     (command) => {
       const filesHere = vi.fn(() => ["README.md", "welcome.htm"]);
-      const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+      const { runRootTerminal } = loadTerminalScript({
+        _builtInFilesHere: filesHere,
+        _filesHere: filesHere,
+      });
       const editing = createEditingTerm({ line: `${command.toUpperCase()} re` });
       const { term } = editing;
       runRootTerminal(term);
@@ -307,6 +311,160 @@ describe("runRootTerminal", () => {
       expect(term.executeCommandLine).not.toHaveBeenCalled();
     }
   );
+
+  it("keeps session filenames out of cd candidates without narrowing reader candidates", () => {
+    const builtInsHere = vi.fn(() => ["bin", "home"]);
+    const filesHere = vi.fn(() => ["bin", "home", "bill", "budget"]);
+    const { runRootTerminal } = loadTerminalScript({
+      _builtInFilesHere: builtInsHere,
+      _filesHere: filesHere,
+    });
+
+    const cdEditing = createEditingTerm({ line: "cd b" });
+    runRootTerminal(cdEditing.term);
+    cdEditing.term.write.mockClear();
+    pressTab(cdEditing.term);
+    expect(cdEditing.term.currentLine).toBe("cd bin ");
+    expect(builtInsHere).toHaveBeenCalledTimes(1);
+    expect(filesHere).not.toHaveBeenCalled();
+
+    const catEditing = createEditingTerm({ line: "cat bil" });
+    runRootTerminal(catEditing.term);
+    catEditing.term.write.mockClear();
+    pressTab(catEditing.term);
+    expect(catEditing.term.currentLine).toBe("cat bill ");
+    expect(filesHere).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["cat", "head", "tail", "less", "more"])(
+    "completes and executes a current-directory session file through production handlers for %s",
+    async (command) => {
+      let activeDirectory = "~";
+      const outputs = [];
+      const filesByDirectory = {
+        "~": ["id_rsa", "notes.txt"],
+        bin: ["zsh", "other.txt"],
+      };
+      const commands = {};
+      commands.cat = vi.fn((args) => {
+        const filename = args[0];
+        if (filesByDirectory[activeDirectory].includes(filename)) {
+          outputs.push(`${activeDirectory}:${filename}`);
+        }
+      });
+      for (const alias of ["head", "tail", "less", "more"]) {
+        commands[alias] = (args) => commands.cat(args);
+      }
+      const filesHere = vi.fn(() => filesByDirectory[activeDirectory]);
+      const { runRootTerminal } = loadTerminalScript({ commands, _filesHere: filesHere });
+      const editing = createEditingTerm({ line: `${command} not` });
+      const { term } = editing;
+      term.executeCommandLine = vi.fn(async (line) => {
+        const [name, ...args] = line.trim().split(/\s+/);
+        commands[name](args);
+      });
+      runRootTerminal(term);
+      term.write.mockClear();
+
+      pressTab(term);
+      expect(term.currentLine).toBe(`${command} notes.txt `);
+      await term._onData("\r");
+      expect(term.executeCommandLine).toHaveBeenCalledWith(`${command} notes.txt `);
+      expect(outputs).toEqual(["~:notes.txt"]);
+
+      activeDirectory = "bin";
+      term.currentLine = `${command} not`;
+      pressTab(term);
+      expect(term.currentLine).toBe(`${command} not`);
+      expect(filesHere).toHaveBeenLastCalledWith();
+    }
+  );
+
+  it("completes grep's filename rather than its pattern and executes the intended session file", async () => {
+    let activeDirectory = "~";
+    const filesByDirectory = {
+      "~": ["id_rsa", "notes.txt", "notices.txt"],
+      bin: ["zsh"],
+    };
+    const grep = vi.fn();
+    const commands = { grep };
+    const filesHere = vi.fn(() => filesByDirectory[activeDirectory]);
+    const { runRootTerminal } = loadTerminalScript({ commands, _filesHere: filesHere });
+    const editing = createEditingTerm({ line: "grep needle notes" });
+    const { term } = editing;
+    term.executeCommandLine = vi.fn(async (line) => {
+      const [name, ...args] = line.trim().split(/\s+/);
+      commands[name](args);
+    });
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+    expect(term.currentLine).toBe("grep needle notes.txt ");
+    await term._onData("\r");
+    expect(grep).toHaveBeenCalledWith(["needle", "notes.txt"]);
+
+    term.setCurrentLine("grep needle not");
+    term.write.mockClear();
+    pressTab(term);
+    expect(term.currentLine).toBe("grep needle not");
+    pressTab(term);
+    expect(term.write.mock.calls[0][0]).toContain("notes.txt");
+    expect(term.write.mock.calls[0][0]).toContain("notices.txt");
+
+    activeDirectory = "bin";
+    term.setCurrentLine("grep needle notes");
+    term.write.mockClear();
+    pressTab(term);
+    expect(term.currentLine).toBe("grep needle notes");
+  });
+
+  it("preserves quoted grep patterns and spacing while completing only the filename", () => {
+    const filesHere = vi.fn(() => ["notesx", "notices", "Alpha.LOG"]);
+    const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+
+    const cases = [
+      ['grep "hello world" notes', 'grep "hello world" notesx '],
+      ["grep 'hello world' notes", "grep 'hello world' notesx "],
+      ['GrEp   "hello "world   AL', 'GrEp   "hello "world   Alpha.LOG '],
+      ["grep hello notes", "grep hello notesx "],
+    ];
+
+    for (const [line, expected] of cases) {
+      const editing = createEditingTerm({ line });
+      runRootTerminal(editing.term);
+      editing.term.write.mockClear();
+
+      pressTab(editing.term);
+
+      expect(editing.term.currentLine).toBe(expected);
+      expect(editing.cursor()).toBe(expected.length);
+      expect(editing.term.write).not.toHaveBeenCalled();
+      expect(editing.term.executeCommandLine).not.toHaveBeenCalled();
+    }
+    expect(filesHere).toHaveBeenCalledTimes(cases.length);
+  });
+
+  it.each([
+    ["ambiguous filename", 'grep "hello world" not', ["notesx", "notices"]],
+    ["unmatched filename", 'grep "hello world" missing', ["notesx"]],
+    ["other-directory filename", 'grep "hello world" not', ["elsewhere"]],
+    ["unterminated pattern", 'grep "hello world not', ["notesx"]],
+    ["pattern position", 'grep "hello world"', ["notesx"]],
+  ])("retains grep input for %s", (_name, line, entries) => {
+    const { runRootTerminal } = loadTerminalScript({ _filesHere: () => entries });
+    const editing = createEditingTerm({ line });
+    const { term } = editing;
+    runRootTerminal(term);
+    term.write.mockClear();
+
+    pressTab(term);
+
+    expect(term.currentLine).toBe(line);
+    expect(editing.cursor()).toBe(line.length);
+    expect(term.write).not.toHaveBeenCalled();
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
 
   it("refreshes filesystem candidates after a cwd change before arming and listing", () => {
     let entries = ["alpha", "alpine"];
@@ -344,7 +502,10 @@ describe("runRootTerminal", () => {
     (command) => {
       let entries = ["alpha", "alpine"];
       const filesHere = vi.fn(() => entries);
-      const { runRootTerminal } = loadTerminalScript({ _filesHere: filesHere });
+      const { runRootTerminal } = loadTerminalScript({
+        _builtInFilesHere: filesHere,
+        _filesHere: filesHere,
+      });
       const editing = createEditingTerm({ line: `${command} alp` });
       const { term } = editing;
       runRootTerminal(term);
@@ -816,6 +977,25 @@ describe("runRootTerminal", () => {
     term._onData("\x1b[A");
     expect([term.currentLine, term.historyCursor]).toEqual(["newest   command", 0]);
     expect(term.history).toEqual(history);
+  });
+
+  it("recalls an append redirection as one whole pending line without executing it", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const editing = createEditingTerm({ history: ["echo b>>n"] });
+    const { term } = editing;
+    runRootTerminal(term);
+
+    term._onData("\x1b[A");
+
+    expect(term.currentLine).toBe("echo b>>n");
+    expect(editing.cursor()).toBe("echo b>>n".length);
+    expect(term.history).toEqual(["echo b>>n"]);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+
+    term._onData("\u0003");
+    expect(term.currentLine).toBe("");
+    expect(term.history).toEqual(["echo b>>n"]);
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
   it("passes near misses to the existing data path without inserting shortcut bytes", () => {

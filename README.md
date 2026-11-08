@@ -55,6 +55,32 @@ replace the existing standalone commands with the same names.
 Sorting and duplicate detection ignore ANSI color and escape sequences while
 preserving each selected line's original styling.
 
+## Output redirection
+
+Save the final visible output of a command or pipeline in a session file with
+`COMMAND > FILE`; use `COMMAND >> FILE` to append instead. For example:
+
+```
+echo first > notes.txt
+echo second >> notes.txt
+cat notes.txt
+```
+
+`>` replaces any earlier content. `>>` appends and creates the file when it does
+not exist. Successful redirection prints no command output. A pipeline is
+filtered before storage, as in `whois | grep -i partner > team.txt`.
+
+`FILE` is one unquoted name of 1–64 ASCII letters, digits, `.`, `_`, or `-`, and
+must not start with `.` or `-`. Session files belong to the directory that was
+current when they were written. They live only in page memory until reload:
+they are not written to localStorage, disk, or a server.
+
+Invalid redirection is atomic: a missing command or filename, multiple filenames,
+another `>`, an invalid or quoted filename, or a visible built-in file or directory target
+prints one `redirect:` error, runs no command, and creates or changes no file.
+Pipeline validation errors retain their normal message and likewise do not change
+the target. Run `man redirect` for the full terminal reference.
+
 For example, `whois | grep -i root | head 3`, `whois | sort -r | head 3`, and
 `tldr | uniq -c | sort -rn` chain filters from left to right. Run `man pipe`,
 `man grep`, `man head`, `man tail`, `man wc`, `man sort`, or `man uniq` in the

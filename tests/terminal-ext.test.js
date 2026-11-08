@@ -1112,6 +1112,42 @@ describe("terminal-ext", () => {
     expect(term.busy).toBe(false);
   });
 
+  it("rejects redirected unknown filters before preload and producer while preserving cleanup", async () => {
+    const { extend } = loadTerminalExt({
+      getVisibleBuiltInEntryType: vi.fn(() => null),
+      resolveSessionDirectory: vi.fn(() => "/home/guest"),
+      writeSessionFile: vi.fn(),
+    });
+    const term = createTerm();
+
+    extend(term);
+    const preload = vi.spyOn(term, "preloadCommandAssets");
+    const producer = vi.fn(() => {
+      term.writeln("must not execute");
+      return 0;
+    });
+    term.command = producer;
+    const stylePrint = vi.spyOn(term, "stylePrint");
+    const clearCurrentLine = vi.spyOn(term, "clearCurrentLine");
+    term.writeln.mockClear();
+
+    await term.executeCommandLine("fake | head 1 | mystery > side.txt");
+
+    expect(preload).not.toHaveBeenCalled();
+    expect(producer).not.toHaveBeenCalled();
+    expect(stylePrint).toHaveBeenCalledOnce();
+    expect(stylePrint).toHaveBeenCalledWith("Unknown pipeline filter: mystery");
+    expect(term.writeln).not.toHaveBeenCalledWith("must not execute");
+    expect(term.history).toEqual(["fake | head 1 | mystery > side.txt"]);
+    expect(env.window.dataLayer).toEqual([{
+      args: "| head 1 | mystery > side.txt",
+      command: "fake",
+      event: "commandSent",
+    }]);
+    expect(clearCurrentLine).toHaveBeenCalledOnce();
+    expect(term.busy).toBe(false);
+  });
+
   it("runs the producer once before reporting and discarding an unknown filter", async () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();

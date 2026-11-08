@@ -38,6 +38,119 @@ const _DIRS = {
   "/": ["bin", "home"],
 };
 
+// Writable files live only in this JavaScript Map. Keeping them separate from
+// the DOM-backed built-ins avoids changing built-in serialization and ensures
+// a page reload starts with a fresh store.
+const _SESSION_FILES = new Map();
+let _SESSION_FILE_VIEW = null;
+const _SESSION_DIRECTORY_KEYS = new Set([
+  "/",
+  "/bin",
+  "/home",
+  "/home/guest",
+  "/home/root",
+]);
+
+// Session storage uses explicit absolute identities even though the terminal's
+// established cwd labels remain compact (notably "~" for either user's home).
+function resolveSessionDirectory(cwd, user) {
+  switch (cwd) {
+    case "~":
+      if (user !== "guest" && user !== "root") {
+        throw new TypeError("A guest or root user is required to resolve ~");
+      }
+      return `/home/${user}`;
+    case "bin":
+      return "/bin";
+    case "home":
+      return "/home";
+    case "/":
+      return "/";
+    default:
+      throw new TypeError(`Unknown session directory: ${cwd}`);
+  }
+}
+
+function _sessionDirectory(directory, create = false) {
+  if (!_SESSION_DIRECTORY_KEYS.has(directory)) {
+    throw new TypeError(`Session directory key must be canonical: ${directory}`);
+  }
+  const store = _SESSION_FILE_VIEW || _SESSION_FILES;
+  if (!store.has(directory) && create) {
+    store.set(directory, new Map());
+  }
+  return store.get(directory);
+}
+
+// History replay reads from a detached, page-memory-only view. The live store
+// is never replaced, and nested/failed replays restore the previous view.
+function _snapshotSessionFiles() {
+  return new Map(
+    Array.from(_SESSION_FILES, ([directory, files]) => [
+      directory,
+      new Map(Array.from(files, ([name, lines]) => [name, [...lines]])),
+    ])
+  );
+}
+
+async function _withSessionFileView(snapshot, operation) {
+  const previousView = _SESSION_FILE_VIEW;
+  _SESSION_FILE_VIEW = new Map(
+    Array.from(snapshot, ([directory, files]) => [
+      directory,
+      new Map(Array.from(files, ([name, lines]) => [name, [...lines]])),
+    ])
+  );
+  try {
+    return await operation();
+  } finally {
+    _SESSION_FILE_VIEW = previousView;
+  }
+}
+
+function getSessionFileNames(directory) {
+  const files = _sessionDirectory(directory);
+  return files ? Array.from(files.keys()) : [];
+}
+
+function hasSessionFile(directory, filename) {
+  const files = _sessionDirectory(directory);
+  return Boolean(files && files.has(filename));
+}
+
+function getSessionFileLines(directory, filename) {
+  const files = _sessionDirectory(directory);
+  if (!files || !files.has(filename)) return null;
+  return [...files.get(filename)];
+}
+
+function writeSessionFile(directory, filename, lines, append = false) {
+  if (!Array.isArray(lines)) {
+    throw new TypeError("Session file contents must be an array of lines");
+  }
+
+  const files = _sessionDirectory(directory, true);
+  const nextLines = lines.map((line) => String(line));
+  if (append && files.has(filename)) {
+    files.set(filename, [...files.get(filename), ...nextLines]);
+  } else {
+    files.set(filename, nextLines);
+  }
+  return [...files.get(filename)];
+}
+
+// Reports only immutable entries visible to this user. Session files are
+// deliberately excluded so callers can distinguish a writable existing file
+// from a built-in collision before executing a command.
+function getVisibleBuiltInEntryType(directory, filename, user = "guest") {
+  const entries = _DIRS[directory] || [];
+  const visible = entries.includes(filename) &&
+    (filename !== "README.md" || user === "root");
+  if (!visible) return null;
+  if (directory === "/" || directory === "home") return "directory";
+  return "file";
+}
+
 // Pre-compute absolute paths for every known file, used by `find`.
 let _FULL_PATHS = {};
 let _LOADING_FILES = {};

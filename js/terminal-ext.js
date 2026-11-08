@@ -37,6 +37,94 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+// Redirection requires the first lexical command token itself to be nonempty;
+// later arguments cannot supply a missing command.
+const _hasRedirectionCommandToken = (command) => {
+  const [commandToken = ""] = _parseCommandLine(command);
+  return commandToken.length > 0;
+};
+
+// Target classification is intentionally deferred until the existing
+// pipeline validator has accepted every stage.
+const _canClassifyRedirectionTarget = (pipelineValidation) => (
+  pipelineValidation === null || pipelineValidation.ok
+);
+
+// Finds and validates shell-style output redirection without executing or
+// otherwise parsing the command. The original line is returned unchanged when
+// there is no unquoted operator so the established command path can remain
+// byte-for-byte identical.
+const _parseRedirection = (line) => {
+  const source = String(line);
+  let quote = null;
+  let operatorIndex = -1;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote !== null) {
+      if (character === quote) quote = null;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === ">") {
+      operatorIndex = index;
+      break;
+    }
+  }
+
+  if (operatorIndex === -1) {
+    return {
+      hasRedirection: false,
+      command: source,
+      operator: null,
+      filename: null,
+      append: false,
+      error: null,
+    };
+  }
+
+  const append = source[operatorIndex + 1] === ">";
+  const operator = append ? ">>" : ">";
+  const command = source.slice(0, operatorIndex).trim();
+  const target = source.slice(operatorIndex + operator.length).trim();
+  const result = {
+    hasRedirection: true,
+    command,
+    operator,
+    filename: null,
+    append,
+    error: null,
+  };
+
+  if (!command) {
+    return { ...result, error: "redirect: command required" };
+  }
+  if (!_hasRedirectionCommandToken(command)) {
+    return { ...result, error: "redirect: command required" };
+  }
+  if (!target) {
+    return { ...result, error: "redirect: file name required" };
+  }
+  if (target.includes(">")) {
+    return { ...result, error: "redirect: unexpected second >" };
+  }
+
+  if (target[0] === "'" || target[0] === '"') {
+    return {
+      ...result,
+      error: "redirect: quoted file names are not supported",
+    };
+  }
+  const targetParts = target.split(/\s+/);
+  if (targetParts.length !== 1) {
+    return { ...result, error: "redirect: one file name required" };
+  }
+  if (!/^(?![.-])[A-Za-z0-9._-]{1,64}$/.test(target)) {
+    return { ...result, error: "redirect: invalid file name" };
+  }
+
+  return { ...result, filename: target };
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -49,8 +137,25 @@ const extend = (term) => {
   term.sep = ":";
   term._promptChar = "$";
   term.history = [];
+  let historyMetadata = [];
+  let redirectedProducerDepth = 0;
   term.historyCursor = -1;
   term.busy = false;
+
+  const submissionMetadata = (line) => ({
+    line,
+    cwd: term.cwd,
+    user: term.user,
+    sessionFiles: typeof _snapshotSessionFiles === "function"
+      ? _snapshotSessionFiles()
+      : null,
+  });
+
+  const recordHistory = (line, settings, metadata) => {
+    if (!settings.addToHistory || line.length === 0) return;
+    term.history.push(line);
+    historyMetadata.push(metadata);
+  };
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -632,6 +737,9 @@ const extend = (term) => {
     }
   };
 
+  let activeResizeReplay = null;
+  let resizeReplayTail = null;
+
   term.executeCommandLine = async (line, options = {}) => {
     const settings = {
       addToHistory: true,
@@ -640,13 +748,84 @@ const extend = (term) => {
       showLeadingNewline: true,
       trackAnalytics: true,
       scrollAfter: true,
+      commitRedirection: true,
+      replayExecution: false,
       ...options,
     };
+    // A live submission must resolve cwd/user and enter the session-file APIs
+    // only after a resize replay has restored its detached historical view.
+    // Replay-owned executions opt out so they do not wait on themselves.
+    if (!settings.replayExecution && activeResizeReplay) {
+      await activeResizeReplay.catch(() => {});
+    }
+    const redirection = _parseRedirection(line);
     const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
+    const metadata = submissionMetadata(parsed.line);
+    const commandParsed = redirection.hasRedirection && !redirection.error
+      ? parseCommandLine(redirection.command)
+      : parsed;
+    // User aliases expand exactly once, on the lexical command before
+    // pipeline parsing; variable and alias values are never reparsed as
+    // redirection syntax.
+    const expanded = expandUserAlias(commandParsed);
     const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    const pipelineValidation = parsedPipeline
+      ? Pipeline.validatePipeline(parsedPipeline)
+      : null;
+    // Alias expansion can remove either a standalone command or a pipeline
+    // producer. Apply the same quote-aware token rule to the selected expanded
+    // command span before preload, target classification, or dispatch.
+    const redirectedCommand = parsedPipeline
+      ? parsedPipeline.producer
+      : expanded.line;
+    const redirectedMissingProducer = (
+      redirection.hasRedirection &&
+      !redirection.error &&
+      !_hasRedirectionCommandToken(redirectedCommand)
+    );
+    // Unknown filters remain deferred for ordinary pipelines, but a redirected
+    // pipeline must reject them before target classification, preload, or its
+    // producer can run. Derive the diagnostic through the same filter path that
+    // reports deferred unknown filters after ordinary producer execution.
+    const redirectedUnknownFilter = (
+      redirection.hasRedirection &&
+      !redirection.error &&
+      pipelineValidation?.ok
+    )
+      ? pipelineValidation.filters.find((filter) => filter.type === "unknown")
+      : null;
+    const redirectedUnknownError = redirectedUnknownFilter
+      ? Pipeline.applyPipelineFilter([], redirectedUnknownFilter).error
+      : null;
+    const redirectCwd = redirection.hasRedirection ? term.cwd : null;
+    const redirectDirectory = redirection.hasRedirection
+      ? resolveSessionDirectory(redirectCwd, term.user)
+      : null;
+    let redirectError = redirection.error || (
+      redirectedMissingProducer ? "redirect: command required" : null
+    );
+    if (
+      redirection.hasRedirection &&
+      !redirectError &&
+      !redirectedUnknownError &&
+      _canClassifyRedirectionTarget(pipelineValidation)
+    ) {
+      const collision = getVisibleBuiltInEntryType(
+        redirectCwd,
+        redirection.filename,
+        term.user
+      );
+      if (collision === "directory") {
+        redirectError = "redirect: target is a directory";
+      } else if (collision === "file") {
+        redirectError = "redirect: target is a built-in file";
+      }
+    }
+    const preflightRejected = Boolean(
+      redirectError ||
+      redirectedUnknownError ||
+      (parsedPipeline && !pipelineValidation.ok)
+    );
     let exitStatus;
 
     try {
@@ -654,17 +833,49 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      if (parsedPipeline) {
-        const validation = Pipeline.validatePipeline(parsedPipeline);
+      if (redirectError) {
+        if (settings.showLeadingNewline && (parsed.cmd != "upgrade" || preflightRejected)) {
+          term.writeln("");
+        }
+
+        recordHistory(parsed.line, settings, metadata);
+
+        term.stylePrint(redirectError);
+
+        if (settings.trackAnalytics) {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: "commandSent",
+            command: parsed.cmd,
+            args: parsed.args.join(" "),
+          });
+        }
+      } else if (redirectedUnknownError) {
+        if (settings.showLeadingNewline && (parsed.cmd != "upgrade" || preflightRejected)) {
+          term.writeln("");
+        }
+
+        recordHistory(parsed.line, settings, metadata);
+
+        term.stylePrint(redirectedUnknownError.message);
+
+        if (settings.trackAnalytics) {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: "commandSent",
+            command: parsed.cmd,
+            args: parsed.args.join(" "),
+          });
+        }
+      } else if (parsedPipeline) {
+        const validation = pipelineValidation;
 
         if (!validation.ok) {
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (settings.showLeadingNewline && (parsed.cmd != "upgrade" || preflightRejected)) {
             term.writeln("");
           }
 
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
+          recordHistory(parsed.line, settings, metadata);
 
           term.stylePrint(validation.error.message);
 
@@ -683,14 +894,14 @@ const extend = (term) => {
             term.writeln("");
           }
 
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
+          recordHistory(parsed.line, settings, metadata);
 
           const capture = _captureTerminalOutput(term);
+          redirectedProducerDepth += redirection.hasRedirection ? 1 : 0;
           try {
             exitStatus = await term.command(validation.producer);
           } finally {
+            redirectedProducerDepth -= redirection.hasRedirection ? 1 : 0;
             capture.restore();
           }
 
@@ -702,6 +913,15 @@ const extend = (term) => {
 
           if (result.error) {
             term.stylePrint(result.error.message);
+          } else if (redirection.hasRedirection) {
+            if (settings.commitRedirection) {
+              writeSessionFile(
+                redirectDirectory,
+                redirection.filename,
+                result.lines.map(_visibleTerminalText),
+                redirection.append
+              );
+            }
           } else {
             for (const outputLine of result.lines) {
               term.writeln(outputLine);
@@ -734,14 +954,41 @@ const extend = (term) => {
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
+          recordHistory(parsed.line, settings, metadata);
 
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
-          // a piped producer.
-          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+          // a piped producer or redirected command.
+          if (redirection.hasRedirection) {
+            const capture = _captureTerminalOutput(term);
+            redirectedProducerDepth += 1;
+            try {
+              exitStatus = await term.dispatchCommand(
+                prepared.cmd,
+                prepared.args,
+                prepared
+              );
+            } finally {
+              redirectedProducerDepth -= 1;
+              capture.restore();
+            }
+
+            if (settings.commitRedirection) {
+              writeSessionFile(
+                redirectDirectory,
+                redirection.filename,
+                capture.lines().map(_visibleTerminalText),
+                redirection.append
+              );
+            }
+            capture.flushPromptCleanup();
+          } else {
+            exitStatus = await term.dispatchCommand(
+              prepared.cmd,
+              prepared.args,
+              prepared
+            );
+          }
 
           if (settings.trackAnalytics) {
             window.dataLayer = window.dataLayer || [];
@@ -757,7 +1004,11 @@ const extend = (term) => {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+      if (
+        settings.promptAfter &&
+        exitStatus != 1 &&
+        (parsed.cmd != "upgrade" || preflightRejected)
+      ) {
         term.prompt();
         term.clearCurrentLine(true);
       }
@@ -788,7 +1039,7 @@ const extend = (term) => {
   // locked the terminal for its whole animation again, and `apply` would have
   // restarted the form — so their line is echoed but they are not rerun.
   term.NO_REPLAY = ["tui", "upgrade", "apply", "test", "claude"];
-  term.resizeListener = async () => {
+  const performResizeReplay = async () => {
     if (window.rootTui?.active) {
       window.fitAddon.fit();
       return;
@@ -809,17 +1060,47 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
-        term.prompt("\r\n", ` ${c}\r\n`);
-        if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
-          await term.executeCommandLine(c, {
-            addToHistory: false,
-            manageBusy: false,
-            promptAfter: false,
-            showLeadingNewline: false,
-            trackAnalytics: false,
-            scrollAfter: false,
-          });
+      for (const [index, c] of term.history.entries()) {
+        const historical = historyMetadata[index];
+        const hasHistoricalContext = historical && historical.line === c;
+        const liveCwd = term.cwd;
+        const liveUser = term.user;
+        try {
+          // The prompt is part of the historical entry too. Apply its recorded
+          // context before echoing so skipped commands and replayed commands use
+          // the same submission-time user and directory.
+          if (hasHistoricalContext) {
+            term.cwd = historical.cwd;
+            term.user = historical.user;
+          }
+          term.prompt("\r\n", ` ${c}\r\n`);
+          if (term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
+            continue;
+          }
+          const replay = () => term.executeCommandLine(c, {
+              addToHistory: false,
+              manageBusy: false,
+              promptAfter: false,
+              showLeadingNewline: false,
+              trackAnalytics: false,
+              scrollAfter: false,
+              commitRedirection: false,
+              replayExecution: true,
+            });
+          if (
+            hasHistoricalContext &&
+            historical.sessionFiles &&
+            typeof _withSessionFileView === "function"
+          ) {
+            await _withSessionFileView(historical.sessionFiles, replay);
+          } else {
+            await replay();
+          }
+        } finally {
+          if (hasHistoricalContext) {
+            term.cwd = liveCwd;
+            term.user = liveUser;
+          }
         }
       }
     });
@@ -832,6 +1113,21 @@ const extend = (term) => {
     }
     term.scrollToBottom();
     term._initialized = true;
+  };
+
+  term.resizeListener = () => {
+    // Browser scheduling already coalesces resizes, while this tail also keeps
+    // direct callers from overlapping two detached session-file views. The
+    // first replay starts synchronously to preserve the existing listener API.
+    const operation = resizeReplayTail
+      ? resizeReplayTail.catch(() => {}).then(performResizeReplay)
+      : performResizeReplay();
+    resizeReplayTail = operation;
+    activeResizeReplay = operation;
+    return operation.finally(() => {
+      if (resizeReplayTail === operation) resizeReplayTail = null;
+      if (activeResizeReplay === operation) activeResizeReplay = null;
+    });
   };
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
@@ -873,8 +1169,9 @@ const extend = (term) => {
     }
 
     term.user = user;
-    if (!preserveHistory) {
+    if (!preserveHistory && redirectedProducerDepth === 0) {
       term.history = [];
+      historyMetadata = [];
     }
     term.focus();
   };
