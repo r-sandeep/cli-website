@@ -37,6 +37,156 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+// Compare a canonical nonnegative decimal string with a small numeric bound
+// without first converting the submitted digits. History bounds are always
+// safe integers, while a submitted event number may contain arbitrarily many
+// digits.
+const _compareDecimalToBound = (decimal, bound) => {
+  const boundText = String(bound);
+  if (decimal.length !== boundText.length) {
+    return decimal.length < boundText.length ? -1 : 1;
+  }
+  if (decimal === boundText) return 0;
+  return decimal < boundText ? -1 : 1;
+};
+
+const _normalizeDecimal = (digits) => digits.replace(/^0+/, "") || "0";
+
+// Expand history syntax against a fixed snapshot. This helper deliberately
+// scans only `line`: text copied from history is appended directly and is never
+// considered as input to the scanner a second time.
+const _expandHistory = (line, history) => {
+  const source = String(line);
+  const entries = Array.isArray(history) ? history : [];
+
+  if (source.charAt(0) === "^") {
+    const separator = source.indexOf("^", 1);
+    if (separator !== -1) {
+      const oldText = source.slice(1, separator);
+      let newText = source.slice(separator + 1);
+      if (newText.endsWith("^")) newText = newText.slice(0, -1);
+
+      const previous = entries[entries.length - 1];
+      if (
+        oldText.length === 0 ||
+        typeof previous !== "string" ||
+        !previous.includes(oldText)
+      ) {
+        return { ok: false, message: "substitution failed" };
+      }
+
+      const match = previous.indexOf(oldText);
+      return {
+        ok: true,
+        line:
+          previous.slice(0, match) +
+          newText +
+          previous.slice(match + oldText.length),
+        expanded: true,
+      };
+    }
+  }
+
+  let result = "";
+  let quote = null;
+  let expanded = false;
+
+  for (let index = 0; index < source.length; ) {
+    const character = source.charAt(index);
+
+    if (character === "\\" && source.charAt(index + 1) === "!") {
+      result += "\\!";
+      index += 2;
+      continue;
+    }
+
+    if (character === "'" && quote !== '"') {
+      quote = quote === "'" ? null : "'";
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (character === '"' && quote !== "'") {
+      quote = quote === '"' ? null : '"';
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (character !== "!" || quote === "'") {
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    let event = null;
+    let replacement;
+    let end = index + 1;
+    const next = source.charAt(end);
+
+    if (next === "!") {
+      event = "!!";
+      end += 1;
+      replacement = entries[entries.length - 1];
+    } else if (/[0-9]/.test(next)) {
+      while (/[0-9]/.test(source.charAt(end))) end += 1;
+      event = source.slice(index, end);
+      const numberText = _normalizeDecimal(event.slice(1));
+      const lastHistoryNumber = 1000 + entries.length - 1;
+      if (
+        entries.length > 0 &&
+        _compareDecimalToBound(numberText, 1000) >= 0 &&
+        _compareDecimalToBound(numberText, lastHistoryNumber) <= 0
+      ) {
+        replacement = entries[Number(numberText) - 1000];
+      }
+    } else if (next === "-" && /[0-9]/.test(source.charAt(end + 1))) {
+      end += 1;
+      while (/[0-9]/.test(source.charAt(end))) end += 1;
+      const offsetText = _normalizeDecimal(source.slice(index + 2, end));
+      if (offsetText !== "0") {
+        event = source.slice(index, end);
+        if (_compareDecimalToBound(offsetText, entries.length) <= 0) {
+          replacement = entries[entries.length - Number(offsetText)];
+        }
+      }
+    } else if (/[A-Za-z]/.test(next)) {
+      end += 1;
+      while (
+        end < source.length &&
+        !/[\s'"!|><;&]/.test(source.charAt(end))
+      ) {
+        end += 1;
+      }
+      event = source.slice(index, end);
+      const prefix = event.slice(1);
+      for (let historyIndex = entries.length - 1; historyIndex >= 0; historyIndex -= 1) {
+        if (entries[historyIndex].startsWith(prefix)) {
+          replacement = entries[historyIndex];
+          break;
+        }
+      }
+    }
+
+    if (event === null) {
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (typeof replacement !== "string") {
+      return { ok: false, message: `${event}: event not found` };
+    }
+
+    result += replacement;
+    expanded = true;
+    index = end;
+  }
+
+  return { ok: true, line: result, expanded };
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -252,6 +402,36 @@ const extend = (term) => {
       return persistEnvironmentCandidate(candidate);
     },
   });
+
+  // Expanded reset commands and width replay may overlap while their handlers
+  // await animation or asset work. Prevent each operation's synchronous init
+  // from clearing submitted history, and release only that operation's token
+  // when it settles. Snapshots remain replay inputs, never restoration writes.
+  const activeHistoryPreservations = new Set();
+  const preserveHistoryDuring = async (operation) => {
+    const token = Symbol("history-preservation");
+    activeHistoryPreservations.add(token);
+    try {
+      return await operation();
+    } finally {
+      activeHistoryPreservations.delete(token);
+    }
+  };
+
+  // A reset deep link must retain its ordinary init semantics even when resize
+  // replay owns a history-preservation token. The override is intentionally
+  // synchronous: reset handlers call init before returning, while any promise
+  // they return settles after this dispatch-only policy has already unwound.
+  let historyResetPolicyDepth = 0;
+  const dispatchWithHistoryResetPolicy = (operation, enabled) => {
+    if (!enabled) return operation();
+    historyResetPolicyDepth += 1;
+    try {
+      return operation();
+    } finally {
+      historyResetPolicyDepth -= 1;
+    }
+  };
 
   // The replay may be asynchronous (resize replays each history line through
   // executeCommandLine so aliases and pipelines apply); the guard is held for
@@ -635,35 +815,79 @@ const extend = (term) => {
   term.executeCommandLine = async (line, options = {}) => {
     const settings = {
       addToHistory: true,
+      expandHistory: true,
       manageBusy: true,
       promptAfter: true,
       showLeadingNewline: true,
       trackAnalytics: true,
       scrollAfter: true,
+      resetHistoryOnInit: false,
       ...options,
     };
-    const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    const historyExpansion = settings.expandHistory
+      ? _expandHistory(line, [...term.history])
+      : { ok: true, line: String(line), expanded: false };
+    const parsed = parseCommandLine(historyExpansion.ok ? historyExpansion.line : line);
+    const successfulSubmission = historyExpansion.ok;
+    const recordedLine = historyExpansion.expanded
+      ? historyExpansion.line
+      : parsed.line;
+    const shouldRecordSubmission =
+      parsed.line.length > 0 || (successfulSubmission && historyExpansion.expanded);
     let exitStatus;
+    let leadingNewlineWritten = false;
+
+    // A command such as `zsh` normally starts a fresh session and clears typed
+    // history. When reached through expansion, acquire protection before the
+    // real handler invokes init; never restore a snapshot after newer work.
+    const dispatchWithHistorySemantics = (dispatch) => {
+      const invoke = () =>
+        dispatchWithHistoryResetPolicy(dispatch, settings.resetHistoryOnInit);
+      return historyExpansion.expanded && settings.addToHistory
+        ? preserveHistoryDuring(invoke)
+        : invoke();
+    };
 
     try {
       if (settings.manageBusy) {
         term.busy = true;
       }
 
+      if (!historyExpansion.ok) {
+        if (settings.showLeadingNewline) {
+          term.writeln("");
+        }
+        term.writeln(historyExpansion.message);
+        return exitStatus;
+      }
+
+      if (historyExpansion.expanded) {
+        if (settings.showLeadingNewline) {
+          term.writeln("");
+        }
+        term.writeln(historyExpansion.line);
+        leadingNewlineWritten = true;
+      }
+
+      // User aliases expand exactly once after history expansion and before
+      // pipeline parsing; inserted history text is not scanned a second time.
+      const expanded = expandUserAlias(parsed);
+      const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (
+            settings.showLeadingNewline &&
+            !leadingNewlineWritten &&
+            parsed.cmd != "upgrade"
+          ) {
             term.writeln("");
           }
 
           if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(recordedLine);
           }
 
           term.stylePrint(validation.error.message);
@@ -679,17 +903,23 @@ const extend = (term) => {
         } else {
           await term.preloadCommandAssets(validation.producer);
 
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (
+            settings.showLeadingNewline &&
+            !leadingNewlineWritten &&
+            parsed.cmd != "upgrade"
+          ) {
             term.writeln("");
           }
 
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(recordedLine);
           }
 
           const capture = _captureTerminalOutput(term);
           try {
-            exitStatus = await term.command(validation.producer);
+            exitStatus = await dispatchWithHistorySemantics(() =>
+              term.command(validation.producer)
+            );
           } finally {
             capture.restore();
           }
@@ -729,19 +959,27 @@ const extend = (term) => {
         const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
 
-        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+        if (
+          settings.showLeadingNewline &&
+          !leadingNewlineWritten &&
+          parsed.cmd != "upgrade"
+        ) {
           term.writeln("");
         }
 
-        if (parsed.line.length > 0) {
+        if (shouldRecordSubmission) {
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(recordedLine);
           }
 
-          // Commands may own an interactive continuation. Await its final
-          // status so standalone prompt cleanup observes the same lifecycle as
-          // a piped producer.
-          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+          if (parsed.line.length > 0) {
+            // Commands may own an interactive continuation. Await its final
+            // status so standalone prompt cleanup observes the same lifecycle as
+            // a piped producer.
+            exitStatus = await dispatchWithHistorySemantics(() =>
+              term.dispatchCommand(prepared.cmd, prepared.args, prepared)
+            );
+          }
 
           if (settings.trackAnalytics) {
             window.dataLayer = window.dataLayer || [];
@@ -757,7 +995,11 @@ const extend = (term) => {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+      if (
+        settings.promptAfter &&
+        exitStatus != 1 &&
+        (!successfulSubmission || parsed.cmd != "upgrade")
+      ) {
         term.prompt();
         term.clearCurrentLine(true);
       }
@@ -800,28 +1042,35 @@ const extend = (term) => {
       return;
     }
     term._initialized = false;
-    term.init(term.user, true);
-    if (typeof preloadASCIIArt === "function") {
-      window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
-    }
-    await term.runDeepLink({ replay: true });
-    // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
-    await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
-        term.prompt("\r\n", ` ${c}\r\n`);
-        if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
-          await term.executeCommandLine(c, {
-            addToHistory: false,
-            manageBusy: false,
-            promptAfter: false,
-            showLeadingNewline: false,
-            trackAnalytics: false,
-            scrollAfter: false,
-          });
-        }
+    await preserveHistoryDuring(async () => {
+      term.init(term.user, true);
+      if (typeof preloadASCIIArt === "function") {
+        window.scheduleIdleTask(() => preloadASCIIArt(), 1500);
       }
+      await term.runDeepLink({ replay: true });
+      // A reset deep link has now had its real synchronous init opportunity.
+      // Select replay entries from the resulting live history, never from a
+      // pre-reset snapshot that could resurrect discarded commands.
+      const replayHistory = [...term.history];
+      // Replay serially through the full execution boundary so aliases and
+      // pipelines apply exactly as they did interactively, while environment
+      // mutations replayed from history never persist a second time.
+      await replayWithoutEnvironmentSideEffects(async () => {
+        for (const c of replayHistory) {
+          term.prompt("\r\n", ` ${c}\r\n`);
+          if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
+            await term.executeCommandLine(c, {
+              addToHistory: false,
+              expandHistory: false,
+              manageBusy: false,
+              promptAfter: false,
+              showLeadingNewline: false,
+              trackAnalytics: false,
+              scrollAfter: false,
+            });
+          }
+        }
+      });
     });
     // A form (collectInput) still owns the keyboard, so put its question and
     // what has been typed back on screen rather than a misleading shell prompt.
@@ -873,7 +1122,10 @@ const extend = (term) => {
     }
 
     term.user = user;
-    if (!preserveHistory) {
+    if (
+      !preserveHistory &&
+      (activeHistoryPreservations.size === 0 || historyResetPolicyDepth > 0)
+    ) {
       term.history = [];
     }
     term.focus();
@@ -893,8 +1145,10 @@ const extend = (term) => {
     if (term.deepLink != "") {
       return term.executeCommandLine(term.deepLink, {
         addToHistory: false,
+        expandHistory: false,
         promptAfter: false,
         showLeadingNewline: false,
+        resetHistoryOnInit: true,
         // Deep links are how visitors now reach a specific company or person,
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.

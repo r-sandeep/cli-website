@@ -949,6 +949,47 @@ describe("help stays in sync with commands", () => {
     );
   });
 
+  it("renders all history expansion forms and descriptions at narrow and wide widths", () => {
+    const expectedEntries = {
+      "  !!": "run the previous history entry",
+      "  !N": "run history entry N (numbering starts at 1000)",
+      "  !-N": "run the Nth most recent history entry",
+      "  !PREFIX": "run the most recent entry starting with PREFIX",
+      "  ^OLD^NEW": "rerun the previous entry with its first OLD replaced by NEW",
+    };
+    expect(helpContext.helpEntries).toMatchObject(expectedEntries);
+
+    for (const cols of [40, 100]) {
+      const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+      term.cols = cols;
+
+      commands.help([]);
+
+      const output = term.stylePrint.mock.calls.map(([line]) => line);
+      for (const [form, description] of Object.entries(expectedEntries)) {
+        if (cols >= 80) {
+          expect(output.some((line) => line.includes(form) && line.includes(description))).toBe(true);
+        } else {
+          const formIndex = output.indexOf(form);
+          expect(formIndex).toBeGreaterThanOrEqual(0);
+          expect(output[formIndex + 1]).toBe(description);
+        }
+      }
+      if (cols >= 80) {
+        expect(
+          output.some(
+            (line) =>
+              line.includes("%help%") &&
+              line.includes("list all commands (you're looking at it)")
+          )
+        ).toBe(true);
+      } else {
+        expect(output).toContain("%help%");
+        expect(output).toContain("list all commands (you're looking at it)");
+      }
+    }
+  });
+
   it("advertises every bookmark and navigation form", () => {
     expect(helpContext.helpEntries["%bookmark% add NAME"]).toContain("save");
     expect(helpContext.helpEntries["%bookmark% list"]).toContain("list");
