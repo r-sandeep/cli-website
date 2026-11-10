@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { parse as parseJavaScript } from "acorn";
 import { afterEach, describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
 import {
@@ -42,6 +43,25 @@ function parse(content) {
 // "portfolio/zed/index.html" -> "/portfolio/zed/"
 function pathnameFor(filePath) {
   return `/${filePath.replace(/index\.html$/, "")}`;
+}
+
+function bigIntLiteralNodes(source) {
+  const root = parseJavaScript(source, { ecmaVersion: "latest", sourceType: "script" });
+  const found = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || typeof node !== "object") continue;
+    if (node.type === "Literal" && Object.prototype.hasOwnProperty.call(node, "bigint")) {
+      found.push(node);
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "start" || key === "end" || key === "loc") continue;
+      if (Array.isArray(value)) pending.push(...value);
+      else if (value && typeof value === "object") pending.push(value);
+    }
+  }
+  return found;
 }
 
 let env;
@@ -183,6 +203,14 @@ describe("script load order", () => {
     );
     expect(emittedBundle).toContain(buildInfo.version);
     expect(emittedBundle).toContain(buildInfo.buildDate);
+    expect(bigIntLiteralNodes("const positiveControl = 1000n;")).toHaveLength(1);
+    expect(bigIntLiteralNodes(emittedBundle)).toEqual([]);
+    expect(() =>
+      parseJavaScript("const positiveControl = 1000n;", {
+        ecmaVersion: 2019,
+        sourceType: "script",
+      })
+    ).toThrow();
 
     const bundleSource = createAppBundleSource(buildInfo);
     const commandPrefix = bundleSource.slice(

@@ -32,6 +32,47 @@ The terminal supports persistent named bookmarks for quick directory navigation:
 `NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
 browser storage, with a maximum of 25 saved bookmarks.
 
+## History expansion
+
+Submitted command lines can reuse entries shown by `history`:
+
+- `!!` reruns the previous entry.
+- `!N` reruns entry N, where a fresh session's numbering starts at 1000.
+- `!-N` reruns the Nth most recent entry (`!-1` is the same as `!!`).
+- `!PREFIX` reruns the most recent entry beginning with PREFIX.
+- `^OLD^NEW` reruns the previous entry after replacing its first OLD with NEW.
+
+A successful expansion prints the expanded command on its own row before that
+command's output. The expanded command, rather than the designator, is then
+stored in history. For example, this transcript begins with an empty history;
+the first `echo a` is therefore entry 1000:
+
+```text
+$ echo a
+a
+$ !!
+echo a
+a
+$ history
+1000  echo a
+1001  echo a
+1002  history
+$ !1000
+echo a
+a
+$ ^a^b
+echo b
+b
+```
+
+Expansion is performed once on the submitted line, before aliases and variables
+are processed. Text supplied by a history entry, alias, or variable is not
+expanded again. A bang stays literal inside single quotes (for example,
+`echo '!!'`) or when escaped as `\!`; unsupported forms such as `hi!` also stay
+literal. If an event has no match, the terminal prints `!EVENT: event not found`;
+a failed quick substitution prints `substitution failed`. Failed expansions run
+nothing and add nothing to history.
+
 ## Output pipelines
 
 Pipe the output of any terminal command through one or more filters with

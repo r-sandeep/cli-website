@@ -1574,8 +1574,10 @@ describe("terminal-ext", () => {
 
     expect(term.executeCommandLine).toHaveBeenCalledWith("whois lee", {
       addToHistory: false,
+      expandHistory: false,
       promptAfter: false,
       showLeadingNewline: false,
+      resetHistoryOnInit: true,
       // Deep links are the only way to address a specific company or person
       // now, and a fragment fires no pageview of its own, so these arrivals
       // would otherwise be invisible in analytics.
