@@ -1580,6 +1580,7 @@ describe("terminal-ext", () => {
       // now, and a fragment fires no pageview of its own, so these arrivals
       // would otherwise be invisible in analytics.
       trackAnalytics: true,
+      expandHistory: false,
     });
   });
 
@@ -1598,7 +1599,10 @@ describe("terminal-ext", () => {
 
     expect(term.executeCommandLine).toHaveBeenCalledWith(
       "whois lee",
-      expect.objectContaining({ trackAnalytics: false })
+      expect.objectContaining({
+        trackAnalytics: false,
+        expandHistory: false,
+      })
     );
   });
 

@@ -7,6 +7,128 @@
 //
 // TODO: make this a proper xterm addon
 
+const _expandHistory = (line, history) => {
+  const source = String(line);
+
+  if (source[0] === "^") {
+    const delimiter = source.indexOf("^", 1);
+    if (delimiter !== -1) {
+      const oldText = source.slice(1, delimiter);
+      let newText = source.slice(delimiter + 1);
+      if (newText.endsWith("^")) newText = newText.slice(0, -1);
+
+      const previous = history[history.length - 1];
+      if (previous === undefined || oldText === "" || !previous.includes(oldText)) {
+        return { status: "error", error: "substitution failed" };
+      }
+
+      const match = previous.indexOf(oldText);
+      return {
+        status: "expanded",
+        line:
+          previous.slice(0, match) +
+          newText +
+          previous.slice(match + oldText.length),
+      };
+    }
+  }
+
+  const normalizedDecimal = (digits) => digits.replace(/^0+(?=\d)/, "");
+  const findAbsolute = (digits) => {
+    const number = normalizedDecimal(digits);
+    for (let index = 0; index < history.length; index += 1) {
+      if (String(1000 + index) === number) return history[index];
+    }
+    return undefined;
+  };
+  const findRelative = (digits) => {
+    const number = normalizedDecimal(digits);
+    for (let offset = 1; offset <= history.length; offset += 1) {
+      if (String(offset) === number) return history[history.length - offset];
+    }
+    return undefined;
+  };
+
+  let result = "";
+  let quote = null;
+  let expanded = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+
+    if (character === "'" || character === '"') {
+      // Match _parseCommandLine exactly: backslashes are ordinary bytes here,
+      // so either quote character changes state whenever it is active or opens
+      // a new quoted span. This keeps bang protection aligned with dispatch.
+      if (quote === null) quote = character;
+      else if (quote === character) quote = null;
+      result += character;
+      continue;
+    }
+
+    if (
+      character !== "!" ||
+      quote === "'" ||
+      (index > 0 && source[index - 1] === "\\")
+    ) {
+      result += character;
+      continue;
+    }
+
+    let event = null;
+    let replacement;
+    let eventEnd = index + 1;
+    const next = source[index + 1];
+
+    if (next === "!") {
+      event = "!!";
+      eventEnd = index + 2;
+      replacement = history[history.length - 1];
+    } else if (/\d/.test(next || "")) {
+      while (/\d/.test(source[eventEnd] || "")) eventEnd += 1;
+      event = source.slice(index, eventEnd);
+      replacement = findAbsolute(event.slice(1));
+    } else if (next === "-" && /\d/.test(source[index + 2] || "")) {
+      eventEnd = index + 2;
+      while (/\d/.test(source[eventEnd] || "")) eventEnd += 1;
+      event = source.slice(index, eventEnd);
+      const digits = event.slice(2);
+      if (!/^0+$/.test(digits)) replacement = findRelative(digits);
+      else event = null;
+    } else if (/[A-Za-z]/.test(next || "")) {
+      eventEnd = index + 2;
+      while (
+        eventEnd < source.length &&
+        !/[\s'"!|><;&]/.test(source[eventEnd])
+      ) {
+        eventEnd += 1;
+      }
+      event = source.slice(index, eventEnd);
+      const prefix = event.slice(1);
+      for (let historyIndex = history.length - 1; historyIndex >= 0; historyIndex -= 1) {
+        if (history[historyIndex].startsWith(prefix)) {
+          replacement = history[historyIndex];
+          break;
+        }
+      }
+    }
+
+    if (event === null) {
+      result += character;
+      continue;
+    }
+    if (replacement === undefined) {
+      return { status: "error", error: `${event}: event not found` };
+    }
+
+    result += replacement;
+    expanded = true;
+    index = eventEnd - 1;
+  }
+
+  return { status: expanded ? "expanded" : "unchanged", line: result };
+};
+
 const _parseCommandLine = (line) => {
   const tokens = [];
   let token = "";
@@ -640,13 +762,13 @@ const extend = (term) => {
       showLeadingNewline: true,
       trackAnalytics: true,
       scrollAfter: true,
+      expandHistory: true,
       ...options,
     };
-    const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    let parsed = null;
+    let expanded = null;
+    let parsedPipeline = null;
+    let expansionPrinted = false;
     let exitStatus;
 
     try {
@@ -654,16 +776,43 @@ const extend = (term) => {
         term.busy = true;
       }
 
+      const historyExpansion = settings.expandHistory
+        ? _expandHistory(line, term.history)
+        : { status: "unchanged", line: String(line) };
+      if (historyExpansion.status === "error") {
+        if (settings.showLeadingNewline) term.writeln("");
+        term.writeln(historyExpansion.error);
+        return exitStatus;
+      }
+
+      parsed = parseCommandLine(historyExpansion.line);
+      const historyLine =
+        historyExpansion.status === "expanded" ? historyExpansion.line : parsed.line;
+      if (historyExpansion.status === "expanded") {
+        if (settings.showLeadingNewline) term.writeln("");
+        term.writeln(historyExpansion.line);
+        expansionPrinted = true;
+      }
+
+      // History expands once on the original submission. Alias and variable
+      // values, and text inserted from history, remain opaque to this phase.
+      expanded = expandUserAlias(parsed);
+      parsedPipeline = Pipeline.parsePipeline(expanded.line);
+
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (
+            settings.showLeadingNewline &&
+            !expansionPrinted &&
+            parsed.cmd != "upgrade"
+          ) {
             term.writeln("");
           }
 
           if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(historyLine);
           }
 
           term.stylePrint(validation.error.message);
@@ -679,12 +828,16 @@ const extend = (term) => {
         } else {
           await term.preloadCommandAssets(validation.producer);
 
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (
+            settings.showLeadingNewline &&
+            !expansionPrinted &&
+            parsed.cmd != "upgrade"
+          ) {
             term.writeln("");
           }
 
           if (settings.addToHistory) {
-            term.history.push(parsed.line);
+            term.history.push(historyLine);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -727,37 +880,47 @@ const extend = (term) => {
         // expanded values stay opaque data instead of being parsed or expanded
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
+        const shouldRecord =
+          parsed.line.length > 0 || historyExpansion.status === "expanded";
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
 
-        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+        if (
+          settings.showLeadingNewline &&
+          !expansionPrinted &&
+          parsed.cmd != "upgrade"
+        ) {
           term.writeln("");
         }
 
-        if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
+        if (shouldRecord && settings.addToHistory) {
+          term.history.push(historyLine);
+        }
 
+        if (parsed.line.length > 0) {
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
           exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+        }
 
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
-          }
+        if (shouldRecord && settings.trackAnalytics) {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: "commandSent",
+            command: parsed.cmd,
+            args: parsed.args.join(" "),
+          });
         }
       }
     } catch (error) {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+      if (
+        settings.promptAfter &&
+        exitStatus != 1 &&
+        (!parsed || parsed.cmd != "upgrade")
+      ) {
         term.prompt();
         term.clearCurrentLine(true);
       }
@@ -819,6 +982,7 @@ const extend = (term) => {
             showLeadingNewline: false,
             trackAnalytics: false,
             scrollAfter: false,
+            expandHistory: false,
           });
         }
       }
@@ -899,6 +1063,10 @@ const extend = (term) => {
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.
         trackAnalytics: !replay,
+        // URL-driven commands are not submitted lines. Preserve their literal
+        // parser semantics on both arrival and redraw, even when they contain
+        // syntax that interactive submissions use for history expansion.
+        expandHistory: false,
       }).catch((error) => {
         console.error("Deep link failed", error);
       });
