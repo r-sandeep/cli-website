@@ -710,6 +710,206 @@ describe("terminal-ext", () => {
     );
   });
 
+  it("expands a submitted event before real dispatch, history, analytics, and plain output", async () => {
+    const echo = vi.fn((args) => term.writeln(args.join(" ")));
+    const { extend } = loadTerminalExt({ commands: { echo } });
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const stylePrint = vi.spyOn(term, "stylePrint");
+
+    await term.executeCommandLine("echo a");
+    term.writeln.mockClear();
+    env.window.dataLayer = [];
+
+    await term.executeCommandLine("!!");
+
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "",
+      "echo a",
+      "a",
+    ]);
+    expect(stylePrint).not.toHaveBeenCalledWith("echo a");
+    expect(term.history).toEqual(["echo a", "echo a"]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "a", command: "echo", event: "commandSent" },
+    ]);
+    expect(echo).toHaveBeenCalledTimes(2);
+  });
+
+  it("records and reports a successful expansion whose expanded line is empty", async () => {
+    const echo = vi.fn((args) => term.writeln(args.join(" ")));
+    const { extend } = loadTerminalExt({ commands: { echo } });
+    const term = createTerm();
+    extend(term);
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine("echo");
+    term.writeln.mockClear();
+    env.window.dataLayer = [];
+
+    await term.executeCommandLine("^echo^");
+
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual(["", ""]);
+    expect(term.history).toEqual(["echo", ""]);
+    expect(env.window.dataLayer).toEqual([
+      { args: "", command: "", event: "commandSent" },
+    ]);
+    expect(echo).toHaveBeenCalledTimes(1);
+  });
+
+  it("executes expanded aliases, variables, and pipelines through production preparation once", async () => {
+    const { commands, term } = loadAliasTerminal();
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    commands.echo = (args) => term.writeln(args.join(" "));
+    term.defineAlias("r", "echo a");
+    term.environment.set("X", "a");
+
+    await term.executeCommandLine("r");
+    await term.executeCommandLine("!1000");
+    expect(term.writeln).toHaveBeenCalledWith("a");
+    expect(term.history.at(-1)).toBe("r");
+
+    await term.executeCommandLine("echo $X");
+    await term.executeCommandLine("!1002");
+    expect(term.history.at(-1)).toBe("echo $X");
+    expect(term.writeln).toHaveBeenCalledWith("a");
+
+    await term.executeCommandLine("echo b");
+    term.writeln.mockClear();
+    await term.executeCommandLine("!!|wc -l", {
+      promptAfter: false,
+      showLeadingNewline: true,
+    });
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual([
+      "",
+      "echo b|wc -l",
+      "1",
+    ]);
+    expect(term.history.at(-1)).toBe("echo b|wc -l");
+  });
+
+  it.each([
+    { name: "previous from empty history", history: [], line: "!!", error: "!!: event not found" },
+    { name: "absolute below range", history: ["echo a", "echo b"], line: "!999", error: "!999: event not found" },
+    { name: "absolute above range", history: ["echo a", "echo b"], line: "!1002", error: "!1002: event not found" },
+    { name: "relative beyond oldest", history: ["echo a", "echo b"], line: "!-3", error: "!-3: event not found" },
+    { name: "missing prefix", history: ["echo a", "echo b"], line: "!missing", error: "!missing: event not found" },
+    { name: "quick substitution empty history", history: [], line: "^a^b", error: "substitution failed" },
+    { name: "quick substitution empty old", history: ["echo a"], line: "^^b", error: "substitution failed" },
+    { name: "quick substitution absent old", history: ["echo a"], line: "^z^b", error: "substitution failed" },
+  ])("rejects $name atomically and accepts the next command", async ({ history, line, error }) => {
+    const echo = vi.fn((args) => term.writeln(args.join(" ")));
+    const { extend } = loadTerminalExt({ commands: { echo } });
+    const term = createTerm();
+    extend(term);
+    term.history = [...history];
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    const historyBefore = [...term.history];
+    const analyticsBefore = [...(env.window.dataLayer || [])];
+
+    await term.executeCommandLine(line);
+
+    expect(term.writeln.mock.calls.map(([value]) => value)).toEqual(["", error]);
+    expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+    expect(echo).not.toHaveBeenCalled();
+    expect(term.history).toEqual(historyBefore);
+    expect(env.window.dataLayer || []).toEqual(analyticsBefore);
+    expect(term.busy).toBe(false);
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo ok");
+    expect(echo).toHaveBeenCalledWith(["ok"]);
+    expect(term.writeln).toHaveBeenCalledWith("ok");
+  });
+
+  it("rejects a later missing event without partially executing an earlier one", async () => {
+    const echo = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { echo } });
+    const term = createTerm();
+    extend(term);
+    term.history = ["echo a"];
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+
+    await term.executeCommandLine("!! | !missing");
+
+    expect(term.writeln.mock.calls.map(([value]) => value)).toEqual([
+      "",
+      "!missing: event not found",
+    ]);
+    expect(term.preloadCommandAssets).not.toHaveBeenCalled();
+    expect(echo).not.toHaveBeenCalled();
+    expect(term.history).toEqual(["echo a"]);
+    expect(env.window.dataLayer).toBeUndefined();
+  });
+
+  it("does not history-expand text introduced by aliases, variables, or a referenced entry", async () => {
+    const { commands, term } = loadAliasTerminal();
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    commands.echo = (args) => term.writeln(args.join(" "));
+
+    term.defineAlias("r", "echo !!");
+    expect(term.getAlias("r")).toBe("echo !!");
+    await term.executeCommandLine("r");
+    expect(term.writeln).toHaveBeenCalledWith("!!");
+
+    term.environment.set("X", "!!");
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo $X");
+    expect(term.writeln).toHaveBeenCalledWith("!!");
+
+    term.history = ["echo a"];
+    await term.executeCommandLine("^a^!!");
+    expect(term.history.at(-1)).toBe("echo !!");
+    term.writeln.mockClear();
+    await term.executeCommandLine("!1001");
+    expect(term.writeln).toHaveBeenCalledWith("echo !!");
+    expect(term.writeln).toHaveBeenCalledWith("!!");
+    expect(term.writeln).not.toHaveBeenCalledWith("!!: event not found");
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo ok");
+    expect(term.writeln).toHaveBeenCalledWith("ok");
+  });
+
+  it("replays expanded history without rescanning bangs or printing expansion rows", async () => {
+    const { commands, term } = loadAliasTerminal();
+    term.preloadCommandAssets = vi.fn(() => Promise.resolve());
+    commands.echo = (args) => term.writeln(args.join(" "));
+
+    await term.executeCommandLine("echo a");
+    await term.executeCommandLine("^a^!!");
+    await term.executeCommandLine("r", { addToHistory: false }).catch(() => {});
+    const historyBefore = [...term.history];
+    const analyticsBefore = [...env.window.dataLayer];
+    const persistedEnvironment = env.window.localStorage.getItem(
+      "rootvc.cli.environment.v1"
+    );
+
+    term.runDeepLink = vi.fn();
+    term.writeln.mockClear();
+    term.write.mockClear();
+    env.window.__term = term;
+    fitTo(120);
+    await term.resizeListener();
+
+    expect(term.history).toEqual(historyBefore);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+    expect(env.window.localStorage.getItem("rootvc.cli.environment.v1")).toBe(
+      persistedEnvironment
+    );
+    expect(term.write).toHaveBeenCalledWith(
+      "\r\nguest:rootpc ~ $ echo !!\r\n"
+    );
+    expect(term.writeln).toHaveBeenCalledWith("!!");
+    expect(term.writeln).not.toHaveBeenCalledWith("echo !!");
+    expect(term.writeln).not.toHaveBeenCalledWith("!!: event not found");
+
+    term.writeln.mockClear();
+    await term.executeCommandLine("echo ok");
+    expect(term.writeln).toHaveBeenCalledWith("ok");
+  });
+
   it("expands every recognized argument reference once without changing token boundaries", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -1576,6 +1776,7 @@ describe("terminal-ext", () => {
       addToHistory: false,
       promptAfter: false,
       showLeadingNewline: false,
+      expandHistory: false,
       // Deep links are the only way to address a specific company or person
       // now, and a fragment fires no pageview of its own, so these arrivals
       // would otherwise be invisible in analytics.

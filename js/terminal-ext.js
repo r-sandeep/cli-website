@@ -37,6 +37,153 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+// Expands history syntax in a submitted source line. Replacement text is
+// appended directly rather than fed back through the scanner, so each source
+// designator is expanded exactly once and inserted quotes or bangs stay opaque.
+const _expandHistoryLine = (line, history) => {
+  const source = String(line);
+  const entries = Array.isArray(history) ? history : [];
+
+  if (source.charAt(0) === "^") {
+    const separator = source.indexOf("^", 1);
+    if (separator !== -1) {
+      const oldText = source.slice(1, separator);
+      let newText = source.slice(separator + 1);
+      if (newText.endsWith("^")) newText = newText.slice(0, -1);
+
+      const previous = entries[entries.length - 1];
+      if (
+        typeof previous !== "string" ||
+        oldText.length === 0 ||
+        !previous.includes(oldText)
+      ) {
+        return { ok: false, error: "substitution failed" };
+      }
+
+      const match = previous.indexOf(oldText);
+      return {
+        ok: true,
+        line:
+          previous.slice(0, match) +
+          newText +
+          previous.slice(match + oldText.length),
+        expanded: true,
+      };
+    }
+  }
+
+  let result = "";
+  let quote = null;
+  let expanded = false;
+
+  const eventNotFound = (event) => ({
+    ok: false,
+    error: `${event}: event not found`,
+  });
+
+  for (let index = 0; index < source.length; ) {
+    const character = source.charAt(index);
+
+    if (character === "\\" && source.charAt(index + 1) === "!") {
+      result += "\\!";
+      index += 2;
+      continue;
+    }
+
+    if (quote === "'") {
+      result += character;
+      if (character === "'") quote = null;
+      index += 1;
+      continue;
+    }
+
+    if (character === "'" && quote !== '"') {
+      quote = "'";
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (character === '"') {
+      quote = quote === '"' ? null : '"';
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (character !== "!") {
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    let event = null;
+    let replacement;
+    let end = index + 1;
+    const next = source.charAt(end);
+
+    if (next === "!") {
+      event = "!!";
+      end += 1;
+      replacement = entries[entries.length - 1];
+    } else if (/^[0-9]$/.test(next)) {
+      end += 1;
+      while (/^[0-9]$/.test(source.charAt(end))) end += 1;
+      event = source.slice(index, end);
+      const number = Number(event.slice(1));
+      const historyIndex = number - 1000;
+      if (
+        Number.isSafeInteger(number) &&
+        historyIndex >= 0 &&
+        historyIndex < entries.length
+      ) {
+        replacement = entries[historyIndex];
+      }
+    } else if (next === "-" && /^[0-9]$/.test(source.charAt(end + 1))) {
+      end += 2;
+      while (/^[0-9]$/.test(source.charAt(end))) end += 1;
+      const countText = source.slice(index + 2, end);
+      const count = Number(countText);
+      if (!/^0+$/.test(countText)) {
+        event = source.slice(index, end);
+        if (Number.isSafeInteger(count) && count <= entries.length) {
+          replacement = entries[entries.length - count];
+        }
+      }
+    } else if (/^[A-Za-z]$/.test(next)) {
+      end += 1;
+      while (
+        end < source.length &&
+        !/[\s'"!|><;&]/.test(source.charAt(end))
+      ) {
+        end += 1;
+      }
+      event = source.slice(index, end);
+      const prefix = event.slice(1);
+      for (let historyIndex = entries.length - 1; historyIndex >= 0; historyIndex--) {
+        if (entries[historyIndex].startsWith(prefix)) {
+          replacement = entries[historyIndex];
+          break;
+        }
+      }
+    }
+
+    if (event === null) {
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (typeof replacement !== "string") return eventNotFound(event);
+
+    result += replacement;
+    expanded = true;
+    index = end;
+  }
+
+  return { ok: true, line: result, expanded };
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -640,11 +787,32 @@ const extend = (term) => {
       showLeadingNewline: true,
       trackAnalytics: true,
       scrollAfter: true,
+      expandHistory: true,
       ...options,
     };
-    const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
+    const historyExpansion = settings.expandHistory
+      ? _expandHistoryLine(line, term.history)
+      : { ok: true, line: String(line), expanded: false };
+
+    // A failed lookup is rejected before parsing, alias/variable preparation,
+    // preload, history mutation, analytics, or dispatch. It still owns the
+    // ordinary interactive prompt lifecycle so the next submission is usable.
+    if (!historyExpansion.ok) {
+      if (settings.manageBusy) term.busy = true;
+      if (settings.showLeadingNewline) term.writeln("");
+      term.writeln(historyExpansion.error);
+      if (settings.promptAfter) {
+        term.prompt();
+        term.clearCurrentLine(true);
+      }
+      if (settings.manageBusy) term.busy = false;
+      if (settings.scrollAfter) term.scrollToBottom();
+      return undefined;
+    }
+
+    const parsed = parseCommandLine(historyExpansion.line);
+    // User aliases expand exactly once, after history expansion and before
+    // pipeline parsing; inserted alias or variable text is never history-scanned.
     const expanded = expandUserAlias(parsed);
     const parsedPipeline = Pipeline.parsePipeline(expanded.line);
     let exitStatus;
@@ -654,11 +822,22 @@ const extend = (term) => {
         term.busy = true;
       }
 
+      // Complete the typed row and show the expanded submitted source as plain
+      // text before command output. This write remains outside pipeline capture.
+      if (historyExpansion.expanded && settings.showLeadingNewline) {
+        term.writeln("");
+        term.writeln(historyExpansion.line);
+      }
+
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (
+            settings.showLeadingNewline &&
+            !historyExpansion.expanded &&
+            parsed.cmd != "upgrade"
+          ) {
             term.writeln("");
           }
 
@@ -679,7 +858,11 @@ const extend = (term) => {
         } else {
           await term.preloadCommandAssets(validation.producer);
 
-          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+          if (
+            settings.showLeadingNewline &&
+            !historyExpansion.expanded &&
+            parsed.cmd != "upgrade"
+          ) {
             term.writeln("");
           }
 
@@ -729,28 +912,35 @@ const extend = (term) => {
         const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
 
-        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+        if (
+          settings.showLeadingNewline &&
+          !historyExpansion.expanded &&
+          parsed.cmd != "upgrade"
+        ) {
           term.writeln("");
         }
 
-        if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
+        const shouldRecordSubmission =
+          parsed.line.length > 0 || historyExpansion.expanded;
 
+        if (shouldRecordSubmission && settings.addToHistory) {
+          term.history.push(parsed.line);
+        }
+
+        if (parsed.line.length > 0) {
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
           exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+        }
 
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
-          }
+        if (shouldRecordSubmission && settings.trackAnalytics) {
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({
+            event: "commandSent",
+            command: parsed.cmd,
+            args: parsed.args.join(" "),
+          });
         }
       }
     } catch (error) {
@@ -819,6 +1009,7 @@ const extend = (term) => {
             showLeadingNewline: false,
             trackAnalytics: false,
             scrollAfter: false,
+            expandHistory: false,
           });
         }
       }
@@ -895,6 +1086,7 @@ const extend = (term) => {
         addToHistory: false,
         promptAfter: false,
         showLeadingNewline: false,
+        expandHistory: false,
         // Deep links are how visitors now reach a specific company or person,
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.
