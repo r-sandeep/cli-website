@@ -22,6 +22,79 @@ function loadTerminalScript(globals = {}) {
   return env.exportValues(["runRootTerminal"]);
 }
 
+function loadIntegratedTerminal() {
+  let cursorX = 0;
+  const term = {
+    VERSION: 4,
+    buffer: { active: { cursorX: 0 } },
+    cols: 80,
+    currentLine: "",
+    focus: vi.fn(),
+    history: [],
+    historyCursor: -1,
+    loadAddon: vi.fn(),
+    open: vi.fn(),
+    reset: vi.fn(() => {
+      cursorX = 0;
+      term.buffer.active.cursorX = 0;
+    }),
+    scrollToBottom: vi.fn(),
+    write: vi.fn((output) => {
+      for (const token of String(output).matchAll(/\x1b\[([\d;]*)([A-Za-z])|([\s\S])/g)) {
+        if (token[2] === "C") cursorX += Number(token[1] || 1);
+        else if (token[2] === "D") cursorX = Math.max(0, cursorX - Number(token[1] || 1));
+        else if (token[3] === "\r" || token[3] === "\n") cursorX = 0;
+        else if (token[3]) cursorX += 1;
+      }
+      term.buffer.active.cursorX = cursorX;
+    }),
+    writeln: vi.fn((output = "") => {
+      term.write(output);
+      cursorX = 0;
+      term.buffer.active.cursorX = 0;
+    }),
+  };
+  term.attachCustomKeyEventHandler = vi.fn((handler) => {
+    term._customKeyHandler = handler;
+  });
+  term.onData = vi.fn((handler) => {
+    term._onData = handler;
+    return { dispose: vi.fn() };
+  });
+
+  env = createBrowserEnv({
+    globals: {
+      LOGO_TYPE: "ROOT",
+      _DIRS: { "~": [] },
+      buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
+      colorText: (text) => text,
+      ensureASCIIArt: vi.fn(() => Promise.resolve()),
+      ensureFileLoaded: vi.fn(() => Promise.resolve()),
+      firm: { blurb: "", email: "hello@example.com" },
+      fitAddon: { fit: vi.fn() },
+      getASCIIArtIdForCommand: vi.fn(() => null),
+      getArt: vi.fn(() => ""),
+      getPreloadFileForCommand: vi.fn(() => null),
+      help: {},
+      jobs: {},
+      portfolio: {},
+      preloadASCIIArt: vi.fn(() => Promise.resolve()),
+      scheduleIdleTask: vi.fn((task) => task()),
+      team: {},
+      term,
+    },
+  });
+  env.loadScripts([
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+    "js/terminal.js",
+  ]);
+  const { extend, runRootTerminal } = env.exportValues(["extend", "runRootTerminal"]);
+  extend(term);
+  return { runRootTerminal, term };
+}
+
 function createTerm(overrides = {}) {
   const term = {
     _initialized: false,
@@ -501,6 +574,39 @@ describe("runRootTerminal", () => {
     expect(term.tabIndex).toBe(0);
     expect(term.tabOptions).toEqual([]);
     expect(term.scrollToBottom).toHaveBeenCalled();
+  });
+
+  it("recalls and edits an expanded command through the production keyboard handlers", async () => {
+    const { runRootTerminal, term } = loadIntegratedTerminal();
+    runRootTerminal(term);
+    term.write.mockClear();
+    term.writeln.mockClear();
+
+    const submit = async (line) => {
+      for (const character of line) term._onData(character);
+      term._onData("\r");
+      await vi.waitFor(() => expect(term.busy).toBe(false));
+    };
+
+    await submit("echo a");
+    await submit("!!");
+    expect(term.history).toEqual(["echo a", "echo a"]);
+
+    term._onData("\x1b[A");
+    expect(term.currentLine).toBe("echo a");
+    expect(term.pos()).toBe(6);
+
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "a" }));
+    expect(term.pos()).toBe(0);
+    term._customKeyHandler(keyEvent({ ctrlKey: true, key: "e" }));
+    expect(term.pos()).toBe(6);
+    term._onData("x");
+    term._onData("\r");
+    await vi.waitFor(() => expect(term.busy).toBe(false));
+
+    expect(term.history).toEqual(["echo a", "echo a", "echo ax"]);
+    expect(term.writeln).toHaveBeenCalledWith("echo a");
+    expect(term.writeln).toHaveBeenCalledWith("ax");
   });
 
   it("retains bounded input-history navigation after environment commands", () => {

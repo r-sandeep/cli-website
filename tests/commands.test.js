@@ -133,6 +133,7 @@ function loadCommands({
   storage = createMemoryStorage(),
   help = {},
   portfolio = {},
+  cols = 100,
 } = {}) {
   const aliases = new Map();
   const location = {
@@ -152,7 +153,7 @@ function loadCommands({
     prompt: vi.fn(),
     clearCurrentLine: vi.fn(),
     collectInput: vi.fn(),
-    cols: 100,
+    cols,
     defineAlias: vi.fn((name, value) => {
       aliases.set(name, value);
       return true;
@@ -962,6 +963,53 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
+  });
+
+  it.each([80, 40])(
+    "renders every history expansion form through production help at %d columns",
+    (cols) => {
+      const { commands, term } = loadCommands({
+        help: helpContext.helpEntries,
+        cols,
+      });
+
+      commands.help([]);
+
+      const styled = term.stylePrint.mock.calls.map(([line]) => line).join("\n");
+      const expected = {
+        "  !!": "run the most recent history entry",
+        "  !N": "run history entry N (numbering starts at 1000)",
+        "  !-N": "run the Nth most recent history entry",
+        "  !PREFIX": "run the most recent entry that starts with PREFIX",
+        "  ^OLD^NEW": "replace the first OLD in the most recent entry with NEW and run it",
+      };
+
+      expect(styled).toContain("HISTORY EXPANSION");
+      for (const [syntax, description] of Object.entries(expected)) {
+        expect(helpContext.helpEntries[syntax]).toBe(description);
+        expect(styled).toContain(syntax);
+        expect(styled).toContain(description);
+      }
+      expect(styled).toContain("%help%");
+      expect(styled).toContain("PIPELINES");
+      if (cols === 40) expect(term.writeln).toHaveBeenCalledWith("");
+    }
+  );
+
+  it("documents executable examples, numbering, single-pass order, and failures in README", () => {
+    const readme = readFileSync("README.md", "utf8");
+
+    expect(readme).toContain("## History expansion");
+    expect(readme).toContain("The `history` listing starts at 1000");
+    expect(readme).toContain("echo old\n!!\n^old^new");
+    expect(readme).toContain("`!-1` is the same as `!!`");
+    expect(readme).toContain("`!PREFIX` runs the most recent entry");
+    expect(readme).toContain("Expansion is single-pass");
+    expect(readme).toContain("before aliases, variables, and pipelines");
+    expect(readme).toContain("text\ninserted from those sources or from history is not expanded again");
+    expect(readme).toContain("`!EVENT: event not found`");
+    expect(readme).toContain("`substitution failed`");
+    expect(readme).toContain("Either failure runs nothing and\nadds nothing to history");
   });
 
   it("renders the environment commands and complete expansion grammar", () => {
