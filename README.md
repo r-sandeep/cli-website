@@ -32,6 +32,30 @@ The terminal supports persistent named bookmarks for quick directory navigation:
 `NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
 browser storage, with a maximum of 25 saved bookmarks.
 
+## History expansion
+
+Reuse commands before they are executed with bash-style history expansion:
+
+- `!!` runs the previous history entry.
+- `!N` runs numbered entry N from `history`, whose first entry is numbered 1000.
+- `!-N` runs the Nth most recent entry.
+- `!PREFIX` runs the newest entry that starts with PREFIX.
+- `^OLD^NEW` reruns the previous entry after replacing the first OLD with NEW.
+
+For example, the terminal prints the expanded command on its own row before its
+result:
+
+```
+guest:rootpc ~ $ echo a
+a
+guest:rootpc ~ $ !!
+echo a
+a
+```
+
+The expanded `echo a`, rather than the typed `!!`, becomes the new history
+entry and is recalled by ArrowUp.
+
 ## Output pipelines
 
 Pipe the output of any terminal command through one or more filters with

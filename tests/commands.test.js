@@ -964,6 +964,43 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
   });
 
+  it("renders every history expansion form with a single-line description", () => {
+    const expected = {
+      "  !!": "run the previous history entry",
+      "  !N": "run history entry N (numbering starts at 1000)",
+      "  !-N": "run the Nth most recent history entry",
+      "  !PREFIX": "run the newest history entry starting with PREFIX",
+      "  ^OLD^NEW": "rerun the previous entry with its first OLD replaced by NEW",
+    };
+
+    expect(helpContext.helpEntries).toMatchObject(expected);
+    Object.values(expected).forEach((description) => {
+      expect(description).not.toMatch(/[\r\n]/);
+    });
+
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+    commands.help([]);
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    Object.entries(expected).forEach(([form, description]) => {
+      expect(output.some((line) => line.includes(form) && line.includes(description))).toBe(true);
+    });
+  });
+
+  it("documents history numbering and the visible expansion result in README", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const section = readme.match(/## History expansion\n([\s\S]*?)(?=\n## )/)?.[1];
+
+    expect(section).toBeDefined();
+    expect(section).toContain("`!!`");
+    expect(section).toContain("`!N`");
+    expect(section).toContain("`!-N`");
+    expect(section).toContain("`!PREFIX`");
+    expect(section).toContain("`^OLD^NEW`");
+    expect(section).toContain("first entry is numbered 1000");
+    expect(section).toContain("guest:rootpc ~ $ echo a\na\nguest:rootpc ~ $ !!\necho a\na");
+    expect(section).toMatch(/rather than the typed `!!`, becomes the new history\s+entry/);
+  });
+
   it("renders the environment commands and complete expansion grammar", () => {
     const { commands, term } = loadCommands({ help: helpContext.helpEntries });
 
