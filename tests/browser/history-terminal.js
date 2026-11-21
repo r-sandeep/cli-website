@@ -11,6 +11,9 @@
     dispatchPending: "PASS: pending native writes did not block pong, pipeline result, pipeline error, exact history, or the next prompt",
     dispatchOrder: "PASS: committed archive equals the complete submission sequence once in order; failures retained complete live history",
     dispatchReset: "PASS: late completion did not restore cleared live history; fresh visit restored the complete committed archive",
+    resizeOnce: "PASS: resize during original execution caused one alias write, one saved submission, one command event, and one subsequent alias result",
+    resizeCleanup: "PASS: root README fetch success and failure each produced one result; repeated resize races released execution ownership and next ping printed pong",
+    resizePreserved: "PASS: idle redraw, height-only resize, and active TUI retained behavior; real apply kept pending input, cancelled once, and next ping printed pong",
   };
 
   const assert = (condition, message) => {
@@ -73,16 +76,18 @@
     await settle(term, outputBefore);
   }
 
-  async function boot(storeFactory = productionHistoryStore) {
+  async function boot(storeFactory = productionHistoryStore, { useFileSystem = false } = {}) {
     const originalFactory = window.createCommandHistoryStore;
     window.createCommandHistoryStore = storeFactory;
     window.colorText = (text) => text;
     window.ensureASCIIArt = async () => {};
-    window.ensureFileLoaded = async () => {};
+    if (!useFileSystem) {
+      window.ensureFileLoaded = async () => {};
+      window.getPreloadFileForCommand = () => null;
+    }
     window.fitAddon = { fit() {} };
     window.getASCIIArtIdForCommand = () => null;
     window.getArt = () => "";
-    window.getPreloadFileForCommand = () => null;
     window.preloadASCIIArt = async () => {};
     window.scheduleIdleTask = () => {};
     window.dataLayer = [];
@@ -314,6 +319,125 @@
     document.querySelector("#dispatch-reset").textContent = PASS.dispatchReset;
   }
 
+  async function executionResize() {
+    const databaseName = "history-terminal-execution-resize";
+    const factory = () => productionHistoryStore({ databaseName });
+    const term = await boot(factory);
+    const blocker = await holdHistoryWrites(databaseName);
+    const aliasWrites = [];
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "rootvc.aliases") aliasWrites.push(value);
+      return originalSetItem.call(this, key, value);
+    };
+    try {
+      localStorage.removeItem("rootvc.aliases");
+      const outputBefore = term.output.join("");
+      for (const character of "alias race=echo race_ok") term.emit(character);
+      term.emit("\r");
+      let nextCols = 70;
+      window.fitAddon.fit = () => { term.cols = nextCols; nextCols -= 10; };
+      await term.resizeListener();
+      await term.resizeListener();
+      await settle(term, outputBefore);
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
+
+    assert(aliasWrites.length === 1, `alias persisted ${aliasWrites.length} times`);
+    assert(aliasWrites[0] === JSON.stringify([["race", "echo race_ok"]]), "alias snapshot changed");
+    assert(term.history.filter((line) => line === "alias race=echo race_ok").length === 1, "alias submission saved more than once");
+    assert(window.dataLayer.filter((event) => event.event === "commandSent" && event.command === "alias").length === 1, "alias command event count changed");
+    await submit(term, "alias race");
+    assert(term.output.join("").includes("race=echo race_ok"), "alias query changed");
+    const raceOutputBefore = term.output.join("");
+    await submit(term, "race");
+    assert(term.output.join("").slice(raceOutputBefore.length).split("race_ok").length - 1 === 1, "alias invocation result was not rendered once");
+    blocker.release();
+    await blocker.complete;
+    await waitForHistory(factory, ["alias race=echo race_ok", "alias race", "race"], "resize alias archive changed");
+    document.querySelector("#resize-once").textContent = PASS.resizeOnce;
+  }
+
+  const occurrences = (text, value) => text.split(value).length - 1;
+
+  async function runReadmeResizeCase(mode) {
+    document.getElementById("README.md")?.remove();
+    let settleFetch;
+    window.fetch = () => new Promise((resolve, reject) => {
+      settleFetch = mode === "success"
+        ? () => resolve({ text: async () => "RESIZE_README_RESULT" })
+        : () => reject(new Error("fixture fetch failed"));
+    });
+    const term = await boot(productionHistoryStore, { useFileSystem: true });
+    await submit(term, "su root");
+    const outputBefore = term.output.join("");
+    for (const character of "cat README.md") term.emit(character);
+    term.emit("\r");
+    await waitFor(() => typeof settleFetch === "function", `${mode} README fetch did not start`);
+    const promptsBeforeResize = occurrences(term.output.join(""), "guest:rootpc") + occurrences(term.output.join(""), "root:rootpc");
+    window.fitAddon.fit = () => { term.cols -= 10; };
+    await term.resizeListener();
+    await term.resizeListener();
+    assert(occurrences(term.output.join(""), "guest:rootpc") + occurrences(term.output.join(""), "root:rootpc") === promptsBeforeResize, `${mode} resize emitted a premature prompt`);
+    settleFetch();
+    await settle(term, outputBefore);
+    const rendered = term.output.join("");
+    const expected = mode === "success"
+      ? "RESIZE_README_RESULT"
+      : "Command failed to load required assets. Please try again.";
+    assert(occurrences(rendered, expected) === 1, `${mode} README result count changed`);
+    await submit(term, "ping");
+    assert(term.output.join("").includes("pong"), `${mode} execution guard blocked next ping`);
+    assert(term.history.filter((line) => line === "cat README.md").length === 1, `${mode} cat saved more than once`);
+  }
+
+  async function resizeCleanup() {
+    await runReadmeResizeCase("success");
+    await runReadmeResizeCase("failure");
+    document.querySelector("#resize-cleanup").textContent = PASS.resizeCleanup;
+  }
+
+  async function resizePreserved() {
+    const term = await boot();
+    await submit(term, "echo idle_resize_marker");
+    const historyBefore = term.history.slice();
+    const eventsBefore = window.dataLayer.slice();
+    window.fitAddon.fit = () => { term.cols = 60; };
+    await term.resizeListener();
+    assertArray(term.history, historyBefore, "idle redraw appended history");
+    assertArray(window.dataLayer, eventsBefore, "idle redraw emitted analytics");
+    assert(term.output.join("").includes("idle_resize_marker"), "idle redraw stopped replaying output");
+
+    const outputBeforeHeight = term.output.join("");
+    window.fitAddon.fit = () => {};
+    await term.resizeListener();
+    assert(term.output.join("") === outputBeforeHeight, "height-only resize reset output");
+
+    window.rootTui = { active: true };
+    const outputBeforeTui = term.output.join("");
+    window.fitAddon.fit = () => { term.cols = 50; };
+    await term.resizeListener();
+    assert(term.output.join("") === outputBeforeTui, "active TUI resize reset CLI");
+    window.rootTui = null;
+
+    const outputBeforeApply = term.output.join("");
+    for (const character of "apply 1") term.emit(character);
+    term.emit("\r");
+    await waitFor(() => term.activeInput?.label.includes("What's your name?"), "apply did not reach name input");
+    for (const character of "Jane") term.emit(character);
+    window.fitAddon.fit = () => { term.cols = 40; };
+    await term.resizeListener();
+    assert(term.activeInput?.buffer === "Jane", "resize lost pending form input");
+    assert(term.output.join("").includes("What's your name?"), "resize lost form question");
+    term.emit("\u0003");
+    await settle(term, outputBeforeApply);
+    assert(occurrences(term.output.join(""), "Application cancelled.") === 1, "apply cancellation output count changed");
+    await submit(term, "ping");
+    assert(term.output.join("").includes("pong"), "cancelled apply retained execution ownership");
+    document.querySelector("#resize-preserved").textContent = PASS.resizePreserved;
+  }
+
   document.querySelector("#run-terminal-cases").addEventListener("click", async () => {
     try {
       await unavailable();
@@ -334,6 +458,19 @@
       await pendingReset();
     } catch (error) {
       for (const element of document.querySelectorAll("[id^=dispatch-]")) {
+        if (element.textContent === "PENDING") element.textContent = `FAIL: ${error.message}`;
+      }
+      throw error;
+    }
+  });
+
+  document.querySelector("#run-resize-cases").addEventListener("click", async () => {
+    try {
+      await executionResize();
+      await resizeCleanup();
+      await resizePreserved();
+    } catch (error) {
+      for (const element of document.querySelectorAll("[id^=resize-]")) {
         if (element.textContent === "PENDING") element.textContent = `FAIL: ${error.message}`;
       }
       throw error;
