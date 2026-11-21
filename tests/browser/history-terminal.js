@@ -2,6 +2,8 @@
   "use strict";
 
   const productionHistoryStore = createCommandHistoryStore;
+  const productionEnsureFileLoaded = ensureFileLoaded;
+  const productionGetPreloadFileForCommand = getPreloadFileForCommand;
 
   const PASS = {
     unavailable: "PASS: denied getter and failed open booted; complete memory history recalled and listed; next ping printed pong",
@@ -81,7 +83,10 @@
     window.createCommandHistoryStore = storeFactory;
     window.colorText = (text) => text;
     window.ensureASCIIArt = async () => {};
-    if (!useFileSystem) {
+    if (useFileSystem) {
+      window.ensureFileLoaded = productionEnsureFileLoaded;
+      window.getPreloadFileForCommand = productionGetPreloadFileForCommand;
+    } else {
       window.ensureFileLoaded = async () => {};
       window.getPreloadFileForCommand = () => null;
     }
@@ -372,6 +377,7 @@
     });
     const term = await boot(productionHistoryStore, { useFileSystem: true });
     await submit(term, "su root");
+    const catCountBefore = term.history.filter((line) => line === "cat README.md").length;
     const outputBefore = term.output.join("");
     for (const character of "cat README.md") term.emit(character);
     term.emit("\r");
@@ -390,7 +396,10 @@
     assert(occurrences(rendered, expected) === 1, `${mode} README result count changed`);
     await submit(term, "ping");
     assert(term.output.join("").includes("pong"), `${mode} execution guard blocked next ping`);
-    assert(term.history.filter((line) => line === "cat README.md").length === 1, `${mode} cat saved more than once`);
+    assert(
+      term.history.filter((line) => line === "cat README.md").length === catCountBefore + 1,
+      `${mode} cat submission was not saved exactly once`,
+    );
   }
 
   async function resizeCleanup() {
