@@ -376,11 +376,11 @@
     for (const character of "cat README.md") term.emit(character);
     term.emit("\r");
     await waitFor(() => typeof settleFetch === "function", `${mode} README fetch did not start`);
-    const promptsBeforeResize = occurrences(term.output.join(""), "guest:rootpc") + occurrences(term.output.join(""), "root:rootpc");
+    assert(term.busy, `${mode} README execution did not retain busy ownership`);
     window.fitAddon.fit = () => { term.cols -= 10; };
     await term.resizeListener();
     await term.resizeListener();
-    assert(occurrences(term.output.join(""), "guest:rootpc") + occurrences(term.output.join(""), "root:rootpc") === promptsBeforeResize, `${mode} resize emitted a premature prompt`);
+    assert(term.busy, `${mode} resize released execution before fetch settled`);
     settleFetch();
     await settle(term, outputBefore);
     const rendered = term.output.join("");
