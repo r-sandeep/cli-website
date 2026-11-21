@@ -85,34 +85,23 @@
     return term;
   }
 
-  const unavailableStatus = (stage) => {
-    document.querySelector("#terminal-unavailable").textContent = `RUNNING: ${stage}`;
-  };
-
   async function unavailable() {
     const throwingFactory = () => {
       const options = {};
       Object.defineProperty(options, "indexedDB", { get() { throw new Error("denied"); } });
       return productionHistoryStore(options);
     };
-    let caseIndex = 0;
     for (const factory of [
       throwingFactory,
       () => productionHistoryStore({ indexedDB: { open() { const request = {}; queueMicrotask(() => request.onerror?.({ preventDefault() {} })); return request; } } }),
     ]) {
-      caseIndex += 1;
-      unavailableStatus(`boot ${caseIndex}`);
       const term = await boot(factory);
-      unavailableStatus(`submit echo one ${caseIndex}`);
       await submit(term, "echo one");
-      unavailableStatus(`submit echo two ${caseIndex}`);
       await submit(term, "echo two");
-      term.emit("\033[A");
+      term.emit("\x1b[A");
       assert(term.currentLine === "echo two", "memory recall lost latest command");
-      term.emit("\033[B");
-      unavailableStatus(`submit history ${caseIndex}`);
+      term.emit("\x1b[B");
       await submit(term, "history");
-      unavailableStatus(`submit ping ${caseIndex}`);
       await submit(term, "ping");
       assert(term.output.join("").includes("1000  echo one"), "memory history output incomplete");
       assert(term.output.join("").includes("pong"), "terminal unusable after storage failure");
@@ -159,7 +148,7 @@
     const expected = commands.slice(-200);
     assertArray(term.history, expected, "active history was not capped at 200");
     term.historyCursor = -1;
-    term.emit("\033[A");
+    term.emit("\x1b[A");
     assert(term.currentLine === expected[199], "ArrowUp did not recall latest capped command");
     const restored = await boot(factory);
     assertArray(restored.history, expected, "fresh restoration differs from active latest 200");
@@ -203,7 +192,6 @@
     document.querySelector("#terminal-isolation").textContent = PASS.isolation;
   }
 
-  document.querySelector("#terminal-unavailable").textContent = "READY";
   document.querySelector("#run-terminal-cases").addEventListener("click", async () => {
     try {
       await unavailable();
