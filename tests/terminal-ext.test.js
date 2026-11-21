@@ -105,6 +105,93 @@ afterEach(() => {
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
 
+  it("keeps standalone and pipeline dispatch independent of pending history writes", async () => {
+    let releaseAppend;
+    const pendingAppend = new Promise((resolve) => { releaseAppend = resolve; });
+    const append = vi.fn(() => pendingAppend);
+    let term;
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => [], append }),
+      commands: {
+        echo: (args) => term.writeln(args.join(" ")),
+        history: () => term.history.forEach((line, index) => term.writeln(`${1000 + index}  ${line}`)),
+        ping: () => term.writeln("pong"),
+      },
+    });
+    term = createTerm();
+    extend(term);
+    await term.historyReady;
+    term.preloadCommandAssets = vi.fn(async () => {});
+
+    await term.executeCommandLine("ping");
+    expect(term.writeln).toHaveBeenCalledWith("pong");
+    await term.executeCommandLine("echo branch_marker | wc -l");
+    expect(term.writeln).toHaveBeenCalledWith("1");
+    const stylePrint = vi.spyOn(term, "stylePrint");
+    await term.executeCommandLine("echo bad_marker | head 0");
+    expect(stylePrint).toHaveBeenCalledWith("head: count must be a positive base-10 integer");
+    await term.executeCommandLine("history");
+
+    expect(term.history).toEqual([
+      "ping",
+      "echo branch_marker | wc -l",
+      "echo bad_marker | head 0",
+      "history",
+    ]);
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual(expect.arrayContaining([
+      "1000  ping",
+      "1001  echo branch_marker | wc -l",
+      "1002  echo bad_marker | head 0",
+      "1003  history",
+    ]));
+    expect(append.mock.calls.map(([line]) => line)).toEqual(term.history);
+    expect(term.busy).toBe(false);
+    releaseAppend();
+  });
+
+  it.each(["reject", "throw"])("retains complete live history when append %ss", async (mode) => {
+    const append = mode === "throw"
+      ? vi.fn(() => { throw new Error("storage unavailable"); })
+      : vi.fn(() => Promise.reject(new Error("storage unavailable")));
+    const ping = vi.fn();
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => ["restored"], append }),
+      commands: { ping },
+    });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+
+    await expect(term.executeCommandLine("ping")).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(ping).toHaveBeenCalledOnce();
+    expect(append).toHaveBeenCalledOnce();
+    expect(term.history).toEqual(["restored", "ping"]);
+    expect(term.currentVisitHistory).toEqual(["ping"]);
+    expect(term.busy).toBe(false);
+  });
+
+  it("does not restore cleared live history when an earlier append settles late", async () => {
+    let releaseAppend;
+    const pendingAppend = new Promise((resolve) => { releaseAppend = resolve; });
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => ["restored"], append: () => pendingAppend }),
+      commands: { clear: () => term.init() },
+    });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+
+    await term.executeCommandLine("clear");
+    expect(term.history).toEqual([]);
+    expect(term.currentVisitHistory).toEqual([]);
+    releaseAppend();
+    await pendingAppend;
+    await Promise.resolve();
+    expect(term.history).toEqual([]);
+    expect(term.currentVisitHistory).toEqual([]);
+  });
+
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();

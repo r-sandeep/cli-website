@@ -59,16 +59,19 @@ const extend = (term) => {
     typeof createCommandHistoryStore === "function"
       ? createCommandHistoryStore()
       : { load: async () => [], append: async () => null };
+  let historyHydrated = false;
   term.historyReady = Promise.resolve()
     .then(() => historyStore.load())
     .then((entries) => {
       term.history = Array.isArray(entries) ? entries.slice(-historyLimit) : [];
       term.historyCursor = -1;
+      historyHydrated = true;
       return term.history.slice();
     })
     .catch(() => {
       term.history = [];
       term.historyCursor = -1;
+      historyHydrated = true;
       return [];
     });
 
@@ -82,7 +85,8 @@ const extend = (term) => {
     // authoritative for this visit whether append throws, rejects, or settles
     // after an explicit terminal reset.
     try {
-      Promise.resolve(historyStore.append(line)).catch(() => {});
+      const pending = historyStore.append(line);
+      if (pending && typeof pending.catch === "function") pending.catch(() => {});
     } catch (_error) {
       // The live arrays are authoritative for this visit when storage fails.
     }
@@ -691,7 +695,7 @@ const extend = (term) => {
       }
 
       if (settings.addToHistory && parsed.line.length > 0) {
-        await term.historyReady;
+        if (!historyHydrated) await term.historyReady;
         recordSubmission(parsed.line);
       }
 
@@ -760,27 +764,38 @@ const extend = (term) => {
         // expanded values stay opaque data instead of being parsed or expanded
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
-        await term.preloadCommandAssets(prepared.cmd, prepared.args);
+        const preload = term.preloadCommandAssets(prepared.cmd, prepared.args);
 
-        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-          term.writeln("");
-        }
-
-        if (parsed.line.length > 0) {
-          // Commands may own an interactive continuation. Await its final
-          // status so standalone prompt cleanup observes the same lifecycle as
-          // a piped producer.
-          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
-
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
+        const dispatchPrepared = async () => {
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
           }
-        }
+
+          if (parsed.line.length > 0) {
+            // Commands may own an interactive continuation. Await its final
+            // status so standalone prompt cleanup observes the same lifecycle as
+            // a piped producer.
+            const status = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+
+            if (settings.trackAnalytics) {
+              window.dataLayer = window.dataLayer || [];
+              window.dataLayer.push({
+                event: "commandSent",
+                command: parsed.cmd,
+                args: parsed.args.join(" "),
+              });
+            }
+            return status;
+          }
+          return undefined;
+        };
+
+        // Dispatch from the preload settlement callback so a ready preload has
+        // no extra scheduling turn, while unresolved asset work still remains a
+        // strict prerequisite for command execution.
+        exitStatus = preload && typeof preload.then === "function"
+          ? await preload.then(dispatchPrepared)
+          : await dispatchPrepared();
       }
     } catch (error) {
       console.error("Command preparation failed", error);
@@ -828,6 +843,10 @@ const extend = (term) => {
       term.scrollToBottom();
       return;
     }
+    // A width change may arrive after live recording but before the original
+    // dispatch has finished. Fit immediately, but leave the live execution in
+    // sole ownership of output and cleanup rather than replaying it.
+    if (term.busy) return;
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
