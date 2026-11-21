@@ -4,6 +4,8 @@
     concurrency: "PASS: both writers retained once in transaction order; reopened length 200",
     invalid: "PASS: each invalid record ignored without overwrite; valid overlength record trimmed",
     failures: "PASS: getter, open, blocked, quota, and abort failures settled; prior snapshot and unrelated data unchanged",
+    sparseValidation: "PASS: every sparse slot case rejected before trimming; dense string-array controls retained exact values",
+    sparsePreservation: "PASS: native load and direct append preserved every sparse slot and unrelated record without retrying persistence",
   };
 
   function assert(condition, message) {
@@ -11,6 +13,19 @@
   }
   function assertArray(actual, expected, message) {
     assert(JSON.stringify(actual) === JSON.stringify(expected), message);
+  }
+  function assertSparseArray(actual, expected, message) {
+    assert(actual.length === expected.length, `${message}: length changed`);
+    for (let index = 0; index < expected.length; index += 1) {
+      assert(
+        Object.prototype.hasOwnProperty.call(actual, index) ===
+          Object.prototype.hasOwnProperty.call(expected, index),
+        `${message}: slot ${index} topology changed`,
+      );
+      if (Object.prototype.hasOwnProperty.call(expected, index)) {
+        assert(actual[index] === expected[index], `${message}: slot ${index} value changed`);
+      }
+    }
   }
   function deleteDatabase(name) {
     return new Promise((resolve, reject) => {
@@ -163,6 +178,63 @@
     assertArray((await readRecord(abortCase.name)).entries, abortCase.expected, "abort snapshot changed later");
     document.querySelector("#store-failures").textContent = results.failures;
   }
+
+  async function sparseCases() {
+    const denseControls = [
+      [],
+      ["duplicate", "duplicate", "echo café 🚀"],
+      Array.from({ length: 201 }, (_, index) => `dense-${index}`),
+    ];
+    for (const entries of denseControls) {
+      assertArray(
+        normalizeCommandHistoryRecord({ id: "history", version: 1, entries }),
+        entries.slice(-200),
+        "dense control changed",
+      );
+    }
+
+    for (const [length, missing] of [[3, 0], [3, 1], [3, 2], [201, 0]]) {
+      const entries = Array.from({ length }, (_, index) => `sparse-${index}`);
+      delete entries[missing];
+      assert(
+        normalizeCommandHistoryRecord({ id: "history", version: 1, entries }) === null,
+        `sparse slot ${missing} of ${length} accepted`,
+      );
+    }
+    document.querySelector("#sparse-validation").textContent = results.sparseValidation;
+
+    for (const operation of ["load", "append"]) {
+      const name = `history-sparse-${operation}`;
+      await deleteDatabase(name);
+      const entries = Array.from({ length: 201 }, (_, index) => `stored-${index}`);
+      delete entries[0];
+      await writeRecord(name, { id: "history", version: 1, entries });
+      await writeRecord(name, { id: "unrelated", version: 1, entries: ["keep-me"] });
+      const store = createCommandHistoryStore({ databaseName: name });
+      if (operation === "load") {
+        assertArray(await store.load(), [], "sparse load did not fall back");
+        assert((await store.append("must-not-retry")) === null, "sparse load retried persistence");
+      } else {
+        assert((await store.append("must-not-overwrite")) === null, "direct sparse append succeeded");
+        assert((await store.append("must-not-retry")) === null, "direct sparse append retried persistence");
+      }
+      const stored = await readRecord(name);
+      assertSparseArray(stored.entries, entries, `${operation} sparse record changed`);
+      assertArray((await readRecord(name, "unrelated")).entries, ["keep-me"], `${operation} unrelated record changed`);
+    }
+    document.querySelector("#sparse-preservation").textContent = results.sparsePreservation;
+  }
+
+  document.querySelector("#run-sparse-cases").addEventListener("click", async () => {
+    try {
+      await sparseCases();
+    } catch (error) {
+      for (const element of document.querySelectorAll("[id^=sparse-]")) {
+        if (element.textContent === "PENDING") element.textContent = `FAIL: ${error.stack || error}`;
+      }
+      throw error;
+    }
+  });
 
   document.querySelector("#run-store-cases").addEventListener("click", async () => {
     try {

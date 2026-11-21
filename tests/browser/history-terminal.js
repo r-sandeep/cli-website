@@ -16,6 +16,7 @@
     resizeOnce: "PASS: resize during original execution caused one alias write, one saved submission, one command event, and one subsequent alias result",
     resizeCleanup: "PASS: root README fetch success and failure each produced one result; repeated resize races released execution ownership and next ping printed pong",
     resizePreserved: "PASS: idle redraw, height-only resize, and active TUI retained behavior; real apply kept pending input, cancelled once, and next ping printed pong",
+    sparseTerminal: "PASS: sparse archive preserved; production terminal printed pong, then exactly 1000  ping and 1001  history, and a fresh usable prompt",
   };
 
   const assert = (condition, message) => {
@@ -224,6 +225,29 @@
       request.onerror = () => reject(request.error || new Error("raw database open failed"));
       request.onsuccess = () => resolve(request.result);
     });
+  }
+
+  async function writeRawRecord(databaseName, record) {
+    const database = await openRawDatabase(databaseName);
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction("snapshots", "readwrite");
+      transaction.objectStore("snapshots").put(record);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error("raw record write failed"));
+      transaction.onabort = () => reject(transaction.error || new Error("raw record write aborted"));
+    });
+    database.close();
+  }
+
+  async function readRawRecord(databaseName, id = "history") {
+    const database = await openRawDatabase(databaseName);
+    const record = await new Promise((resolve, reject) => {
+      const request = database.transaction("snapshots", "readonly").objectStore("snapshots").get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("raw record read failed"));
+    });
+    database.close();
+    return record;
   }
 
   async function holdHistoryWrites(databaseName) {
@@ -447,6 +471,58 @@
     assert(term.output.join("").includes("pong"), "cancelled apply retained execution ownership");
     document.querySelector("#resize-preserved").textContent = PASS.resizePreserved;
   }
+
+  async function sparseTerminal() {
+    const databaseName = "history-terminal-sparse";
+    const entries = ["stored-first", "stored-middle", "stored-last"];
+    delete entries[1];
+    await writeRawRecord(databaseName, { id: "history", version: 1, entries });
+    await writeRawRecord(databaseName, { id: "unrelated", version: 1, entries: ["keep-me"] });
+
+    const factory = () => productionHistoryStore({ databaseName });
+    const term = await boot(factory);
+    assertArray(term.history, [], "sparse archive hydrated into live history");
+
+    const pingStart = term.output.length;
+    await submit(term, "ping");
+    const pingOutput = term.output.slice(pingStart).join("");
+    assert(occurrences(pingOutput, "pong\r\n") === 1, "sparse fallback ping output changed");
+    assert(pingOutput.endsWith("guest:rootpc ~ $ "), "sparse fallback ping omitted fresh prompt");
+
+    const historyStart = term.output.length;
+    await submit(term, "history");
+    const historyOutput = term.output.slice(historyStart).join("");
+    assert(occurrences(historyOutput, "1000  ping\r\n") === 1, "sparse fallback history omitted or duplicated ping");
+    assert(occurrences(historyOutput, "1001  history\r\n") === 1, "sparse fallback history omitted or duplicated itself");
+    assert(!historyOutput.includes("stored-first") && !historyOutput.includes("stored-last"), "sparse archive leaked into listing");
+    assert(historyOutput.endsWith("guest:rootpc ~ $ "), "sparse fallback history omitted fresh prompt");
+    assertArray(term.history, ["ping", "history"], "sparse fallback live history changed");
+    assert(term.busy === false && term.locked === false, "sparse fallback terminal remained unavailable");
+
+    const stored = await readRawRecord(databaseName);
+    assert(stored.entries.length === entries.length, "sparse archive length changed");
+    for (let index = 0; index < entries.length; index += 1) {
+      assert(
+        Object.prototype.hasOwnProperty.call(stored.entries, index) ===
+          Object.prototype.hasOwnProperty.call(entries, index),
+        `sparse archive slot ${index} topology changed`,
+      );
+      if (Object.prototype.hasOwnProperty.call(entries, index)) {
+        assert(stored.entries[index] === entries[index], `sparse archive slot ${index} value changed`);
+      }
+    }
+    assertArray((await readRawRecord(databaseName, "unrelated")).entries, ["keep-me"], "sparse terminal changed unrelated record");
+    document.querySelector("#sparse-terminal").textContent = PASS.sparseTerminal;
+  }
+
+  document.querySelector("#run-sparse-terminal-cases").addEventListener("click", async () => {
+    try {
+      await sparseTerminal();
+    } catch (error) {
+      document.querySelector("#sparse-terminal").textContent = `FAIL: ${error.message}`;
+      throw error;
+    }
+  });
 
   document.querySelector("#run-terminal-cases").addEventListener("click", async () => {
     try {

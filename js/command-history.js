@@ -8,9 +8,14 @@ function normalizeCommandHistoryRecord(record) {
     !record ||
     record.id !== "history" ||
     record.version !== COMMAND_HISTORY_RECORD_VERSION ||
-    !Array.isArray(record.entries) ||
-    !record.entries.every((entry) => typeof entry === "string")
+    !Array.isArray(record.entries)
   ) return null;
+  for (let index = 0; index < record.entries.length; index += 1) {
+    if (
+      !Object.prototype.hasOwnProperty.call(record.entries, index) ||
+      typeof record.entries[index] !== "string"
+    ) return null;
+  }
   return record.entries.slice(-COMMAND_HISTORY_LIMIT);
 }
 

@@ -28,6 +28,38 @@ describe("command history record validation", () => {
       .toEqual(entries.slice(1));
   });
 
+  it("accepts dense empty, duplicate, Unicode, and overlength string arrays", () => {
+    const { normalizeCommandHistoryRecord } = loadFactory();
+    expect(normalizeCommandHistoryRecord({ id: "history", version: 1, entries: [] }))
+      .toEqual([]);
+    const dense = ["duplicate", "duplicate", "echo café 🚀"];
+    expect(normalizeCommandHistoryRecord({ id: "history", version: 1, entries: dense }))
+      .toEqual(dense);
+  });
+
+  it.each([
+    { length: 3, missing: 0, label: "first" },
+    { length: 3, missing: 1, label: "middle" },
+    { length: 3, missing: 2, label: "last" },
+    { length: 201, missing: 0, label: "evicted prefix" },
+  ])("rejects a missing own $label slot before trimming", ({ length, missing }) => {
+    const { normalizeCommandHistoryRecord } = loadFactory();
+    const entries = Array.from({ length }, (_, index) => `command-${index}`);
+    delete entries[missing];
+    expect(normalizeCommandHistoryRecord({ id: "history", version: 1, entries }))
+      .toBeNull();
+  });
+
+  it("rejects a sparse slot even when an inherited string shadows it", () => {
+    const { normalizeCommandHistoryRecord } = loadFactory();
+    const entries = ["first", "second", "third"];
+    delete entries[1];
+    Object.setPrototypeOf(entries, { ...Array.prototype, 1: "inherited" });
+    expect(entries[1]).toBe("inherited");
+    expect(normalizeCommandHistoryRecord({ id: "history", version: 1, entries }))
+      .toBeNull();
+  });
+
   it.each([
     null,
     { id: "other", version: 1, entries: [] },
