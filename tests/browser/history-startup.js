@@ -9,6 +9,23 @@
     throw new Error(message);
   };
 
+  const observedOutput = [];
+  let observedPrompts = 0;
+  const originalStylePrint = window.term?.stylePrint;
+  const originalPrompt = window.term?.prompt;
+  if (originalStylePrint) {
+    window.term.stylePrint = (...args) => {
+      observedOutput.push(String(args[0]));
+      return originalStylePrint.apply(window.term, args);
+    };
+  }
+  if (originalPrompt) {
+    window.term.prompt = (...args) => {
+      observedPrompts += 1;
+      return originalPrompt.apply(window.term, args);
+    };
+  }
+
   (async () => {
     try {
       await waitFor(
@@ -17,13 +34,13 @@
       );
       await window.terminalReadyPromise;
       await waitFor(
-        () => document.querySelector(".xterm-screen")?.textContent.includes("guest:rootpc ~ $"),
-        "silent IndexedDB open prevented the first prompt",
+        () => window.term?._initialized === true,
+        "silent IndexedDB open prevented terminal initialization",
       );
       if (window.location.hash === "#ping") {
         await window.deepLinkAssetPromise;
         await waitFor(
-          () => document.querySelector(".xterm-screen")?.textContent.includes("pong"),
+          () => observedOutput.includes("pong"),
           "deep-link command did not run after storage fallback",
         );
         if (window.term.history.includes("ping")) {
@@ -33,7 +50,7 @@
       window.parent.postMessage({
         type: "history-startup-pass",
         history: window.term.history.slice(),
-        promptCount: (document.querySelector(".xterm-screen")?.textContent.match(/guest:rootpc ~ \$/g) || []).length,
+        promptCount: observedPrompts,
       }, "*");
     } catch (error) {
       window.parent.postMessage({ type: "history-startup-fail", message: error.message }, "*");
