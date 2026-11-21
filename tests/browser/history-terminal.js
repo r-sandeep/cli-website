@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const productionHistoryStore = createCommandHistoryStore;
+
   const PASS = {
     unavailable: "PASS: denied getter and failed open booted; complete memory history recalled and listed; next ping printed pong",
     quota: "PASS: quota and abort kept complete live history and old durable snapshot; next ping printed pong",
@@ -50,6 +52,7 @@
   }
 
   async function settle(term) {
+    await waitFor(() => term.busy, "terminal command did not start");
     await waitFor(() => !term.busy, "terminal command did not settle");
     await Promise.resolve();
   }
@@ -60,7 +63,7 @@
     await settle(term);
   }
 
-  async function boot(storeFactory = createCommandHistoryStore) {
+  async function boot(storeFactory = productionHistoryStore) {
     const originalFactory = window.createCommandHistoryStore;
     window.createCommandHistoryStore = storeFactory;
     window.colorText = (text) => text;
@@ -86,11 +89,11 @@
     const throwingFactory = () => {
       const options = {};
       Object.defineProperty(options, "indexedDB", { get() { throw new Error("denied"); } });
-      return createCommandHistoryStore(options);
+      return productionHistoryStore(options);
     };
     for (const factory of [
       throwingFactory,
-      () => createCommandHistoryStore({ indexedDB: { open() { const request = {}; queueMicrotask(() => request.onerror?.({ preventDefault() {} })); return request; } } }),
+      () => productionHistoryStore({ indexedDB: { open() { const request = {}; queueMicrotask(() => request.onerror?.({ preventDefault() {} })); return request; } } }),
     ]) {
       const term = await boot(factory);
       await submit(term, "echo one");
@@ -108,7 +111,7 @@
 
   async function quotaAndAbort() {
     const databaseName = "history-terminal-quota";
-    const factory = () => createCommandHistoryStore({ databaseName });
+    const factory = () => productionHistoryStore({ databaseName });
     const seed = factory();
     await seed.load();
     await seed.append("durable-prior");
@@ -138,7 +141,7 @@
 
   async function cap() {
     const databaseName = "history-terminal-cap";
-    const factory = () => createCommandHistoryStore({ databaseName });
+    const factory = () => productionHistoryStore({ databaseName });
     const term = await boot(factory);
     const commands = Array.from({ length: 201 }, (_, index) => `echo cap-${index}`);
     for (const command of commands) await term.executeCommandLine(command);
@@ -154,7 +157,7 @@
 
   async function isolation() {
     const databaseName = "history-terminal-isolation";
-    const factory = () => createCommandHistoryStore({ databaseName });
+    const factory = () => productionHistoryStore({ databaseName });
     const seed = factory();
     await seed.load();
     for (const command of ["export BAD=executed", "alias bad=echo executed", "go kept"]) await seed.append(command);
@@ -183,7 +186,7 @@
     term.cols = 80;
     window.fitAddon.fit = () => { term.cols = 60; };
     await term.resizeListener();
-    assertArray(await createCommandHistoryStore().load(), durableBefore, "resize appended history");
+    assertArray(await factory().load(), durableBefore, "resize appended history");
     assert(window.dataLayer.length === eventsBefore, "resize emitted analytics");
     assert(term.output.join("").includes("visit-marker"), "current visit was not redrawn");
     document.querySelector("#terminal-isolation").textContent = PASS.isolation;
