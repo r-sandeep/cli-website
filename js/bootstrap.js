@@ -49,7 +49,10 @@
       }
     );
   }
-  window.terminalReadyPromise = Promise.resolve(term.historyReady)
+  const startupHistory = term.historyReadyIsBounded
+    ? term.historyReady
+    : Promise.resolve();
+  window.terminalReadyPromise = Promise.resolve(startupHistory)
     .catch(() => [])
     .then(() => runRootTerminal(term));
 

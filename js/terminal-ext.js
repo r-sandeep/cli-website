@@ -65,6 +65,10 @@ const extend = (term) => {
       : { load: async () => [], append: async () => null };
   let historyHydrated = false;
   let persistenceFrontier = Promise.resolve();
+  // Bootstrap only awaits restoration promises created by this bounded store.
+  // Third-party extensions may expose unrelated historyReady promises that do
+  // not own terminal startup and may never settle.
+  term.historyReadyIsBounded = true;
   term.historyReady = Promise.resolve()
     .then(() => historyStore.load())
     .then((entries) => {

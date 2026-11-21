@@ -12,6 +12,7 @@ function loadFactory(globals = {}) {
   ]);
 }
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   env?.cleanup();
   env = null;
@@ -73,6 +74,120 @@ describe("command history record validation", () => {
 });
 
 describe("command history storage settlement", () => {
+  it("bounds a silent open once and closes a late connection", async () => {
+    vi.useFakeTimers();
+    const { createCommandHistoryStore } = loadFactory();
+    const close = vi.fn();
+    let request;
+    const indexedDB = {
+      open: vi.fn(() => (request = {})),
+    };
+    const store = createCommandHistoryStore({ indexedDB });
+    const load = store.load();
+
+    await vi.advanceTimersByTimeAsync(999);
+    let settled = false;
+    load.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(load).resolves.toEqual([]);
+    await expect(store.append("queued")).resolves.toBeNull();
+    expect(indexedDB.open).toHaveBeenCalledOnce();
+
+    request.result = { close };
+    request.onsuccess();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("aborts a silent read and ignores late read and completion events", async () => {
+    vi.useFakeTimers();
+    const { createCommandHistoryStore } = loadFactory();
+    const abort = vi.fn();
+    const close = vi.fn();
+    const getRequest = {};
+    const transaction = {
+      abort,
+      objectStore: () => ({ get: () => getRequest }),
+    };
+    const database = {
+      close,
+      objectStoreNames: { contains: () => true },
+      transaction: () => transaction,
+    };
+    const indexedDB = {
+      open() {
+        const request = {};
+        queueMicrotask(() => {
+          request.result = database;
+          request.onsuccess();
+        });
+        return request;
+      },
+    };
+    const store = createCommandHistoryStore({ indexedDB });
+    const load = store.load();
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(load).resolves.toEqual([]);
+    expect(abort).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+
+    getRequest.result = { id: "history", version: 1, entries: ["late"] };
+    getRequest.onsuccess();
+    transaction.oncomplete();
+    await expect(store.append("after-timeout")).resolves.toBeNull();
+  });
+
+  it("starts an append deadline only when its serialized operation begins", async () => {
+    vi.useFakeTimers();
+    const { createCommandHistoryStore } = loadFactory();
+    const transactions = [];
+    const database = {
+      close: vi.fn(),
+      objectStoreNames: { contains: () => true },
+      transaction() {
+        const getRequest = {};
+        const put = vi.fn();
+        const transaction = {
+          abort: vi.fn(),
+          objectStore: () => ({ get: () => getRequest, put }),
+        };
+        transactions.push({ getRequest, put, transaction });
+        return transaction;
+      },
+    };
+    const indexedDB = {
+      open() {
+        const request = {};
+        queueMicrotask(() => {
+          request.result = database;
+          request.onsuccess();
+        });
+        return request;
+      },
+    };
+    const store = createCommandHistoryStore({ indexedDB });
+    const first = store.append("first");
+    const second = store.append("second");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transactions).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(900);
+    transactions[0].getRequest.result = undefined;
+    transactions[0].getRequest.onsuccess();
+    transactions[0].transaction.oncomplete();
+    await expect(first).resolves.toEqual(["first"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transactions).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(transactions[1].transaction.abort).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(second).resolves.toBeNull();
+    expect(transactions[1].transaction.abort).toHaveBeenCalledOnce();
+  });
+
   it("settles in memory mode when the IndexedDB getter throws", async () => {
     const { createCommandHistoryStore } = loadFactory();
     const options = {};

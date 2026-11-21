@@ -13,6 +13,7 @@ function loadBootstrap(overrides = {}) {
   const preloadCommandAssets = vi.fn(() => Promise.resolve());
   const extend = vi.fn((instance) => {
     instance.deepLink = "whois lee";
+    instance.historyReadyIsBounded = true;
     instance.historyReady = Promise.resolve([]);
     instance.preloadCommandAssets = preloadCommandAssets;
   });
@@ -116,6 +117,7 @@ describe("bootstrap", () => {
     const state = loadBootstrap({
       extend: vi.fn((instance) => {
         instance.deepLink = "";
+        instance.historyReadyIsBounded = true;
         instance.historyReady = historyReady.then((entries) => {
           instance.history = entries;
           return entries;
@@ -139,7 +141,21 @@ describe("bootstrap", () => {
     const state = loadBootstrap({
       extend: vi.fn((instance) => {
         instance.deepLink = "";
+        instance.historyReadyIsBounded = true;
         instance.historyReady = Promise.reject(new Error("storage denied"));
+        instance.preloadCommandAssets = vi.fn();
+      }),
+    });
+
+    await expect(env.window.terminalReadyPromise).resolves.toBeUndefined();
+    expect(state.runRootTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("does not await an unbounded extension-owned history promise", async () => {
+    const state = loadBootstrap({
+      extend: vi.fn((instance) => {
+        instance.deepLink = "";
+        instance.historyReady = new Promise(() => {});
         instance.preloadCommandAssets = vi.fn();
       }),
     });
