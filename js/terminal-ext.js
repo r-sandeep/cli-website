@@ -52,6 +52,10 @@ const extend = (term) => {
   term.currentVisitHistory = [];
   term.historyCursor = -1;
   term.busy = false;
+  // Resize replay must not infer execution ownership from `busy`: interactive
+  // commands and lifecycle code may legitimately change that public flag while
+  // their original dispatch is still awaiting preparation or input.
+  let originalExecutionsInFlight = 0;
 
   const historyLimit =
     typeof COMMAND_HISTORY_LIMIT === "number" ? COMMAND_HISTORY_LIMIT : 200;
@@ -688,6 +692,8 @@ const extend = (term) => {
     const expanded = expandUserAlias(parsed);
     const parsedPipeline = Pipeline.parsePipeline(expanded.line);
     let exitStatus;
+    const ownsOriginalExecution = settings.manageBusy;
+    if (ownsOriginalExecution) originalExecutionsInFlight += 1;
 
     try {
       if (settings.manageBusy) {
@@ -801,17 +807,21 @@ const extend = (term) => {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
-        term.prompt();
-        term.clearCurrentLine(true);
-      }
+      try {
+        if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+          term.prompt();
+          term.clearCurrentLine(true);
+        }
 
-      if (settings.manageBusy) {
-        term.busy = false;
-      }
+        if (settings.manageBusy) {
+          term.busy = false;
+        }
 
-      if (settings.scrollAfter) {
-        term.scrollToBottom();
+        if (settings.scrollAfter) {
+          term.scrollToBottom();
+        }
+      } finally {
+        if (ownsOriginalExecution) originalExecutionsInFlight -= 1;
       }
     }
 
@@ -845,8 +855,10 @@ const extend = (term) => {
     }
     // A width change may arrive after live recording but before the original
     // dispatch has finished. Fit immediately, but leave the live execution in
-    // sole ownership of output and cleanup rather than replaying it.
-    if (term.busy) return;
+    // sole ownership of output and cleanup rather than replaying it. This fence
+    // is deliberately independent of persistence and the mutable public busy
+    // flag, and no deferred replay is scheduled when it rejects this resize.
+    if (originalExecutionsInFlight > 0) return;
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
