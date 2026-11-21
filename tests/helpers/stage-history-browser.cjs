@@ -22,6 +22,21 @@ for (const [source, destination] of [
   ["config/jobs.js", "jobs.js"],
   ["tests/browser/history-terminal.html", "history-terminal.html"],
   ["tests/browser/history-terminal.js", "history-terminal.js"],
+  ["tests/browser/history-startup.html", "history-startup.html"],
+  ["tests/browser/history-startup.js", "history-startup.js"],
 ]) {
   fs.copyFileSync(path.join(root, source), path.join(target, destination));
+}
+
+const dist = path.join(root, "dist");
+const fingerprinted = fs.readdirSync(path.join(dist, "static"));
+for (const [prefix, destination] of [
+  ["xterm.", "xterm.js"],
+  ["addon-fit.", "addon-fit.js"],
+  ["addon-web-links.", "addon-web-links.js"],
+  ["app.bundle.", "app.js"],
+]) {
+  const source = fingerprinted.find((name) => name.startsWith(prefix));
+  if (!source) throw new Error(`Missing built startup asset: ${prefix}`);
+  fs.copyFileSync(path.join(dist, "static", source), path.join(target, destination));
 }

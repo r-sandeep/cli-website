@@ -1,0 +1,19 @@
+<html lang="en">
+  <head><meta charset="utf-8"><title>History startup case</title></head>
+  <body>
+    <div id="terminal"></div>
+    <div id="aa-all" hidden></div>
+    <div id="files-all" hidden></div>
+    <script>
+      const originalIndexedDB = window.indexedDB;
+      const silentIndexedDB = { open() { return {}; } };
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: silentIndexedDB });
+      window.dataLayer = [];
+    </script>
+    <script src="xterm.js"></script>
+    <script src="addon-fit.js"></script>
+    <script src="addon-web-links.js"></script>
+    <script src="app.js"></script>
+    <script src="history-startup.js"></script>
+  </body>
+</html>

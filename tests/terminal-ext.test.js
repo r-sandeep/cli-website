@@ -192,6 +192,38 @@ describe("terminal-ext", () => {
     expect(term.currentVisitHistory).toEqual([]);
   });
 
+  it("waits only same-page navigation for the captured append frontier", async () => {
+    let releaseFirst;
+    let releaseSecond;
+    const first = new Promise((resolve) => { releaseFirst = resolve; });
+    const second = new Promise((resolve) => { releaseSecond = resolve; });
+    const append = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => [], append }),
+      commands: { ping: vi.fn() },
+    });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+    term._initialized = true;
+
+    await term.executeCommandLine("ping");
+    const navigation = term.openURL("#saved", false);
+    expect(env.window.location.hash).toBe("");
+
+    await term.executeCommandLine("ping");
+    releaseFirst();
+    await navigation;
+    expect(env.window.location.hash).toBe("#saved");
+
+    const open = vi.spyOn(env.window, "open").mockImplementation(() => {});
+    expect(term.openURL("https://example.com", true)).toBeUndefined();
+    expect(open).toHaveBeenCalledWith("https://example.com", "_blank");
+    releaseSecond();
+  });
+
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
