@@ -49,8 +49,40 @@ const extend = (term) => {
   term.sep = ":";
   term._promptChar = "$";
   term.history = [];
+  term.currentVisitHistory = [];
   term.historyCursor = -1;
   term.busy = false;
+
+  const historyLimit =
+    typeof COMMAND_HISTORY_LIMIT === "number" ? COMMAND_HISTORY_LIMIT : 200;
+  const historyStore =
+    typeof createCommandHistoryStore === "function"
+      ? createCommandHistoryStore()
+      : { load: async () => [], append: async () => null };
+  term.historyReady = Promise.resolve()
+    .then(() => historyStore.load())
+    .then((entries) => {
+      term.history = Array.isArray(entries) ? entries.slice(-historyLimit) : [];
+      term.historyCursor = -1;
+      return term.history.slice();
+    })
+    .catch(() => {
+      term.history = [];
+      term.historyCursor = -1;
+      return [];
+    });
+
+  const recordSubmission = async (line) => {
+    await term.historyReady;
+    term.history = term.history.concat(line).slice(-historyLimit);
+    term.currentVisitHistory = term.currentVisitHistory.concat(line).slice(-historyLimit);
+    term.historyCursor = -1;
+    try {
+      await historyStore.append(line);
+    } catch (_error) {
+      // The live arrays are authoritative for this visit when storage fails.
+    }
+  };
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -654,16 +686,16 @@ const extend = (term) => {
         term.busy = true;
       }
 
+      if (settings.addToHistory && parsed.line.length > 0) {
+        await recordSubmission(parsed.line);
+      }
+
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           term.stylePrint(validation.error.message);
@@ -681,10 +713,6 @@ const extend = (term) => {
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -734,10 +762,6 @@ const extend = (term) => {
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
@@ -809,7 +833,7 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+      for (const c of term.currentVisitHistory) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await term.executeCommandLine(c, {
@@ -875,6 +899,8 @@ const extend = (term) => {
     term.user = user;
     if (!preserveHistory) {
       term.history = [];
+      term.currentVisitHistory = [];
+      term.historyCursor = -1;
     }
     term.focus();
   };
