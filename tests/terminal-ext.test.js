@@ -761,10 +761,11 @@ describe("terminal-ext", () => {
     });
     term.dispatchCommand = vi.fn();
 
+    await term.historyReady;
     const execution = term.executeCommandLine("EcHo $NAME");
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", ["before"]);
+    await vi.waitFor(() => {
+      expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", ["before"]);
+    });
     term.environment.set("NAME", "after");
     releasePreload();
     await execution;
