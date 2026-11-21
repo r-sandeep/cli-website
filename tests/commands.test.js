@@ -978,6 +978,31 @@ describe("help stays in sync with commands", () => {
     expect(output).toContain("undefined names become empty");
     expect(output).toContain("\\$NAME escapes expansion");
   });
+
+  it("explains saved history without changing its numbered listing", () => {
+    expect(helpContext.helpEntries["%history%"]).toBe(
+      "list the last 200 commands, including commands saved from earlier visits"
+    );
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const helpOutput = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(helpOutput).toEqual(expect.arrayContaining([
+      "History stays in this browser (last 200 commands).",
+      "Press ArrowUp to recall saved commands, or run %history% to list them.",
+      "Failed commands are saved too; %clear%, %zsh%, and %upgrade% reset only this visit's recall.",
+      "If browser storage is unavailable, history stays in memory for this visit.",
+    ]));
+
+    term.stylePrint.mockClear();
+    term.history = ["echo first", "invalid_root_cmd"];
+    commands.history([]);
+    expect(term.stylePrint.mock.calls).toEqual([
+      ["1000  echo first"],
+      ["1001  invalid_root_cmd"],
+    ]);
+  });
 });
 
 describe("environment manuals", () => {
