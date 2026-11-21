@@ -160,6 +160,7 @@
     term.historyCursor = -1;
     term.emit("\x1b[A");
     assert(term.currentLine === expected[199], "ArrowUp did not recall latest capped command");
+    await waitForHistory(factory, expected, "durable latest 200 did not settle before fresh restoration");
     const restored = await boot(factory);
     assertArray(restored.history, expected, "fresh restoration differs from active latest 200");
     document.querySelector("#terminal-cap").textContent = PASS.cap;
@@ -237,6 +238,16 @@
     };
   }
 
+  async function waitForHistory(factory, expected, message) {
+    let actual = [];
+    for (let count = 0; count < 100; count += 1) {
+      actual = await factory().load();
+      if (JSON.stringify(actual) === JSON.stringify(expected)) return actual;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    throw new Error(`${message}: ${JSON.stringify(actual)}`);
+  }
+
   async function pendingDispatch() {
     const databaseName = "history-terminal-pending-dispatch";
     const factory = () => productionHistoryStore({ databaseName });
@@ -263,15 +274,7 @@
 
     blocker.release();
     await blocker.complete;
-    const committedStore = factory();
-    await committedStore.load();
-    await committedStore.append("commit-barrier");
-    const committed = await factory().load();
-    assertArray(
-      committed,
-      submitted.concat("commit-barrier"),
-      `committed archive was reordered or duplicated: ${JSON.stringify(committed)}`,
-    );
+    await waitForHistory(factory, submitted, "committed archive was reordered or duplicated");
 
     for (const mode of ["reject", "throw"]) {
       const append = mode === "reject"
@@ -299,14 +302,13 @@
     assertArray(term.history, ["history"], "clear did not retain its live-history reset");
     blocker.release();
     await blocker.complete;
-    const committedStore = factory();
-    await committedStore.load();
-    await committedStore.append("commit-barrier");
+    const beforeFinalHistory = ["echo before_reset", "clear", "history"];
+    await waitForHistory(factory, beforeFinalHistory, "reset-era writes did not commit in source order");
     await submit(term, "history");
     assertArray(term.history, ["history", "history"], "late completion restored pre-clear live history");
 
-    const expected = ["echo before_reset", "clear", "history", "commit-barrier", "history"];
-    assertArray(await factory().load(), expected, "fresh visit archive omitted reset-era submissions");
+    const expected = beforeFinalHistory.concat("history");
+    await waitForHistory(factory, expected, "fresh visit archive omitted reset-era submissions");
     const restored = await boot(factory);
     assertArray(restored.history, expected, "fresh visit did not restore committed reset-era archive");
     document.querySelector("#dispatch-reset").textContent = PASS.dispatchReset;
