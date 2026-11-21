@@ -49,12 +49,14 @@
       }
     );
   }
-  const startupHistory = term.historyReadyIsBounded
-    ? term.historyReady
-    : Promise.resolve();
-  window.terminalReadyPromise = Promise.resolve(startupHistory)
-    .catch(() => [])
-    .then(() => runRootTerminal(term));
+  if (term.historyReadyIsBounded) {
+    window.terminalReadyPromise = Promise.resolve(term.historyReady)
+      .catch(() => [])
+      .then(() => runRootTerminal(term));
+  } else {
+    runRootTerminal(term);
+    window.terminalReadyPromise = Promise.resolve();
+  }
 
   window.scheduleIdleTask(() => {
     preloadASCIIArt();
