@@ -592,7 +592,7 @@ const commands = {
     ) {
       _rickRoll();
     } else if (args[0].split(".")[1] == "htm") {
-      term.openURL(`./${args[0]}`, false);
+      return term.openURL(`./${args[0]}`, false);
     } else if (args.join(" ") == "the pod bay doors") {
       term.stylePrint("I'm sorry Dave, I'm afraid I can't do that.");
     } else {
@@ -778,7 +778,7 @@ const commands = {
 
   // Opens the GeoCities-style welcome page (welcome.htm).
   exit: function () {
-    term.dispatchCommand("open", ["welcome.htm"]);
+    return term.dispatchCommand("open", ["welcome.htm"]);
   },
 
   // Reinitializes the terminal, clearing history and resetting the prompt.

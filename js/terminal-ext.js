@@ -64,6 +64,7 @@ const extend = (term) => {
       ? createCommandHistoryStore()
       : { load: async () => [], append: async () => null };
   let historyHydrated = false;
+  let persistenceFrontier = Promise.resolve();
   term.historyReady = Promise.resolve()
     .then(() => historyStore.load())
     .then((entries) => {
@@ -90,8 +91,9 @@ const extend = (term) => {
     // after an explicit terminal reset.
     try {
       const pending = historyStore.append(line);
-      if (pending && typeof pending.catch === "function") pending.catch(() => {});
+      persistenceFrontier = Promise.resolve(pending).catch(() => null);
     } catch (_error) {
+      persistenceFrontier = Promise.resolve(null);
       // The live arrays are authoritative for this visit when storage fails.
     }
   };
@@ -439,13 +441,15 @@ const extend = (term) => {
   // Opens a URL in a new tab (default) or navigates the current page.
   term.openURL = (url, newWindow = true) => {
     term.stylePrint(`Opening ${url}`);
-    if (term._initialized) {
-      if (newWindow) {
-        window.open(url, "_blank");
-      } else {
-        window.location.href = url;
-      }
+    if (!term._initialized) return undefined;
+    if (newWindow) {
+      window.open(url, "_blank");
+      return undefined;
     }
+    const frontier = persistenceFrontier;
+    return frontier.then(() => {
+      window.location.href = url;
+    });
   };
 
   // Prints a URL as a styled hyperlink without opening it.
