@@ -6,11 +6,24 @@
     <div id="terminal-quota">PENDING</div>
     <div id="terminal-cap">PENDING</div>
     <div id="terminal-isolation">PENDING</div>
+    <script>const LOGO_TYPE = "ROOT";</script>
     <script src="command-history.js"></script>
     <script src="pipeline.js"></script>
     <script src="terminal.js"></script>
     <script src="terminal-ext.js"></script>
+    <script src="help.js"></script>
+    <script src="firm.js"></script>
+    <script src="portfolio.js"></script>
+    <script src="team.js"></script>
+    <script>
+      localStorage.setItem("rootvc.aliases", JSON.stringify([["kept", "echo alias-ok"]]));
+      localStorage.setItem("rootvc.cli.environment.v1", JSON.stringify({ version: 1, variables: [["KEPT", "env-ok"]] }));
+      localStorage.setItem("rootvc.bookmarks.v1", JSON.stringify([["kept", "/saved"]]));
+    </script>
     <script src="bookmarks.js"></script>
+    <script src="commands.js"></script>
+    <script src="fs.js"></script>
+    <script src="jobs.js"></script>
     <script src="history-terminal.js"></script>
   </body>
 </html>

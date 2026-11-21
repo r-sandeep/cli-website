@@ -25,15 +25,14 @@
   function createTerminal() {
     const output = [];
     const dataHandlers = [];
-    let cursor = 0;
     const term = {
       VERSION: 4,
-      buffer: { active: { get cursorX() { return term._promptRawText ? term._promptRawText().length + 1 + cursor : cursor; } } },
+      buffer: { active: { get cursorX() { return term._promptRawText ? term._promptRawText().length + 1 + term.currentLine.length : term.currentLine.length; } } },
       cols: 100,
       focus() {},
       loadAddon() {},
       open() {},
-      reset() { output.length = 0; cursor = 0; },
+      reset() { output.length = 0; },
       scrollToBottom() {},
       write(text) { output.push(String(text)); },
       writeln(text = "") { output.push(`${text}\r\n`); },
@@ -43,9 +42,6 @@
       },
       attachCustomKeyEventHandler(handler) { term.keyHandler = handler; },
       emit(data) {
-        if (data === "\r") cursor = 0;
-        else if (data === "\033[A" || data === "\033[B") cursor = term.currentLine.length;
-        else if (data.length === 1 && data.charCodeAt(0) >= 32) cursor += 1;
         for (const handler of [...dataHandlers]) handler(data);
       },
       output,
@@ -67,32 +63,6 @@
   async function boot(storeFactory = createCommandHistoryStore) {
     const originalFactory = window.createCommandHistoryStore;
     window.createCommandHistoryStore = storeFactory;
-    window.LOGO_TYPE = "ROOT";
-    window.jobs = {};
-    window.commands = {
-      echo(args) { term.stylePrint(args.join(" ")); },
-      export(args) {
-        if (args[0]) {
-          const split = args[0].indexOf("=");
-          term.environment.set(args[0].slice(0, split), args[0].slice(split + 1));
-        }
-      },
-      history() { term.history.forEach((line, index) => term.stylePrint(`${1000 + index}  ${line}`)); },
-      ping() { term.stylePrint("pong"); },
-      alias(args, parsed) {
-        const raw = parsed.rawArgs;
-        const split = raw.indexOf("=");
-        term.defineAlias(raw.slice(0, split), raw.slice(split + 1));
-      },
-      bookmark(args) {
-        if (args[0] === "add") bookmarkStore.add(args[1], term.cwd);
-      },
-      go(args) {
-        const found = bookmarkStore.lookup(args[0]);
-        if (found.ok) term.cwd = found.path;
-      },
-      clear() { term.init(); },
-    };
     window.colorText = (text) => text;
     window.ensureASCIIArt = async () => {};
     window.ensureFileLoaded = async () => {};
@@ -110,15 +80,6 @@
     runRootTerminal(term);
     window.createCommandHistoryStore = originalFactory;
     return term;
-  }
-
-  function deleteHistoryDatabase() {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.deleteDatabase("rootvc.command-history");
-      request.onsuccess = resolve;
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error("history delete blocked"));
-    });
   }
 
   async function unavailable() {
@@ -146,13 +107,14 @@
   }
 
   async function quotaAndAbort() {
-    await deleteHistoryDatabase();
-    const seed = createCommandHistoryStore();
+    const databaseName = "history-terminal-quota";
+    const factory = () => createCommandHistoryStore({ databaseName });
+    const seed = factory();
     await seed.load();
     await seed.append("durable-prior");
     const originalPut = IDBObjectStore.prototype.put;
     for (const mode of ["quota", "abort"]) {
-      const term = await boot();
+      const term = await boot(factory);
       IDBObjectStore.prototype.put = function (...args) {
         if (args[0]?.id === "history") {
           if (mode === "quota") throw new DOMException("quota", "QuotaExceededError");
@@ -168,15 +130,16 @@
       assert(term.history.includes(`echo ${mode}-two`), `${mode} dropped live history`);
       await submit(term, "ping");
       assert(term.output.join("").includes("pong"), `${mode} blocked next command`);
-      assertArray(await createCommandHistoryStore().load(), ["durable-prior"], `${mode} changed durable snapshot`);
+      assertArray(await factory().load(), ["durable-prior"], `${mode} changed durable snapshot`);
     }
     IDBObjectStore.prototype.put = originalPut;
     document.querySelector("#terminal-quota").textContent = PASS.quota;
   }
 
   async function cap() {
-    await deleteHistoryDatabase();
-    const term = await boot();
+    const databaseName = "history-terminal-cap";
+    const factory = () => createCommandHistoryStore({ databaseName });
+    const term = await boot(factory);
     const commands = Array.from({ length: 201 }, (_, index) => `echo cap-${index}`);
     for (const command of commands) await term.executeCommandLine(command);
     const expected = commands.slice(-200);
@@ -184,20 +147,18 @@
     term.historyCursor = -1;
     term.emit("\033[A");
     assert(term.currentLine === expected[199], "ArrowUp did not recall latest capped command");
-    const restored = await boot();
+    const restored = await boot(factory);
     assertArray(restored.history, expected, "fresh restoration differs from active latest 200");
     document.querySelector("#terminal-cap").textContent = PASS.cap;
   }
 
   async function isolation() {
-    await deleteHistoryDatabase();
-    localStorage.setItem("rootvc.aliases", JSON.stringify([["kept", "echo alias-ok"]]));
-    localStorage.setItem("rootvc.cli.environment.v1", JSON.stringify({ version: 1, variables: [["KEPT", "env-ok"]] }));
-    localStorage.setItem("rootvc.bookmarks.v1", JSON.stringify([["kept", "/saved"]]));
-    const seed = createCommandHistoryStore();
+    const databaseName = "history-terminal-isolation";
+    const factory = () => createCommandHistoryStore({ databaseName });
+    const seed = factory();
     await seed.load();
     for (const command of ["export BAD=executed", "alias bad=echo executed", "go kept"]) await seed.append(command);
-    const term = await boot();
+    const term = await boot(factory);
     assert(term.environment.get("BAD") === undefined, "restored export executed");
     assert(term.getAlias("bad") === undefined, "restored alias executed");
     assert(term.cwd === "~", "restored bookmark navigation executed");
@@ -205,8 +166,19 @@
     assert(term.environment.get("KEPT") === "env-ok", "existing environment changed");
     assert(bookmarkStore.lookup("kept").path === "/saved", "existing bookmark changed");
     assert(window.dataLayer.length === 0, "restoration emitted analytics");
+    await submit(term, "kept");
+    assert(term.output.join("").includes("alias-ok"), "alias execution changed");
+    await submit(term, "echo $KEPT");
+    assert(term.output.join("").includes("env-ok"), "environment expansion changed");
+    await submit(term, "go kept");
+    assert(term.cwd === "/saved", "bookmark navigation changed");
     await submit(term, "echo visit-marker");
-    const durableBefore = await createCommandHistoryStore().load();
+    term.deepLink = "ping";
+    const durableBeforeDeepLink = await factory().load();
+    await term.runDeepLink();
+    assert(term.output.join("").includes("pong"), "deep link execution changed");
+    assertArray(await factory().load(), durableBeforeDeepLink, "deep link appended history");
+    const durableBefore = await factory().load();
     const eventsBefore = window.dataLayer.length;
     term.cols = 80;
     window.fitAddon.fit = () => { term.cols = 60; };
