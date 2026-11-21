@@ -322,6 +322,7 @@
   async function executionResize() {
     const databaseName = "history-terminal-execution-resize";
     const factory = () => productionHistoryStore({ databaseName });
+    localStorage.removeItem("rootvc.aliases");
     const term = await boot(factory);
     const blocker = await holdHistoryWrites(databaseName);
     const aliasWrites = [];

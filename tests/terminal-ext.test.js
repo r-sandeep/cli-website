@@ -639,6 +639,7 @@ describe("terminal-ext", () => {
       { args: "", command: "race", event: "commandSent" },
     ]);
 
+    term.preloadCommandAssets = vi.fn(async () => {});
     command.mockClear();
     term.init.mockClear();
     fitTo(60);
