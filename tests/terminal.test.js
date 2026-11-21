@@ -134,6 +134,7 @@ describe("runRootTerminal", () => {
     runRootTerminal(term);
 
     expect(term.init).toHaveBeenCalledTimes(1);
+    expect(term.init).toHaveBeenCalledWith("guest", true);
     expect(term.prompt).toHaveBeenCalledTimes(1);
     expect(term.runDeepLink).toHaveBeenCalledTimes(1);
     expect(term.attachCustomKeyEventHandler).toHaveBeenCalledTimes(1);

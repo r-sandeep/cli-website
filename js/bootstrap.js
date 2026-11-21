@@ -49,7 +49,9 @@
       }
     );
   }
-  runRootTerminal(term);
+  window.terminalReadyPromise = Promise.resolve(term.historyReady)
+    .catch(() => [])
+    .then(() => runRootTerminal(term));
 
   window.scheduleIdleTask(() => {
     preloadASCIIArt();
