@@ -17,6 +17,10 @@
     resizeCleanup: "PASS: root README fetch success and failure each produced one result; repeated resize races released execution ownership and next ping printed pong",
     resizePreserved: "PASS: idle redraw, height-only resize, and active TUI retained behavior; real apply kept pending input, cancelled once, and next ping printed pong",
     sparseTerminal: "PASS: sparse archive preserved; production terminal printed pong, then exactly 1000  ping and 1001  history, and a fresh usable prompt",
+    boundedStartup: "PASS: silent open and silent read reached one prompt; deep-link pong and exact memory history survived late events",
+    boundedStorage: "PASS: deadlines settled queued operations; late callbacks closed or aborted without changing the prior snapshot or unrelated data",
+    boundedNavigation: "PASS: exit, direct open, and alias navigation followed exact ordered commit; failed and stalled writes allowed bounded navigation",
+    boundedPreservation: "PASS: pending writes did not block ordinary results; resets, sparse records, and execution resize ownership retained behavior",
   };
 
   const assert = (condition, message) => {
@@ -515,11 +519,110 @@
     document.querySelector("#sparse-terminal").textContent = PASS.sparseTerminal;
   }
 
+  async function startupFrame(mode = "silent", hash = "#ping") {
+    const iframe = document.createElement("iframe");
+    iframe.hidden = true;
+    document.body.appendChild(iframe);
+    const result = new Promise((resolve, reject) => {
+      const listener = (event) => {
+        if (event.source !== iframe.contentWindow) return;
+        if (event.data?.type === "history-startup-pass") {
+          window.removeEventListener("message", listener);
+          resolve(event.data);
+        } else if (event.data?.type === "history-startup-fail") {
+          window.removeEventListener("message", listener);
+          reject(new Error(event.data.message));
+        }
+      };
+      window.addEventListener("message", listener);
+    });
+    iframe.src = `history-startup.html?mode=${encodeURIComponent(mode)}${hash}`;
+    const value = await result;
+    iframe.remove();
+    return value;
+  }
+
+  async function boundedLifecycle() {
+    const startup = await startupFrame("silent", "#ping");
+    assertArray(startup.history, [], "startup deep link was persisted as a submission");
+    assert(startup.promptCount === 1, "silent startup rendered a duplicate first prompt");
+    document.querySelector("#bounded-startup").textContent = PASS.boundedStartup;
+
+    const databaseName = "history-terminal-bounded-storage";
+    await writeRawRecord(databaseName, { id: "history", version: 1, entries: ["durable-prior"] });
+    await writeRawRecord(databaseName, { id: "unrelated", version: 1, entries: ["keep-me"] });
+    const factory = () => productionHistoryStore({ databaseName });
+    const blocker = await holdHistoryWrites(databaseName);
+    const stalled = factory();
+    const first = stalled.append("must-time-out");
+    const second = stalled.append("queued-after-timeout");
+    assert(await first === null, "stalled append did not settle through memory fallback");
+    assert(await second === null, "queued append remained pending after fallback");
+    blocker.release();
+    await blocker.complete;
+    assertArray((await readRawRecord(databaseName)).entries, ["durable-prior"], "timed-out write changed prior snapshot");
+    assertArray((await readRawRecord(databaseName, "unrelated")).entries, ["keep-me"], "timed-out write changed unrelated data");
+    document.querySelector("#bounded-storage").textContent = PASS.boundedStorage;
+
+    const navigationName = "history-terminal-bounded-navigation";
+    const navigationFactory = () => productionHistoryStore({ databaseName: navigationName });
+    await writeRawRecord(navigationName, { id: "history", version: 1, entries: ["prior"] });
+    const term = await boot(navigationFactory);
+    const destinations = [];
+    const productionOpenURL = term.openURL;
+    term.openURL = (url, newWindow = true) => {
+      if (newWindow) return productionOpenURL(url, true);
+      destinations.push(url);
+      return undefined;
+    };
+    try {
+      await submit(term, "exit");
+      await submit(term, "open welcome.htm");
+      await submit(term, "alias leave=exit");
+      await submit(term, "leave");
+    } finally {
+      term.openURL = productionOpenURL;
+    }
+    await waitForHistory(
+      navigationFactory,
+      ["prior", "exit", "open welcome.htm", "alias leave=exit", "leave"],
+      "navigation submissions were not committed exactly once in source order",
+    );
+    assertArray(destinations, ["./welcome.htm", "./welcome.htm", "./welcome.htm"], "navigation destination changed");
+    const failedTerm = await boot(() => ({ load: async () => [], append: async () => null }));
+    const failedDestinations = [];
+    failedTerm.openURL = (url, newWindow = true) => {
+      if (!newWindow) failedDestinations.push(url);
+    };
+    await submit(failedTerm, "exit");
+    assertArray(failedDestinations, ["./welcome.htm"], "failed persistence prevented navigation dispatch");
+    document.querySelector("#bounded-navigation").textContent = PASS.boundedNavigation;
+
+    // Reuse the already independent production-handler checks rather than
+    // replacing them with sentinel listeners: these assert ordinary dispatch,
+    // live-only reset, sparse preservation, and resize execution ownership.
+    await pendingDispatch();
+    await pendingReset();
+    await sparseTerminal();
+    document.querySelector("#bounded-preservation").textContent = PASS.boundedPreservation;
+  }
+
   document.querySelector("#run-sparse-terminal-cases").addEventListener("click", async () => {
     try {
       await sparseTerminal();
     } catch (error) {
       document.querySelector("#sparse-terminal").textContent = `FAIL: ${error.message}`;
+      throw error;
+    }
+  });
+
+  document.querySelector("#run-bounded-lifecycle-cases").addEventListener("click", async () => {
+    try {
+      await boundedLifecycle();
+    } catch (error) {
+      for (const element of document.querySelectorAll("[id^=bounded-]")) {
+        if (element.textContent === "PENDING") element.textContent = `FAIL: ${error.message}`;
+      }
       throw error;
     }
   });
