@@ -981,7 +981,7 @@ describe("help stays in sync with commands", () => {
 
   it("explains saved history without changing its numbered listing", () => {
     expect(helpContext.helpEntries["%history%"]).toBe(
-      "list the last 200 commands, including commands saved from earlier visits"
+      "list saved commands from this and earlier visits"
     );
     const { commands, term } = loadCommands({ help: helpContext.helpEntries });
 

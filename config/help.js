@@ -19,7 +19,7 @@ const help = {
   "%bookmark% list": "list saved directory bookmarks",
   "%bookmark% remove NAME": "remove a saved directory bookmark",
   "%go% NAME": "go to the directory saved as NAME",
-  "%history%": "list the last 200 commands, including commands saved from earlier visits",
+  "%history%": "list saved commands from this and earlier visits",
   "PIPELINES": "pipe command output through filters from left to right",
   "  COMMAND | %grep% [-ivn] PATTERN": "keep literal matching lines (-i case-insensitive, -v invert, -n number)",
   "  COMMAND | %head% [N]": "keep the first N lines (default: 10; N must be positive)",
