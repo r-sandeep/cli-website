@@ -72,13 +72,17 @@ const extend = (term) => {
       return [];
     });
 
-  const recordSubmission = async (line) => {
-    await term.historyReady;
+  const recordSubmission = (line) => {
     term.history = term.history.concat(line).slice(-historyLimit);
     term.currentVisitHistory = term.currentVisitHistory.concat(line).slice(-historyLimit);
     term.historyCursor = -1;
+
+    // Durable writes retain the store's source-order queue, but their completion
+    // is not part of command execution. The live arrays above remain
+    // authoritative for this visit whether append throws, rejects, or settles
+    // after an explicit terminal reset.
     try {
-      await historyStore.append(line);
+      Promise.resolve(historyStore.append(line)).catch(() => {});
     } catch (_error) {
       // The live arrays are authoritative for this visit when storage fails.
     }
@@ -687,7 +691,8 @@ const extend = (term) => {
       }
 
       if (settings.addToHistory && parsed.line.length > 0) {
-        await recordSubmission(parsed.line);
+        await term.historyReady;
+        recordSubmission(parsed.line);
       }
 
       if (parsedPipeline) {
