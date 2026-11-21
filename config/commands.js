@@ -125,6 +125,11 @@ const commands = {
     Object.entries(shortcuts).forEach(function (kv) {
       term.stylePrint(`${kv[0]}: ${kv[1]}`);
     });
+    term.stylePrint("");
+    term.stylePrint("History stays in this browser (last 200 commands).");
+    term.stylePrint("Press ArrowUp to recall saved commands, or run %history% to list them.");
+    term.stylePrint("Failed commands are saved too; %clear%, %zsh%, and %upgrade% reset only this visit's recall.");
+    term.stylePrint("If browser storage is unavailable, history stays in memory for this visit.");
   },
 
   // Prints the metadata fixed into the application bundle by build-assets.js.

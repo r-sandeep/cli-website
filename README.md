@@ -32,6 +32,26 @@ The terminal supports persistent named bookmarks for quick directory navigation:
 `NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
 browser storage, with a maximum of 25 saved bookmarks.
 
+## Saved command history
+
+The terminal saves submitted commands in this browser across visits. Press
+**ArrowUp** to recall the newest saved command, or run `history` to list the
+retained commands using the existing numbering from 1000. The latest 200
+commands are retained in submission order, including duplicate, failed, and
+invalid commands.
+
+History never synchronizes to another browser or device. If browser storage is
+unavailable or full, the terminal continues to work and keeps the latest 200
+commands in memory for the current visit. `clear`, `zsh`, and `upgrade` keep
+their existing behavior of resetting the live recall list, but they do not
+delete the saved archive; submitted reset commands return with the archive on a
+later visit. Remove this site's browser data to delete the saved archive.
+
+Simultaneous tabs merge successfully saved commands in browser transaction
+order, while each already-open tab keeps an independent live recall list until
+a new visit. Saving history does not change the existing per-command analytics;
+restoring or redrawing saved commands does not send new command events.
+
 ## Output pipelines
 
 Pipe the output of any terminal command through one or more filters with
