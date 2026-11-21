@@ -607,6 +607,69 @@ describe("terminal-ext", () => {
     expect(term.prompt).toHaveBeenCalled();
   });
 
+  it("fences resize for the full original execution even when busy is cleared early", async () => {
+    const command = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { race: command } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+    await term.historyReady;
+    let releasePreload;
+    term.preloadCommandAssets = vi.fn(() => new Promise((resolve) => {
+      releasePreload = resolve;
+    }));
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+
+    const execution = term.executeCommandLine("race");
+    await vi.waitFor(() => expect(term.preloadCommandAssets).toHaveBeenCalledOnce());
+    term.busy = false;
+    fitTo(40);
+    await term.resizeListener();
+
+    expect(term.init).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(term.history).toEqual(["race"]);
+    expect(env.window.dataLayer || []).toEqual([]);
+
+    releasePreload();
+    await execution;
+    expect(command).toHaveBeenCalledOnce();
+    expect(env.window.dataLayer).toEqual([
+      { args: "", command: "race", event: "commandSent" },
+    ]);
+
+    command.mockClear();
+    term.init.mockClear();
+    fitTo(60);
+    await term.resizeListener();
+    expect(term.init).toHaveBeenCalledWith("guest", true);
+    expect(command).toHaveBeenCalledOnce();
+    expect(term.history).toEqual(["race"]);
+    expect(env.window.dataLayer).toHaveLength(1);
+  });
+
+  it.each(["success", "failure"])("releases resize execution ownership after %s", async (mode) => {
+    const command = mode === "success"
+      ? vi.fn(() => 0)
+      : vi.fn(() => { throw new Error("failed command"); });
+    const { extend } = loadTerminalExt({ commands: { race: command } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+    term.preloadCommandAssets = vi.fn(async () => {});
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+
+    await term.executeCommandLine("race");
+    command.mockClear();
+    fitTo(40);
+    await term.resizeListener();
+
+    expect(term.init).toHaveBeenCalledWith("guest", true);
+    expect(command).toHaveBeenCalledOnce();
+  });
+
   it("replays history only when the column count changes", async () => {
     // Phone keyboards and collapsing address bars fire resize with the same
     // width. xterm keeps its buffer in that case, so wiping and redrawing the
