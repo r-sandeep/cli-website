@@ -1,0 +1,45 @@
+<html lang="en">
+  <head><meta charset="utf-8"><title>History terminal cases</title></head>
+  <body>
+    <button id="run-terminal-cases">Run terminal cases</button>
+    <div id="terminal-unavailable">PENDING</div>
+    <div id="terminal-quota">PENDING</div>
+    <div id="terminal-cap">PENDING</div>
+    <div id="terminal-isolation">PENDING</div>
+    <button id="run-dispatch-cases">Run pending dispatch cases</button>
+    <div id="dispatch-pending">PENDING</div>
+    <div id="dispatch-order">PENDING</div>
+    <div id="dispatch-reset">PENDING</div>
+    <button id="run-resize-cases">Run execution resize cases</button>
+    <div id="resize-once">PENDING</div>
+    <div id="resize-cleanup">PENDING</div>
+    <div id="resize-preserved">PENDING</div>
+    <button id="run-sparse-terminal-cases">Run sparse terminal cases</button>
+    <div id="sparse-terminal">PENDING</div>
+    <button id="run-bounded-lifecycle-cases">Run bounded lifecycle cases</button>
+    <div id="bounded-startup">PENDING</div>
+    <div id="bounded-storage">PENDING</div>
+    <div id="bounded-navigation">PENDING</div>
+    <div id="bounded-preservation">PENDING</div>
+    <div id="files-all" hidden></div>
+    <script>const LOGO_TYPE = "ROOT";</script>
+    <script src="command-history.js"></script>
+    <script src="pipeline.js"></script>
+    <script src="terminal.js"></script>
+    <script src="terminal-ext.js"></script>
+    <script src="help.js"></script>
+    <script src="firm.js"></script>
+    <script src="portfolio.js"></script>
+    <script src="team.js"></script>
+    <script>
+      localStorage.setItem("rootvc.aliases", JSON.stringify([["kept", "echo alias-ok"]]));
+      localStorage.setItem("rootvc.cli.environment.v1", JSON.stringify({ version: 1, variables: [["KEPT", "env-ok"]] }));
+      localStorage.setItem("rootvc.bookmarks.v1", JSON.stringify([["kept", "/saved"]]));
+    </script>
+    <script src="bookmarks.js"></script>
+    <script src="commands.js"></script>
+    <script src="fs.js"></script>
+    <script src="jobs.js"></script>
+    <script src="history-terminal.js"></script>
+  </body>
+</html>

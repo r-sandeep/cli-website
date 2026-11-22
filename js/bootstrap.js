@@ -49,7 +49,14 @@
       }
     );
   }
-  runRootTerminal(term);
+  if (term.historyReadyIsBounded) {
+    window.terminalReadyPromise = Promise.resolve(term.historyReady)
+      .catch(() => [])
+      .then(() => runRootTerminal(term));
+  } else {
+    runRootTerminal(term);
+    window.terminalReadyPromise = Promise.resolve();
+  }
 
   window.scheduleIdleTask(() => {
     preloadASCIIArt();

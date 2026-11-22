@@ -67,7 +67,7 @@ function runRootTerminal(term) {
     return;
   }
 
-  term.init();
+  term.init(term.user, true);
   term._initialized = true;
   term.locked = false;
 

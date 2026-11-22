@@ -105,6 +105,125 @@ afterEach(() => {
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
 
+  it("keeps standalone and pipeline dispatch independent of pending history writes", async () => {
+    let releaseAppend;
+    const pendingAppend = new Promise((resolve) => { releaseAppend = resolve; });
+    const append = vi.fn(() => pendingAppend);
+    let term;
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => [], append }),
+      commands: {
+        echo: (args) => term.writeln(args.join(" ")),
+        history: () => term.history.forEach((line, index) => term.writeln(`${1000 + index}  ${line}`)),
+        ping: () => term.writeln("pong"),
+      },
+    });
+    term = createTerm();
+    extend(term);
+    await term.historyReady;
+    term.preloadCommandAssets = vi.fn(async () => {});
+
+    await term.executeCommandLine("ping");
+    expect(term.writeln).toHaveBeenCalledWith("pong");
+    await term.executeCommandLine("echo branch_marker | wc -l");
+    expect(term.writeln).toHaveBeenCalledWith("1");
+    const stylePrint = vi.spyOn(term, "stylePrint");
+    await term.executeCommandLine("echo bad_marker | head 0");
+    expect(stylePrint).toHaveBeenCalledWith("head: count must be a positive base-10 integer");
+    await term.executeCommandLine("history");
+
+    expect(term.history).toEqual([
+      "ping",
+      "echo branch_marker | wc -l",
+      "echo bad_marker | head 0",
+      "history",
+    ]);
+    expect(term.writeln.mock.calls.map(([line]) => line)).toEqual(expect.arrayContaining([
+      "1000  ping",
+      "1001  echo branch_marker | wc -l",
+      "1002  echo bad_marker | head 0",
+      "1003  history",
+    ]));
+    expect(append.mock.calls.map(([line]) => line)).toEqual(term.history);
+    expect(term.busy).toBe(false);
+    releaseAppend();
+  });
+
+  it.each(["reject", "throw"])("retains complete live history when append %ss", async (mode) => {
+    const append = mode === "throw"
+      ? vi.fn(() => { throw new Error("storage unavailable"); })
+      : vi.fn(() => Promise.reject(new Error("storage unavailable")));
+    const ping = vi.fn();
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => ["restored"], append }),
+      commands: { ping },
+    });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+
+    await expect(term.executeCommandLine("ping")).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(ping).toHaveBeenCalledOnce();
+    expect(append).toHaveBeenCalledOnce();
+    expect(term.history).toEqual(["restored", "ping"]);
+    expect(term.currentVisitHistory).toEqual(["ping"]);
+    expect(term.busy).toBe(false);
+  });
+
+  it("does not restore cleared live history when an earlier append settles late", async () => {
+    let releaseAppend;
+    const pendingAppend = new Promise((resolve) => { releaseAppend = resolve; });
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => ["restored"], append: () => pendingAppend }),
+      commands: { clear: () => term.init() },
+    });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+
+    await term.executeCommandLine("clear");
+    expect(term.history).toEqual([]);
+    expect(term.currentVisitHistory).toEqual([]);
+    releaseAppend();
+    await pendingAppend;
+    await Promise.resolve();
+    expect(term.history).toEqual([]);
+    expect(term.currentVisitHistory).toEqual([]);
+  });
+
+  it("waits only same-page navigation for the captured append frontier", async () => {
+    let releaseFirst;
+    let releaseSecond;
+    const first = new Promise((resolve) => { releaseFirst = resolve; });
+    const second = new Promise((resolve) => { releaseSecond = resolve; });
+    const append = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const { extend } = loadTerminalExt({
+      createCommandHistoryStore: () => ({ load: async () => [], append }),
+      commands: { ping: vi.fn() },
+    });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+    term._initialized = true;
+
+    await term.executeCommandLine("ping");
+    const navigation = term.openURL("#saved", false);
+    expect(env.window.location.hash).toBe("");
+
+    await term.executeCommandLine("ping");
+    releaseFirst();
+    await navigation;
+    expect(env.window.location.hash).toBe("#saved");
+
+    const open = vi.spyOn(env.window, "open").mockImplementation(() => {});
+    expect(term.openURL("https://example.com", true)).toBeUndefined();
+    expect(open).toHaveBeenCalledWith("https://example.com", "_blank");
+    releaseSecond();
+  });
+
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
@@ -316,6 +435,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     fitTo(120);
     term.history = ["historical mutation"];
+    term.currentVisitHistory = ["historical mutation"];
     // Replay now runs each history line through executeCommandLine, so the
     // replayed mutation happens at the dispatch seam.
     term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
@@ -511,11 +631,76 @@ describe("terminal-ext", () => {
     fitTo(120);
     term.defineAlias("launch", "tui");
     term.history = [line];
+    term.currentVisitHistory = [line];
     term.deepLink = line;
     term.init = vi.fn(); term.prompt = vi.fn();
     await term.resizeListener();
     expect(launch).not.toHaveBeenCalled();
     expect(term.prompt).toHaveBeenCalled();
+  });
+
+  it("fences resize for the full original execution even when busy is cleared early", async () => {
+    const command = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { race: command } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+    await term.historyReady;
+    let releasePreload;
+    term.preloadCommandAssets = vi.fn(() => new Promise((resolve) => {
+      releasePreload = resolve;
+    }));
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+
+    const execution = term.executeCommandLine("race");
+    await vi.waitFor(() => expect(term.preloadCommandAssets).toHaveBeenCalledOnce());
+    term.busy = false;
+    fitTo(40);
+    await term.resizeListener();
+
+    expect(term.init).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(term.history).toEqual(["race"]);
+    expect(env.window.dataLayer || []).toEqual([]);
+
+    releasePreload();
+    await execution;
+    expect(command).toHaveBeenCalledOnce();
+    expect(env.window.dataLayer).toEqual([
+      { args: "", command: "race", event: "commandSent" },
+    ]);
+
+    term.preloadCommandAssets = vi.fn(async () => {});
+    command.mockClear();
+    term.init.mockClear();
+    fitTo(60);
+    await term.resizeListener();
+    expect(term.init).toHaveBeenCalledWith("guest", true);
+    expect(command).toHaveBeenCalledOnce();
+    expect(term.history).toEqual(["race"]);
+    expect(env.window.dataLayer).toHaveLength(1);
+  });
+
+  it.each(["success", "failure"])("releases resize execution ownership after %s", async (mode) => {
+    const command = mode === "success"
+      ? vi.fn(() => 0)
+      : vi.fn(() => { throw new Error("failed command"); });
+    const { extend } = loadTerminalExt({ commands: { race: command } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+    term.preloadCommandAssets = vi.fn(async () => {});
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+
+    await term.executeCommandLine("race");
+    command.mockClear();
+    fitTo(40);
+    await term.resizeListener();
+
+    expect(term.init).toHaveBeenCalledWith("guest", true);
+    expect(command).toHaveBeenCalledOnce();
   });
 
   it("replays history only when the column count changes", async () => {
@@ -528,6 +713,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     extend(term); // resets history, so it is set afterwards
     term.history = ["whois lee"];
+    term.currentVisitHistory = ["whois lee"];
     term.init = vi.fn();
     term.prompt = vi.fn();
 
@@ -553,6 +739,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     extend(term);
     term.history = ["upgrade", "apply 1", "test", "claude", "whois lee"];
+    term.currentVisitHistory = [...term.history];
     fitTo(40);
     term.init = vi.fn();
     term.prompt = vi.fn();
@@ -757,8 +944,11 @@ describe("terminal-ext", () => {
     });
     term.dispatchCommand = vi.fn();
 
+    await term.historyReady;
     const execution = term.executeCommandLine("EcHo $NAME");
-    expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", ["before"]);
+    await vi.waitFor(() => {
+      expect(term.preloadCommandAssets).toHaveBeenCalledWith("echo", ["before"]);
+    });
     term.environment.set("NAME", "after");
     releasePreload();
     await execution;
@@ -857,6 +1047,7 @@ describe("terminal-ext", () => {
       "unset TEMP",
       "env",
     ];
+    term.currentVisitHistory = [...term.history];
     term.runDeepLink = vi.fn();
     env.window.commands.export = (args) => {
       const assignment = args[0];

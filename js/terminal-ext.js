@@ -49,8 +49,58 @@ const extend = (term) => {
   term.sep = ":";
   term._promptChar = "$";
   term.history = [];
+  term.currentVisitHistory = [];
   term.historyCursor = -1;
   term.busy = false;
+  // Resize replay must not infer execution ownership from `busy`: interactive
+  // commands and lifecycle code may legitimately change that public flag while
+  // their original dispatch is still awaiting preparation or input.
+  let originalExecutionsInFlight = 0;
+
+  const historyLimit =
+    typeof COMMAND_HISTORY_LIMIT === "number" ? COMMAND_HISTORY_LIMIT : 200;
+  const historyStore =
+    typeof createCommandHistoryStore === "function"
+      ? createCommandHistoryStore()
+      : { load: async () => [], append: async () => null };
+  let historyHydrated = false;
+  let persistenceFrontier = Promise.resolve();
+  // Bootstrap only awaits restoration promises created by this bounded store.
+  // Third-party extensions may expose unrelated historyReady promises that do
+  // not own terminal startup and may never settle.
+  term.historyReadyIsBounded = true;
+  term.historyReady = Promise.resolve()
+    .then(() => historyStore.load())
+    .then((entries) => {
+      term.history = Array.isArray(entries) ? entries.slice(-historyLimit) : [];
+      term.historyCursor = -1;
+      historyHydrated = true;
+      return term.history.slice();
+    })
+    .catch(() => {
+      term.history = [];
+      term.historyCursor = -1;
+      historyHydrated = true;
+      return [];
+    });
+
+  const recordSubmission = (line) => {
+    term.history = term.history.concat(line).slice(-historyLimit);
+    term.currentVisitHistory = term.currentVisitHistory.concat(line).slice(-historyLimit);
+    term.historyCursor = -1;
+
+    // Durable writes retain the store's source-order queue, but their completion
+    // is not part of command execution. The live arrays above remain
+    // authoritative for this visit whether append throws, rejects, or settles
+    // after an explicit terminal reset.
+    try {
+      const pending = historyStore.append(line);
+      persistenceFrontier = Promise.resolve(pending).catch(() => null);
+    } catch (_error) {
+      persistenceFrontier = Promise.resolve(null);
+      // The live arrays are authoritative for this visit when storage fails.
+    }
+  };
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -395,13 +445,15 @@ const extend = (term) => {
   // Opens a URL in a new tab (default) or navigates the current page.
   term.openURL = (url, newWindow = true) => {
     term.stylePrint(`Opening ${url}`);
-    if (term._initialized) {
-      if (newWindow) {
-        window.open(url, "_blank");
-      } else {
-        window.location.href = url;
-      }
+    if (!term._initialized) return undefined;
+    if (newWindow) {
+      window.open(url, "_blank");
+      return undefined;
     }
+    const frontier = persistenceFrontier;
+    return frontier.then(() => {
+      window.location.href = url;
+    });
   };
 
   // Prints a URL as a styled hyperlink without opening it.
@@ -648,10 +700,17 @@ const extend = (term) => {
     const expanded = expandUserAlias(parsed);
     const parsedPipeline = Pipeline.parsePipeline(expanded.line);
     let exitStatus;
+    const ownsOriginalExecution = settings.manageBusy;
+    if (ownsOriginalExecution) originalExecutionsInFlight += 1;
 
     try {
       if (settings.manageBusy) {
         term.busy = true;
+      }
+
+      if (settings.addToHistory && parsed.line.length > 0) {
+        if (!historyHydrated) await term.historyReady;
+        recordSubmission(parsed.line);
       }
 
       if (parsedPipeline) {
@@ -660,10 +719,6 @@ const extend = (term) => {
         if (!validation.ok) {
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           term.stylePrint(validation.error.message);
@@ -681,10 +736,6 @@ const extend = (term) => {
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -727,47 +778,58 @@ const extend = (term) => {
         // expanded values stay opaque data instead of being parsed or expanded
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
-        await term.preloadCommandAssets(prepared.cmd, prepared.args);
+        const preload = term.preloadCommandAssets(prepared.cmd, prepared.args);
 
-        if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
-          term.writeln("");
-        }
-
-        if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
+        const dispatchPrepared = async () => {
+          if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
+            term.writeln("");
           }
 
-          // Commands may own an interactive continuation. Await its final
-          // status so standalone prompt cleanup observes the same lifecycle as
-          // a piped producer.
-          exitStatus = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
+          if (parsed.line.length > 0) {
+            // Commands may own an interactive continuation. Await its final
+            // status so standalone prompt cleanup observes the same lifecycle as
+            // a piped producer.
+            const status = await term.dispatchCommand(prepared.cmd, prepared.args, prepared);
 
-          if (settings.trackAnalytics) {
-            window.dataLayer = window.dataLayer || [];
-            window.dataLayer.push({
-              event: "commandSent",
-              command: parsed.cmd,
-              args: parsed.args.join(" "),
-            });
+            if (settings.trackAnalytics) {
+              window.dataLayer = window.dataLayer || [];
+              window.dataLayer.push({
+                event: "commandSent",
+                command: parsed.cmd,
+                args: parsed.args.join(" "),
+              });
+            }
+            return status;
           }
-        }
+          return undefined;
+        };
+
+        // Dispatch from the preload settlement callback so a ready preload has
+        // no extra scheduling turn, while unresolved asset work still remains a
+        // strict prerequisite for command execution.
+        exitStatus = preload && typeof preload.then === "function"
+          ? await preload.then(dispatchPrepared)
+          : await dispatchPrepared();
       }
     } catch (error) {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
-      if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
-        term.prompt();
-        term.clearCurrentLine(true);
-      }
+      try {
+        if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
+          term.prompt();
+          term.clearCurrentLine(true);
+        }
 
-      if (settings.manageBusy) {
-        term.busy = false;
-      }
+        if (settings.manageBusy) {
+          term.busy = false;
+        }
 
-      if (settings.scrollAfter) {
-        term.scrollToBottom();
+        if (settings.scrollAfter) {
+          term.scrollToBottom();
+        }
+      } finally {
+        if (ownsOriginalExecution) originalExecutionsInFlight -= 1;
       }
     }
 
@@ -799,6 +861,12 @@ const extend = (term) => {
       term.scrollToBottom();
       return;
     }
+    // A width change may arrive after live recording but before the original
+    // dispatch has finished. Fit immediately, but leave the live execution in
+    // sole ownership of output and cleanup rather than replaying it. This fence
+    // is deliberately independent of persistence and the mutable public busy
+    // flag, and no deferred replay is scheduled when it rejects this resize.
+    if (originalExecutionsInFlight > 0) return;
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
@@ -809,7 +877,7 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+      for (const c of term.currentVisitHistory) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await term.executeCommandLine(c, {
@@ -875,6 +943,8 @@ const extend = (term) => {
     term.user = user;
     if (!preserveHistory) {
       term.history = [];
+      term.currentVisitHistory = [];
+      term.historyCursor = -1;
     }
     term.focus();
   };

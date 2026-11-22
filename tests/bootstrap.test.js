@@ -13,6 +13,8 @@ function loadBootstrap(overrides = {}) {
   const preloadCommandAssets = vi.fn(() => Promise.resolve());
   const extend = vi.fn((instance) => {
     instance.deepLink = "whois lee";
+    instance.historyReadyIsBounded = true;
+    instance.historyReady = Promise.resolve([]);
     instance.preloadCommandAssets = preloadCommandAssets;
   });
   const runRootTerminal = vi.fn();
@@ -85,6 +87,7 @@ describe("bootstrap", () => {
     const state = loadBootstrap();
 
     await env.window.deepLinkAssetPromise;
+    await env.window.terminalReadyPromise;
 
     expect(state.term.open).toHaveBeenCalledWith(
       env.document.getElementById("terminal")
@@ -104,6 +107,61 @@ describe("bootstrap", () => {
 
     expect(state.preloadASCIIArt).toHaveBeenCalledTimes(1);
     expect(state.preloadFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for restored history before starting the terminal", async () => {
+    let restoreHistory;
+    const historyReady = new Promise((resolve) => {
+      restoreHistory = resolve;
+    });
+    const state = loadBootstrap({
+      extend: vi.fn((instance) => {
+        instance.deepLink = "";
+        instance.historyReadyIsBounded = true;
+        instance.historyReady = historyReady.then((entries) => {
+          instance.history = entries;
+          return entries;
+        });
+        instance.preloadCommandAssets = vi.fn();
+      }),
+    });
+
+    await Promise.resolve();
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+
+    restoreHistory(["echo restored"]);
+    await env.window.terminalReadyPromise;
+
+    expect(state.term.history).toEqual(["echo restored"]);
+    expect(state.runRootTerminal).toHaveBeenCalledOnce();
+    expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
+  });
+
+  it("starts safely when history restoration rejects", async () => {
+    const state = loadBootstrap({
+      extend: vi.fn((instance) => {
+        instance.deepLink = "";
+        instance.historyReadyIsBounded = true;
+        instance.historyReady = Promise.reject(new Error("storage denied"));
+        instance.preloadCommandAssets = vi.fn();
+      }),
+    });
+
+    await expect(env.window.terminalReadyPromise).resolves.toBeUndefined();
+    expect(state.runRootTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("does not await an unbounded extension-owned history promise", async () => {
+    const state = loadBootstrap({
+      extend: vi.fn((instance) => {
+        instance.deepLink = "";
+        instance.historyReady = new Promise(() => {});
+        instance.preloadCommandAssets = vi.fn();
+      }),
+    });
+
+    await expect(env.window.terminalReadyPromise).resolves.toBeUndefined();
+    expect(state.runRootTerminal).toHaveBeenCalledOnce();
   });
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
