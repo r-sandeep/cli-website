@@ -190,4 +190,64 @@ describe("saved terminal history integration", () => {
     await term.resizeListener();
     expect(fresh).not.toHaveBeenCalled();
   });
+
+  it("fits without replaying a command whose first execution is still preparing", async () => {
+    let releasePreload;
+    const preload = new Promise((resolve) => { releasePreload = resolve; });
+    const pending = vi.fn();
+    const { extend } = loadIntegration({ commands: { pending } });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+    env.window.__term = term;
+    term.preloadCommandAssets = vi.fn(() => preload);
+    term.runDeepLink = vi.fn();
+    env.window.fitAddon.fit = vi.fn(() => { term.cols += 20; });
+
+    const execution = term.executeCommandLine("pending", { promptAfter: false });
+    await Promise.resolve();
+    await term.resizeListener();
+    await term.resizeListener();
+
+    expect(env.window.fitAddon.fit).toHaveBeenCalledTimes(2);
+    expect(term.reset).not.toHaveBeenCalled();
+    expect(pending).not.toHaveBeenCalled();
+    expect(env.window.dataLayer).toEqual([]);
+
+    releasePreload();
+    await execution;
+    expect(pending).toHaveBeenCalledTimes(1);
+    expect(term.history).toEqual(["pending"]);
+    expect(env.window.dataLayer).toEqual([
+      { event: "commandSent", command: "pending", args: "" },
+    ]);
+  });
+
+  it("does not publish late completed work across a visit reset", async () => {
+    let releaseCommand;
+    const command = vi.fn(() => new Promise((resolve) => { releaseCommand = resolve; }));
+    const ping = vi.fn();
+    const { extend } = loadIntegration({ commands: { command, ping } });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+    env.window.__term = term;
+    let nextCols = 100;
+    env.window.fitAddon.fit = vi.fn(() => { term.cols = nextCols; });
+
+    const pending = term.executeCommandLine("command", { promptAfter: false });
+    await Promise.resolve();
+    term.init("guest");
+    expect(term.history).toEqual([]);
+
+    releaseCommand();
+    await pending;
+    nextCols = 120;
+    await term.resizeListener();
+    expect(command).toHaveBeenCalledTimes(1);
+
+    await term.executeCommandLine("ping", { promptAfter: false });
+    expect(ping).toHaveBeenCalledTimes(1);
+    expect(term.history).toEqual(["ping"]);
+  });
 });

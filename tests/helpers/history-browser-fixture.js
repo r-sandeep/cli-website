@@ -9,6 +9,8 @@
   const writeExceptionButton = document.querySelector("#run-write-exceptions");
   const executionTimingOutput = document.querySelector("#execution-timing-results");
   const executionTimingButton = document.querySelector("#run-execution-timing");
+  const pendingResizeOutput = document.querySelector("#pending-resize-results");
+  const pendingResizeButton = document.querySelector("#run-pending-resize");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   // Helpers and existing controls always use the native factory, even while the
   // execution-timing fixture temporarily installs a transaction wrapper.
@@ -783,6 +785,101 @@
     passTo(terminalOutput, "PASS analytics counts, payloads and interactive return values");
   };
 
+  const runPendingResizeChecks = async () => {
+    localStorage.clear();
+    await deleteDatabase(COMMAND_HISTORY_DATABASE);
+
+    const term = createTerminal();
+    await term.historyReady;
+    runRootTerminal(term);
+    const nativePreload = term.preloadCommandAssets;
+    let releasePreload;
+    term.preloadCommandAssets = () =>
+      new Promise((resolve) => { releasePreload = resolve; });
+    let cols = 100;
+    window.fitAddon.fit = () => { term.cols = cols; cols += 20; };
+    const analyticsBefore = window.dataLayer.length;
+    const pending = term.executeCommandLine("export PENDING=once", { promptAfter: false });
+    await waitFor(() => releasePreload, "pending preload did not start");
+    await term.resizeListener();
+    await term.resizeListener();
+    assert(term.environment.get("PENDING") === undefined, "resize dispatched pending preload");
+    assert(window.dataLayer.length === analyticsBefore, "pending resize emitted analytics");
+    passTo(pendingResizeOutput, "PASS resize before first dispatch never executes pending work");
+
+    releasePreload();
+    await pending;
+    term.preloadCommandAssets = nativePreload;
+    assert(term.environment.get("PENDING") === "once", "first execution did not dispatch once");
+    assert(window.dataLayer.length === analyticsBefore + 1, "first execution analytics count");
+    const historyAfterPending = [...term.history];
+    passTo(
+      pendingResizeOutput,
+      "PASS pending history completion causes no duplicate dispatch history or analytics"
+    );
+
+    for (const reset of ["clear", "zsh", "upgrade"]) {
+      await term.executeCommandLine("echo reset fence", { promptAfter: false });
+      await term.executeCommandLine(reset, { promptAfter: false });
+      equal(term.history, [], `${reset} clears current recall`);
+      await term.resizeListener();
+      equal(term.history, [], `${reset} resize preserves cleared recall`);
+    }
+    passTo(pendingResizeOutput, "PASS clear zsh and upgrade fence late replay publication");
+
+    await term.executeCommandLine("export KEEP=before", { promptAfter: false });
+    await term.executeCommandLine("export TEMP=original", { promptAfter: false });
+    await term.executeCommandLine("unset TEMP", { promptAfter: false });
+    term.environment.set("KEEP", "live");
+    term.environment.set("TEMP", "live");
+    term.environment.set("EXTRA", "later");
+    const environmentBefore = term.environment.entries();
+    const persistedBefore = localStorage.getItem("rootvc.cli.environment.v1");
+    const historyBeforeReplay = [...term.history];
+    const analyticsBeforeReplay = window.dataLayer.map((entry) => ({ ...entry }));
+    await term.resizeListener();
+    equal(term.environment.entries(), environmentBefore, "idle replay restores full live environment");
+    assert(
+      localStorage.getItem("rootvc.cli.environment.v1") === persistedBefore,
+      "idle replay changed persisted environment"
+    );
+    equal(term.history, historyBeforeReplay, "idle replay does not append history");
+    equal(window.dataLayer, analyticsBeforeReplay, "idle replay does not append analytics");
+    passTo(pendingResizeOutput, "PASS idle replay preserves exclusions environment and interactive ownership");
+
+    await term.executeCommandLine("ping", { promptAfter: false });
+    await term.executeCommandLine("history", { promptAfter: false });
+    assert(term.rendered.some((line) => line.includes("pong")), "next command did not produce pong");
+    const restored = createTerminal();
+    await restored.historyReady;
+    const durableSubmissions = [
+      "export PENDING=once",
+      "echo reset fence",
+      "clear",
+      "echo reset fence",
+      "zsh",
+      "echo reset fence",
+      "upgrade",
+      "export KEEP=before",
+      "export TEMP=original",
+      "unset TEMP",
+      "ping",
+      "history",
+    ];
+    equal(
+      restored.history,
+      durableSubmissions.slice(-200),
+      "reload restores exact newest-200 durable submission sequence"
+    );
+    assert(
+      restored.history.filter((line) => line === "export PENDING=once").length === 1,
+      "pending submission duplicated in durable history"
+    );
+    assert(historyAfterPending.filter((line) => line === "export PENDING=once").length === 1,
+      "pending submission duplicated in visit history");
+    passTo(pendingResizeOutput, "PASS next command and reload retain the exact newest-200 submission sequence");
+  };
+
   const runWriteExceptionChecks = async () => {
     const errors = [];
     const onError = (event) => {
@@ -899,6 +996,17 @@
       passTo(executionTimingOutput, "EXECUTION TIMING CHECKS COMPLETE");
     } catch (error) {
       passTo(executionTimingOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
+
+  pendingResizeButton.addEventListener("click", async () => {
+    pendingResizeButton.disabled = true;
+    pendingResizeOutput.replaceChildren();
+    try {
+      await runPendingResizeChecks();
+      passTo(pendingResizeOutput, "PENDING RESIZE CHECKS COMPLETE");
+    } catch (error) {
+      passTo(pendingResizeOutput, `FAIL ${error && error.stack ? error.stack : error}`);
     }
   });
 
