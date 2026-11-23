@@ -736,10 +736,14 @@
       acceptedCursor += 1;
     }
     assert(restored.history.length <= 200, "restored execution journey exceeded retention cap");
-    assert(
-      durablePrefix.every((line) => restored.history.includes(line) || !durablePrefix.slice(-200).includes(line)),
-      "restored execution journey discarded a retained durable entry"
-    );
+    const retainedPrefixCount = Math.max(0, 200 - (restored.history.length - acceptedLines.length));
+    const retainedPrefix = durablePrefix.slice(-retainedPrefixCount);
+    let prefixCursor = 0;
+    for (const line of retainedPrefix) {
+      prefixCursor = restored.history.indexOf(line, prefixCursor);
+      assert(prefixCursor >= 0, `restored execution journey omitted retained prefix ${line}`);
+      prefixCursor += 1;
+    }
     if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
     else delete window.indexedDB;
   };
@@ -1389,10 +1393,9 @@
     localStorage.clear();
     window.dataLayer = [];
     const stage = (label) => {
-      orderedInputOutput.textContent = `CHECK ${label}`;
+      orderedInputOutput.dataset.stage = label;
     };
     const completeStage = (line) => {
-      orderedInputOutput.replaceChildren();
       passTo(orderedInputOutput, line);
     };
 
@@ -1538,7 +1541,7 @@
 
   orderedInputButton.addEventListener("click", async () => {
     orderedInputButton.disabled = true;
-    orderedInputOutput.textContent = "ORDERED INPUT CLICKED";
+    orderedInputOutput.replaceChildren();
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
       await runOrderedInputChecks();
