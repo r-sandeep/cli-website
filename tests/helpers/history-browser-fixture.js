@@ -5,6 +5,8 @@
   const button = document.querySelector("#run-store");
   const terminalOutput = document.querySelector("#terminal-results");
   const terminalButton = document.querySelector("#run-terminal");
+  const writeExceptionOutput = document.querySelector("#write-exception-results");
+  const writeExceptionButton = document.querySelector("#run-write-exceptions");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   let counter = 0;
 
@@ -245,6 +247,8 @@
       return wrapper;
     },
   });
+
+  const throwingPutFactory = () => wrappingFactory("quota");
 
   const unavailableStorage = async () => {
     const denied = createCommandHistoryStore({
@@ -538,6 +542,125 @@
     assert((await apply) === 1, "interactive cancellation return remains 1");
     passTo(terminalOutput, "PASS analytics counts, payloads and interactive return values");
   };
+
+  const runWriteExceptionChecks = async () => {
+    const errors = [];
+    const onError = (event) => {
+      errors.push(event.error || event.message || "window error");
+      event.preventDefault();
+    };
+    const onRejection = (event) => {
+      errors.push(event.reason || "unhandled rejection");
+      event.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+
+    try {
+      localStorage.setItem("rootvc.aliases", '[["p","ping"]]');
+      localStorage.setItem("rootvc.environment", '{"version":1,"variables":[["KEEP","yes"]]}');
+      localStorage.setItem("rootvc.bookmarks", '{"docs":"~/docs"}');
+      const unrelatedBefore = ["rootvc.aliases", "rootvc.environment", "rootvc.bookmarks"].map(
+        (key) => [key, localStorage.getItem(key)]
+      );
+
+      const appendName = name("callback-append");
+      const prior = { version: 1, entries: ["ping"] };
+      await seedRecord(appendName, prior);
+      const appendStore = createCommandHistoryStore({
+        databaseName: appendName,
+        indexedDB: throwingPutFactory(),
+        timeoutMs: 80,
+      });
+      await appendStore.ready;
+      await appendStore.append("echo accepted");
+      await appendStore.append("echo next");
+      equal(
+        appendStore.getSnapshot(),
+        ["ping", "echo accepted", "echo next"],
+        "append callback failure keeps complete memory"
+      );
+      equal(await readRecord(appendName), prior, "append callback failure leaves durable record");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert(errors.length === 0, `append callback escaped globally: ${errors}`);
+      passTo(writeExceptionOutput, "PASS append callback exception settles without uncaught errors");
+
+      const normalizationName = name("callback-normalization");
+      const oversized = Array.from({ length: 201 }, (_, index) => `saved ${index}`);
+      const oversizedRecord = { version: 1, entries: oversized };
+      await seedRecord(normalizationName, oversizedRecord);
+      const normalizationStore = createCommandHistoryStore({
+        databaseName: normalizationName,
+        indexedDB: throwingPutFactory(),
+        timeoutMs: 80,
+      });
+      await normalizationStore.ready;
+      equal(
+        normalizationStore.getSnapshot(),
+        oversized.slice(-200),
+        "normalization callback failure keeps capped memory"
+      );
+      equal(
+        await readRecord(normalizationName),
+        oversizedRecord,
+        "normalization callback failure leaves durable record"
+      );
+      passTo(
+        writeExceptionOutput,
+        "PASS normalization callback exception preserves exact memory and durable arrays"
+      );
+
+      appendStore.resetVisit();
+      equal(appendStore.getSnapshot(), [], "reset remains owner after failed callback");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      equal(appendStore.getSnapshot(), [], "late callback cannot refill reset memory");
+      await appendStore.append("echo after reset");
+      equal(appendStore.getSnapshot(), ["echo after reset"], "new visit delta remains usable");
+      equal(
+        ["rootvc.aliases", "rootvc.environment", "rootvc.bookmarks"].map(
+          (key) => [key, localStorage.getItem(key)]
+        ),
+        unrelatedBefore,
+        "history failure leaves unrelated browser data unchanged"
+      );
+      passTo(
+        writeExceptionOutput,
+        "PASS reset and late events preserve visit ownership and unrelated data"
+      );
+
+      const descriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+      Object.defineProperty(window, "indexedDB", {
+        configurable: true,
+        value: throwingPutFactory(),
+      });
+      try {
+        const terminal = createTerminal();
+        await terminal.historyReady;
+        runRootTerminal(terminal);
+        await terminal.executeCommandLine("ping", { promptAfter: false });
+        assert(terminal.rendered.some((line) => line.includes("pong")), "ping did not render pong");
+      } finally {
+        if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+        else delete window.indexedDB;
+      }
+      assert(errors.length === 0, `storage failure prevented terminal use: ${errors}`);
+      passTo(writeExceptionOutput, "PASS next production command remains usable after storage failure");
+    } finally {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    }
+  };
+
+  writeExceptionButton.addEventListener("click", async () => {
+    writeExceptionButton.disabled = true;
+    writeExceptionOutput.replaceChildren();
+    try {
+      await runWriteExceptionChecks();
+      passTo(writeExceptionOutput, "WRITE EXCEPTION CHECKS COMPLETE");
+    } catch (error) {
+      passTo(writeExceptionOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
 
   terminalButton.addEventListener("click", async () => {
     terminalButton.disabled = true;

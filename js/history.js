@@ -162,29 +162,38 @@ const createCommandHistoryStore = (options = {}) => {
         resolve(result);
       };
 
+      // Request handlers run after the operation callback has returned, so a
+      // synchronous exception in one of them is not caught by the outer
+      // transaction-construction try/catch. Give every handler the same
+      // transaction-local failure path, and make late callbacks inert after a
+      // timeout, abort, or earlier failure has settled the operation.
+      const fail = () => {
+        if (settled) return;
+        if (transaction) {
+          try {
+            transaction.abort();
+          } catch (error) {
+            // The transaction may already be complete or aborted.
+          }
+        }
+        finish(false);
+      };
+      const active = () => !settled;
+
       try {
         transaction = database.transaction(COMMAND_HISTORY_STORE, mode);
         transaction.oncomplete = () => finish(true);
         transaction.onerror = () => finish(false);
         transaction.onabort = () => finish(false);
-        timer = setTimeout(() => {
-          try {
-            transaction.abort();
-          } catch (error) {
-            // A completed or already-aborted transaction needs no more work.
-          }
-          finish(false);
-        }, timeoutMs);
-        operation(transaction.objectStore(COMMAND_HISTORY_STORE), transaction);
+        timer = setTimeout(fail, timeoutMs);
+        operation(
+          transaction.objectStore(COMMAND_HISTORY_STORE),
+          transaction,
+          fail,
+          active
+        );
       } catch (error) {
-        if (transaction) {
-          try {
-            transaction.abort();
-          } catch (abortError) {
-            // The transaction may already have been aborted by the platform.
-          }
-        }
-        finish(false);
+        fail();
       }
     });
 
@@ -201,40 +210,33 @@ const createCommandHistoryStore = (options = {}) => {
     let loaded = [];
     let loadedValidRecord = false;
     let incompatible = false;
-    const restored = await runTransaction("readwrite", (store, transaction) => {
+    const restored = await runTransaction("readwrite", (store, transaction, fail, active) => {
       const request = store.get(COMMAND_HISTORY_KEY);
-      request.onerror = () => {
-        try {
-          transaction.abort();
-        } catch (error) {
-          // The transaction error path settles readiness.
-        }
-      };
+      request.onerror = fail;
       request.onsuccess = () => {
-        const record = request.result;
-        if (record === undefined) {
-          loaded = [];
-          return;
-        }
-        if (!validRecord(record)) {
-          incompatible = true;
-          return;
-        }
+        if (!active()) return;
+        try {
+          const record = request.result;
+          if (record === undefined) {
+            loaded = [];
+            return;
+          }
+          if (!validRecord(record)) {
+            incompatible = true;
+            return;
+          }
 
-        loaded = newest(record.entries);
-        loadedValidRecord = true;
-        if (loaded.length !== record.entries.length) {
-          const put = store.put(
-            { version: COMMAND_HISTORY_RECORD_VERSION, entries: loaded },
-            COMMAND_HISTORY_KEY
-          );
-          put.onerror = () => {
-            try {
-              transaction.abort();
-            } catch (error) {
-              // The transaction error path settles readiness.
-            }
-          };
+          loaded = newest(record.entries);
+          loadedValidRecord = true;
+          if (loaded.length !== record.entries.length) {
+            const put = store.put(
+              { version: COMMAND_HISTORY_RECORD_VERSION, entries: loaded },
+              COMMAND_HISTORY_KEY
+            );
+            put.onerror = fail;
+          }
+        } catch (error) {
+          fail();
         }
       };
     });
@@ -269,46 +271,35 @@ const createCommandHistoryStore = (options = {}) => {
     if (!durable || database === null) return false;
 
     let incompatible = false;
-    const committed = await runTransaction("readwrite", (store, transaction) => {
+    const committed = await runTransaction("readwrite", (store, transaction, fail, active) => {
       const get = store.get(COMMAND_HISTORY_KEY);
-      get.onerror = () => {
-        try {
-          transaction.abort();
-        } catch (error) {
-          // The transaction error path settles append.
-        }
-      };
+      get.onerror = fail;
       get.onsuccess = () => {
-        const record = get.result;
-        let durableEntries;
-        if (record === undefined) {
-          durableEntries = [];
-        } else if (validRecord(record)) {
-          durableEntries = record.entries;
-        } else {
-          incompatible = true;
-          try {
-            transaction.abort();
-          } catch (error) {
-            // The abort event settles append.
+        if (!active()) return;
+        try {
+          const record = get.result;
+          let durableEntries;
+          if (record === undefined) {
+            durableEntries = [];
+          } else if (validRecord(record)) {
+            durableEntries = record.entries;
+          } else {
+            incompatible = true;
+            fail();
+            return;
           }
-          return;
-        }
 
-        const put = store.put(
-          {
-            version: COMMAND_HISTORY_RECORD_VERSION,
-            entries: newest(durableEntries.concat(normalized)),
-          },
-          COMMAND_HISTORY_KEY
-        );
-        put.onerror = () => {
-          try {
-            transaction.abort();
-          } catch (error) {
-            // The transaction error path settles append.
-          }
-        };
+          const put = store.put(
+            {
+              version: COMMAND_HISTORY_RECORD_VERSION,
+              entries: newest(durableEntries.concat(normalized)),
+            },
+            COMMAND_HISTORY_KEY
+          );
+          put.onerror = fail;
+        } catch (error) {
+          fail();
+        }
       };
     });
 

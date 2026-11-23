@@ -19,6 +19,8 @@ const html = `<!doctype html>
   <div id="store-results" aria-live="polite"></div>
   <button id="run-terminal" type="button">Run terminal checks</button>
   <div id="terminal-results" aria-live="polite"></div>
+  <button id="run-write-exceptions" type="button">Run write exception checks</button>
+  <div id="write-exception-results" aria-live="polite"></div>
   <script src="/__asd_history/history.js"></script>
   <script src="/__asd_history/pipeline.js"></script>
   <script src="/__asd_history/terminal-ext.js"></script>
