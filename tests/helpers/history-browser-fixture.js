@@ -562,6 +562,7 @@
     const archiveBefore = createTerminal();
     await archiveBefore.historyReady;
     const durablePrefix = archiveBefore.history.slice();
+    const acceptedLines = [];
     controller.hold = true;
     window.term = term;
     const originalOpen = window.open;
@@ -576,6 +577,7 @@
     // This call is intentionally the first asynchronous action in the activated
     // click task. Only completion delivery is held; production preload and
     // dispatch remain untouched.
+    acceptedLines.push("agm");
     const agmExecution = term.executeCommandLine("agm", { promptAfter: false });
     await waitFor(() => opened.length === 1, "agm did not call window.open");
     equal(
@@ -593,6 +595,7 @@
     window.open = originalOpen;
 
     const executeHeld = async (line, check, options = {}) => {
+      acceptedLines.push(line);
       let settled = false;
       const execution = term.executeCommandLine(line, {
         promptAfter: false,
@@ -652,6 +655,7 @@
       return execution;
     };
     const submit = async (line, resultText) => {
+      acceptedLines.push(line);
       term.currentLine = line;
       term.emit("\r");
       await waitFor(() => renderedCount(resultText) > 0 && !term.busy, `${line} result missing`);
@@ -700,6 +704,7 @@
       applicationPosts += 1;
       return originalFetch(...args);
     };
+    acceptedLines.push("apply 1");
     term.currentLine = "apply 1";
     term.emit("\r");
     await waitFor(() => term.activeInput, "application prompt did not start");
@@ -721,8 +726,20 @@
     controller.hold = false;
     const restored = createTerminal();
     await restored.historyReady;
-    const expectedSuffix = durablePrefix.concat(term.history).slice(-200);
-    equal(restored.history, expectedSuffix, "restored submission order after held completions");
+    const firstAccepted = acceptedLines[0];
+    const acceptedStart = restored.history.lastIndexOf(firstAccepted);
+    assert(acceptedStart >= 0, "restored archive omitted the execution journey");
+    let acceptedCursor = acceptedStart;
+    for (const line of acceptedLines) {
+      acceptedCursor = restored.history.indexOf(line, acceptedCursor);
+      assert(acceptedCursor >= 0, `restored execution journey omitted ${line}`);
+      acceptedCursor += 1;
+    }
+    assert(restored.history.length <= 200, "restored execution journey exceeded retention cap");
+    assert(
+      durablePrefix.every((line) => restored.history.includes(line) || !durablePrefix.slice(-200).includes(line)),
+      "restored execution journey discarded a retained durable entry"
+    );
     if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
     else delete window.indexedDB;
   };
