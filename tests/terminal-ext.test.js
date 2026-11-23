@@ -325,6 +325,9 @@ describe("terminal-ext", () => {
       promptAfter: false,
       showLeadingNewline: false,
     });
+    // The initial submission establishes replay eligibility; restore the active
+    // value so the assertion isolates resize replay's environment snapshot.
+    term.environment.set("KEEP", "value");
     term.dispatchCommand.mockClear();
     // Only commands submitted during this visit replay; restored recall is not
     // part of this list, so this records the eligible mutation explicitly.
