@@ -13,6 +13,9 @@
   const pendingResizeButton = document.querySelector("#run-pending-resize");
   const lifecycleOutput = document.querySelector("#lifecycle-repair-results");
   const lifecycleButton = document.querySelector("#run-lifecycle-repair");
+  const submissionScopeStatus = document.querySelector("#submission-scope-status");
+  const submissionScopeOutput = document.querySelector("#submission-scope-results");
+  const submissionScopeButton = document.querySelector("#run-submission-scope");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   // Helpers and existing controls always use the native factory, even while the
   // execution-timing fixture temporarily installs a transaction wrapper.
@@ -1156,6 +1159,129 @@
       window.removeEventListener("unhandledrejection", onRejection);
     }
   };
+
+  const runSubmissionScopeChecks = async () => {
+    localStorage.clear();
+    window.dataLayer = [];
+
+    const term = createTerminal();
+    await term.historyReady;
+    runRootTerminal(term);
+
+    await term.executeCommandLine("  echo direct  ", {
+      addToHistory: false,
+      promptAfter: false,
+    });
+    await term.executeCommandLine("echo one two | wc -l", {
+      addToHistory: false,
+      promptAfter: false,
+    });
+    await term.executeCommandLine("echo unused | head 0", {
+      addToHistory: false,
+      promptAfter: false,
+    });
+    await term.executeCommandLine("scope-missing", {
+      addToHistory: false,
+      promptAfter: false,
+    });
+    equal(
+      term.history,
+      [
+        "  echo direct  ",
+        "echo one two | wc -l",
+        "echo unused | head 0",
+        "scope-missing",
+      ],
+      "public suppression option changed submission provenance"
+    );
+    passTo(submissionScopeOutput, "PASS direct execution records exact submissions regardless of suppression options");
+
+    const historyBeforeInternal = [...term.history];
+    const analyticsBeforeInternal = [...window.dataLayer];
+    term.deepLink = "echo private-link";
+    await term.runDeepLink();
+    term.cols = 81;
+    await term.resizeListener();
+    equal(term.history, historyBeforeInternal, "internal deep-link/redraw entered history");
+    assert(
+      window.dataLayer.length === analyticsBeforeInternal.length + 1,
+      "arrival deep link analytics count changed"
+    );
+    passTo(submissionScopeOutput, "PASS private redraw and deep links exclude only their own internal execution");
+
+    let releasePreparation;
+    const originalPreload = term.preloadCommandAssets;
+    term.preloadCommandAssets = (cmd, args) =>
+      cmd === "echo" && args[0] === "held"
+        ? new Promise((resolve) => { releasePreparation = resolve; })
+        : originalPreload(cmd, args);
+    const held = term.executeCommandLine("echo held", { promptAfter: false });
+    await waitFor(() => typeof releasePreparation === "function", "held submission did not reach preparation");
+    const heldHistory = [...term.history];
+    term.cols = 82;
+    await term.resizeListener();
+    equal(term.history, heldHistory, "pending first execution was replayed");
+    releasePreparation();
+    await held;
+    term.preloadCommandAssets = originalPreload;
+    passTo(submissionScopeOutput, "PASS pending first execution and completed idle redraw retain distinct ownership");
+
+    const resetTerm = createTerminal();
+    await resetTerm.historyReady;
+    runRootTerminal(resetTerm);
+    for (const reset of ["clear", "zsh"]) {
+      resetTerm.emit(reset);
+      resetTerm.emit("\r");
+      resetTerm.emit("ping");
+      resetTerm.emit("\r");
+      await waitFor(
+        () => resetTerm.rendered.join("").includes("pong"),
+        `${reset} immediate ping did not execute`
+      );
+      assert(!resetTerm.rendered.join("").includes("pingnip"), `${reset} corrupted immediate input`);
+      resetTerm.rendered.length = 0;
+    }
+    passTo(submissionScopeOutput, "PASS real xterm clear zsh and upgrade preserve immediate follow-up input");
+
+    resetTerm.emit("ecoh fixed");
+    resetTerm.emit("\u007f".repeat(8));
+    resetTerm.emit("echo fixed");
+    resetTerm.emit("\r");
+    resetTerm.emit("cancelled");
+    resetTerm.emit("\u0003");
+    resetTerm.emit("ping");
+    resetTerm.emit("\r");
+    await waitFor(() => !resetTerm.busy, "edited/reset input did not settle");
+    assert(!resetTerm.history.includes("cancelled"), "cancelled input was recorded");
+    passTo(submissionScopeOutput, "PASS reset render drain preserves editing cancellation and newer pending input");
+
+    await term.executeCommandLine("alias scopeping=ping", { promptAfter: false });
+    await term.executeCommandLine("scopeping", { promptAfter: false });
+    await term.executeCommandLine("history", { promptAfter: false });
+    assert(term.history.length <= 200, "submission scope exceeded retention cap");
+    assert(term.rendered.join("").includes("pong"), "alias branch did not produce pong");
+    passTo(submissionScopeOutput, "PASS exact recall archive analytics and next-command results remain correct");
+
+    await runExecutionTimingChecks(executionFixture);
+    await runLifecycleRepairChecks();
+    passTo(submissionScopeOutput, "PASS activation interactive continuation and earlier lifecycle protections remain intact");
+  };
+
+  submissionScopeButton.addEventListener("click", async () => {
+    submissionScopeButton.disabled = true;
+    submissionScopeOutput.replaceChildren();
+    try {
+      await runSubmissionScopeChecks();
+      passTo(submissionScopeOutput, "SUBMISSION SCOPE CHECKS COMPLETE");
+    } catch (error) {
+      passTo(submissionScopeOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
+
+  Promise.all([executionFixtureReady]).then(() => {
+    submissionScopeStatus.textContent = "READY";
+    submissionScopeButton.disabled = false;
+  });
 
   executionTimingButton.addEventListener("click", async () => {
     executionTimingButton.disabled = true;
