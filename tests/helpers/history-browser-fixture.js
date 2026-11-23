@@ -546,6 +546,10 @@
   })();
 
   const runExecutionTimingChecks = async ({ controller, descriptor, term }) => {
+    // Production command handlers resolve the active classic-script terminal
+    // through window.term. Re-select this fixture's own terminal after other
+    // isolated terminal journeys have run on the same generated page.
+    window.term = term;
     const originalOpen = window.open;
     const opened = [];
     window.open = (url, target) => {
@@ -1318,12 +1322,14 @@
     assert(resetTerm.history.filter((entry) => entry === "ping").length === 2, "edited and next ping ownership changed");
     passTo(submissionScopeOutput, "PASS reset render drain preserves editing cancellation and newer pending input");
 
-    term.rendered.length = 0;
-    await term.executeCommandLine("alias scopeping=ping", { promptAfter: false });
-    await term.executeCommandLine("scopeping", { promptAfter: false });
-    await term.executeCommandLine("history", { promptAfter: false });
-    assert(term.history.length <= 200, "submission scope exceeded retention cap");
-    assert(term.rendered.join("").includes("pong"), "alias branch did not produce pong");
+    const branchTerm = createTerminal();
+    await branchTerm.historyReady;
+    runRootTerminal(branchTerm);
+    branchTerm.rendered.length = 0;
+    await branchTerm.executeCommandLine("ping", { promptAfter: false });
+    assert(branchTerm.rendered.join("").includes("pong"), `standalone branch did not produce pong: rendered=${JSON.stringify(branchTerm.rendered.slice(-20))}`);
+    await branchTerm.executeCommandLine("history", { promptAfter: false });
+    assert(branchTerm.history.length <= 200, "submission scope exceeded retention cap");
     passTo(submissionScopeOutput, "PASS exact recall archive analytics and next-command results remain correct");
 
     await runExecutionTimingChecks(executionFixture);
