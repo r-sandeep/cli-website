@@ -5,17 +5,29 @@ let env;
 
 function createTerm(overrides = {}) {
   const term = {
+    _initialized: false,
     VERSION: 4,
     buffer: { active: { cursorX: 0 } },
+    busy: false,
+    clearCurrentLine: vi.fn(),
     cols: 80,
     currentLine: "",
     focus: vi.fn(),
+    locked: false,
     reset: vi.fn(),
+    runDeepLink: vi.fn(),
     scrollToBottom: vi.fn(),
     write: vi.fn(),
     writeln: vi.fn(),
     ...overrides,
   };
+  term.attachCustomKeyEventHandler = vi.fn((handler) => {
+    term._customKeyHandler = handler;
+  });
+  term.onData = vi.fn((handler) => {
+    term._onData = handler;
+    return { dispose: vi.fn() };
+  });
   return term;
 }
 
@@ -136,12 +148,12 @@ describe("saved terminal history integration", () => {
       Array.from({ length: 200 }, (_, index) => `missing ${index + 1}`)
     );
 
-    term.stylePrint.mockClear();
+    const listing = [];
+    term.stylePrint = vi.fn((line) => listing.push(line));
     await term.executeCommandLine("history", { promptAfter: false });
     expect(term.history).toHaveLength(200);
     expect(term.history[0]).toBe("missing 2");
     expect(term.history.at(-1)).toBe("history");
-    const listing = term.stylePrint.mock.calls.map(([line]) => line);
     expect(listing[0]).toBe("1000  missing 2");
     expect(listing.at(-1)).toBe("1199  history");
   });
