@@ -1571,12 +1571,14 @@
       () => term.activeInput?.label.includes("Email address"),
       "answered application did not reach email prompt"
     );
+    const promptsBeforeCancel = promptCount();
     term.emit("\u0003");
     await waitFor(
       () => rendered().includes("Application cancelled.") && !term.locked && !term.busy,
       "answered application cancellation did not settle"
     );
     assert(applicationPosts === 0, "cancelled application made a POST");
+    assert(promptCount() === promptsBeforeCancel, "cancellation printed an extra shell prompt");
     assert(!rendered().toLowerCase().includes("command not found: ada"), "form answer executed as a command");
     assert(!term.history.includes("Ada"), "form answer entered recall history");
     equal(term.history, ["apply 1"], "form answer changed shell recall");
