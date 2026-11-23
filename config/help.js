@@ -1,5 +1,6 @@
 const shortcuts = {
   "Tab": "complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches",
+  "ArrowUp": "recall commands saved in this browser",
   "Alt+Left": "move to the start of the previous word",
   "Alt+Right": "move to the start of the next word",
   "Ctrl+W": "delete back to the start of the previous word",
@@ -12,6 +13,12 @@ const shortcuts = {
 const help = {
   "%tui%": "open the keyboard-driven directory (q to return)",
   "%help%": "list all commands (you're looking at it)",
+  "%history%": "saved in this browser; newest 200; ArrowUp recalls",
+  "HISTORY DETAILS": "original submitted text and duplicates are saved; history numbers entries from 1000",
+  "  Browser storage unavailable": "keep visit-only memory history",
+  "  Unsuccessful submissions": "saved for the next visit",
+  "  Open tabs": "keep independent recall; saved submissions combine for later visits",
+  "  %clear%, %zsh%, %upgrade%": "clear current recall and replay only; their submitted lines stay saved",
   "%version% [--json]": "show the terminal version and build date",
   "%alias% [name[=value]]": "define, list, or query command aliases",
   "%unalias% name": "remove a command alias",
