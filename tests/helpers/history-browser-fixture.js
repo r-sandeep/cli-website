@@ -1371,7 +1371,15 @@
   const runOrderedInputChecks = async () => {
     localStorage.clear();
     window.dataLayer = [];
+    const stage = (label) => {
+      orderedInputOutput.textContent = `CHECK ${label}`;
+    };
+    const completeStage = (line) => {
+      orderedInputOutput.replaceChildren();
+      passTo(orderedInputOutput, line);
+    };
 
+    stage("overlapping acceptance order");
     const replayTerm = createTerminal();
     await replayTerm.historyReady;
     runRootTerminal(replayTerm);
@@ -1405,8 +1413,9 @@
       if (priorFast === undefined) delete commands.asdfast;
       else commands.asdfast = priorFast;
     }
-    passTo(orderedInputOutput, "PASS overlapping completion replays in exact submission order");
+    completeStage("PASS overlapping completion replays in exact submission order");
 
+    stage("newest-200 reservations");
     const retentionTerm = createTerminal();
     await retentionTerm.historyReady;
     runRootTerminal(retentionTerm);
@@ -1433,8 +1442,9 @@
       if (priorMark === undefined) delete commands.asdmark;
       else commands.asdmark = priorMark;
     }
-    passTo(orderedInputOutput, "PASS replay reservations retain exact newest-200 and reset ownership");
+    completeStage("PASS replay reservations retain exact newest-200 and reset ownership");
 
+    stage("startup input handoff");
     const startupTerm = createTerminal(true);
     await startupTerm.historyReady;
     const startupInput = [..."ping", "\r"];
@@ -1447,8 +1457,9 @@
     assert(startupTerm.history.filter((entry) => entry === "ping").length === 1, "startup input executed more than once");
     startupReceiver("x");
     await waitFor(() => startupTerm.currentLine === "x", "startup handoff did not retain live input");
-    passTo(orderedInputOutput, "PASS startup receives input before readiness and executes after prompt parsing");
+    completeStage("PASS startup receives input before readiness and executes after prompt parsing");
 
+    stage("actual xterm reset burst");
     const resetTerm = createTerminal(true);
     await resetTerm.historyReady;
     runRootTerminal(resetTerm);
@@ -1461,8 +1472,9 @@
     resetTerm.emit("\r");
     await waitFor(() => resetTerm.rendered.join("").includes("pong"), "parser-paced edited ping did not execute");
     assert(!resetTerm.rendered.join("").includes("pingnip"), "reset burst reversed cursor input");
-    passTo(orderedInputOutput, "PASS real xterm reset bursts preserve exact input and result rows");
+    completeStage("PASS real xterm reset bursts preserve exact input and result rows");
 
+    stage("editing cancellation recall and completion");
     emitText(resetTerm, "cancelled");
     resetTerm.emit("\u0003");
     resetTerm.emit("\033[A");
@@ -1478,11 +1490,12 @@
     await waitFor(() => resetTerm.rendered.join("").includes("cedar"), "completed echo command did not render cedar");
     assert(!resetTerm.history.includes("cancelled"), "cancelled lifecycle input entered history");
     assert(resetTerm.history.includes("echo cedar"), "completed spelling was not stored");
-    passTo(orderedInputOutput, "PASS parser-paced editing cancellation recall and completion remain usable");
+    completeStage("PASS parser-paced editing cancellation recall and completion remain usable");
 
+    stage("preserved execution branches");
     await runExecutionTimingChecks(executionFixture);
     await runLifecycleRepairChecks();
-    passTo(orderedInputOutput, "PASS branch activation analytics storage and late-settlement protections remain intact");
+    completeStage("PASS branch activation analytics storage and late-settlement protections remain intact");
   };
 
   submissionScopeButton.addEventListener("click", async () => {
@@ -1498,7 +1511,8 @@
 
   orderedInputButton.addEventListener("click", async () => {
     orderedInputButton.disabled = true;
-    orderedInputOutput.replaceChildren();
+    orderedInputOutput.textContent = "ORDERED INPUT CLICKED";
+    await new Promise((resolve) => setTimeout(resolve, 0));
     try {
       await runOrderedInputChecks();
       passTo(orderedInputOutput, "ORDERED INPUT CHECKS COMPLETE");
