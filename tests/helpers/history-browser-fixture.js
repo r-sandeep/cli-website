@@ -546,9 +546,15 @@
   })();
 
   const runExecutionTimingChecks = async ({ controller, descriptor, term }) => {
-    // Production command handlers resolve the active classic-script terminal
-    // through window.term. Re-select this fixture's own terminal after other
-    // isolated terminal journeys have run on the same generated page.
+    // When this accepted journey is composed after another fixture journey, the
+    // shared durable archive legitimately contains that earlier journey while
+    // this tab's recall remains independent. Snapshot that prefix before holding
+    // this journey's completions, then re-select its production terminal.
+    controller.hold = false;
+    const archiveBefore = createTerminal();
+    await archiveBefore.historyReady;
+    const durablePrefix = archiveBefore.history.slice();
+    controller.hold = true;
     window.term = term;
     const originalOpen = window.open;
     const opened = [];
@@ -707,7 +713,7 @@
     controller.hold = false;
     const restored = createTerminal();
     await restored.historyReady;
-    const expectedSuffix = term.history.slice(-200);
+    const expectedSuffix = durablePrefix.concat(term.history).slice(-200);
     equal(restored.history, expectedSuffix, "restored submission order after held completions");
     if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
     else delete window.indexedDB;
