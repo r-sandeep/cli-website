@@ -21,7 +21,7 @@ function loadTerminalExt(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/history.js", "js/pipeline.js", "js/terminal-ext.js"]);
   return env.exportValues(["extend"]);
 }
 
@@ -88,7 +88,12 @@ function loadAliasTerminal() {
       term,
     },
   });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts([
+    "js/history.js",
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
   const { commands, extend } = env.exportValues(["commands", "extend"]);
   extend(term);
   return { commands, extend, term };
@@ -315,10 +320,14 @@ describe("terminal-ext", () => {
     term.runDeepLink = vi.fn();
     env.window.__term = term;
     fitTo(120);
-    term.history = ["historical mutation"];
-    // Replay now runs each history line through executeCommandLine, so the
-    // replayed mutation happens at the dispatch seam.
     term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
+    await term.executeCommandLine("historical mutation", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    term.dispatchCommand.mockClear();
+    // Only commands submitted during this visit replay; restored recall is not
+    // part of this list, so this records the eligible mutation explicitly.
     const persistedBeforeResize = env.window.localStorage.getItem(
       environmentStorageKey
     );
@@ -526,8 +535,12 @@ describe("terminal-ext", () => {
     const { extend } = loadTerminalExt({ commands: { whois } });
     const term = createTerm();
     env.window.__term = term;
-    extend(term); // resets history, so it is set afterwards
-    term.history = ["whois lee"];
+    extend(term); // starts recall and visit replay empty
+    await term.executeCommandLine("whois lee", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    whois.mockClear();
     term.init = vi.fn();
     term.prompt = vi.fn();
 
@@ -552,7 +565,13 @@ describe("terminal-ext", () => {
     const term = createTerm();
     env.window.__term = term;
     extend(term);
-    term.history = ["upgrade", "apply 1", "test", "claude", "whois lee"];
+    for (const line of ["upgrade", "apply 1", "test", "claude", "whois lee"]) {
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+    }
+    for (const command of Object.values(commands)) command.mockClear();
     fitTo(40);
     term.init = vi.fn();
     term.prompt = vi.fn();
@@ -850,7 +869,7 @@ describe("terminal-ext", () => {
     const term = createTerm();
     extend(term);
     term.environment.set("ACTIVE", "later value");
-    term.history = [
+    const replayLines = [
       "export TEMP=one",
       "export TEMP=two",
       "env",
@@ -869,6 +888,15 @@ describe("terminal-ext", () => {
       }
     };
     env.window.commands.unset = (args) => term.environment.unset(args[0]);
+    for (const line of replayLines) {
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+    }
+    term.environment.set("ACTIVE", "later value");
+    term.environment.unset("TEMP");
+    term.writeln.mockClear();
     const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
 
     env.window.__term = term;

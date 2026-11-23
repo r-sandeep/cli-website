@@ -79,6 +79,7 @@ function createTerminalEnvironment(storage, cwd = "~", storageGetter) {
   env.window.term = term;
   env.loadScripts([
     "js/bookmarks.js",
+    "js/history.js",
     // terminal-ext.js (main) reads the Pipeline global from js/pipeline.js.
     "js/pipeline.js",
     "config/commands.js",

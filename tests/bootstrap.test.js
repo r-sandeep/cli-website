@@ -11,9 +11,14 @@ function loadBootstrap(overrides = {}) {
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
   const preloadCommandAssets = vi.fn(() => Promise.resolve());
+  let releaseHistory;
+  const historyReady = new Promise((resolve) => {
+    releaseHistory = resolve;
+  });
   const extend = vi.fn((instance) => {
     instance.deepLink = "whois lee";
     instance.preloadCommandAssets = preloadCommandAssets;
+    instance.historyReady = historyReady;
   });
   const runRootTerminal = vi.fn();
   const preloadASCIIArt = vi.fn();
@@ -66,6 +71,7 @@ function loadBootstrap(overrides = {}) {
     preloadCommandAssets,
     preloadFiles,
     requestIdleCallback,
+    releaseHistory,
     runRootTerminal,
     term,
     Terminal,
@@ -81,10 +87,17 @@ afterEach(() => {
 });
 
 describe("bootstrap", () => {
+  const historyReadyTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
   it("boots the terminal and preloads deep-link assets before idle work", async () => {
     const state = loadBootstrap();
 
     await env.window.deepLinkAssetPromise;
+
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+    expect(state.idleCalls).toHaveLength(0);
+    state.releaseHistory();
+    await historyReadyTick();
 
     expect(state.term.open).toHaveBeenCalledWith(
       env.document.getElementById("terminal")
@@ -108,6 +121,8 @@ describe("bootstrap", () => {
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
     const state = loadBootstrap();
+    state.releaseHistory();
+    await historyReadyTick();
     const originalAppendChild = env.document.head.appendChild.bind(
       env.document.head
     );

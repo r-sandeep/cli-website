@@ -1,4 +1,4 @@
-(function bootstrapTerminal() {
+(async function bootstrapTerminal() {
   const optionalScriptPromises = {};
 
   function loadOptionalScript(src) {
@@ -49,6 +49,10 @@
       }
     );
   }
+  // The history store has its own bounded failure fallback. Await it before the
+  // first init, prompt, deep link, or ordinary input handler so returned-visit
+  // recall is usable immediately without executing any restored command.
+  await term.historyReady;
   runRootTerminal(term);
 
   window.scheduleIdleTask(() => {

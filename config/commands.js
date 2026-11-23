@@ -532,6 +532,7 @@ const commands = {
   },
 
   // Reinitializes the terminal under the current user (simulates a new shell).
+  // init performs a visit-only recall/replay reset; saved history remains.
   zsh: function () {
     term.init(term.user);
   },
@@ -776,7 +777,8 @@ const commands = {
     term.dispatchCommand("open", ["welcome.htm"]);
   },
 
-  // Reinitializes the terminal, clearing history and resetting the prompt.
+  // Reinitializes the terminal, clearing this visit's recall/replay and
+  // resetting the prompt while leaving saved history for the next visit.
   clear: function () {
     term.init();
   },

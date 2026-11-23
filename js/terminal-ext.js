@@ -58,11 +58,15 @@ const extend = (term) => {
   });
   term.busy = false;
 
-  const recordSubmittedCommand = async (line) => {
-    await historyStore.append(line);
+  const recordSubmittedCommand = (line) => {
+    const settlement = historyStore.append(line).catch(() => false);
+    // append updates visit memory before its first await; reflect that snapshot
+    // immediately so parsing/preloading can keep their established timing while
+    // dispatch still waits for the bounded durable settlement below.
     term.history = historyStore.getSnapshot();
     visitReplay = visitReplay.concat(line).slice(-COMMAND_HISTORY_LIMIT);
     term.historyCursor = -1;
+    return settlement;
   };
 
   const resetVisitHistory = () => {
@@ -663,10 +667,7 @@ const extend = (term) => {
       ...options,
     };
     const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    let historySettlement = Promise.resolve();
     let exitStatus;
 
     try {
@@ -674,12 +675,17 @@ const extend = (term) => {
         term.busy = true;
       }
 
-      // Record the original submitted text once, before alias expansion,
-      // preloading, validation or dispatch can fail. Internal execution paths
-      // opt out with addToHistory:false (deep links and resize replay).
+      // Start recording the original submitted text once before alias expansion,
+      // preloading, validation or dispatch. Internal execution paths opt out
+      // with addToHistory:false (deep links and resize replay).
       if (parsed.line.length > 0 && settings.addToHistory) {
-        await recordSubmittedCommand(parsed.line);
+        historySettlement = recordSubmittedCommand(parsed.line);
       }
+
+      // User aliases expand exactly once, on the interactive line and before
+      // pipeline parsing; redirects and replays never expand a second time.
+      const expanded = expandUserAlias(parsed);
+      const parsedPipeline = Pipeline.parsePipeline(expanded.line);
 
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
@@ -689,6 +695,7 @@ const extend = (term) => {
             term.writeln("");
           }
 
+          await historySettlement;
           term.stylePrint(validation.error.message);
 
           if (settings.trackAnalytics) {
@@ -701,6 +708,7 @@ const extend = (term) => {
           }
         } else {
           await term.preloadCommandAssets(validation.producer);
+          await historySettlement;
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
@@ -747,6 +755,7 @@ const extend = (term) => {
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
+        await historySettlement;
 
         if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
           term.writeln("");
