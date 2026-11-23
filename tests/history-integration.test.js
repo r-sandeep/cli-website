@@ -64,7 +64,7 @@ function createTerminal(storage, { hash = "" } = {}) {
     },
   });
   Object.defineProperty(env.window, "localStorage", { configurable: true, value: storage });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/pipeline.js", "js/bookmarks.js", "config/commands.js", "js/terminal-ext.js"]);
   const { extend } = env.exportValues(["extend"]);
   extend(term);
   term.pos = () => term.currentLine.length;
@@ -270,7 +270,7 @@ describe("saved history terminal integration", () => {
       configurable: true,
       get: storageFactory,
     });
-    env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+    env.loadScripts(["js/pipeline.js", "js/bookmarks.js", "config/commands.js", "js/terminal-ext.js"]);
     env.exportValues(["extend"]).extend(term);
     term.pos = () => term.currentLine.length;
     env.loadScript("js/terminal.js");
@@ -301,7 +301,7 @@ describe("saved history terminal integration", () => {
     await vi.waitFor(() => expect(env.window.dataLayer?.length).toBe(1));
     expect(term.history).toEqual(["saved"]);
     expect(term.getAliases()).toEqual([["p", "ping"]]);
-    expect(term.environment.snapshot()).toEqual([["KEEP", "original"]]);
+    expect(Array.from(term.environment.snapshot().entries())).toEqual([["KEEP", "original"]]);
     await enter(term, "p");
     await enter(term, "go desk");
     expect(term.cwd).toBe("projects");
