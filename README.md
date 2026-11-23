@@ -47,8 +47,8 @@ command itself.
 Open tabs keep independent recall views. Before a tab saves a command, it
 rereads durable history so sequential saves from other tabs are retained;
 truly overlapping writes use the last completed write. Saved history is kept
-in browser storage and is not uploaded by this feature. Existing command
-analytics remain unchanged.
+in browser storage and is not uploaded by this feature.
+Existing command analytics remain unchanged.
 
 ## Output pipelines
 
