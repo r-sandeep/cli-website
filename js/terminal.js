@@ -304,7 +304,12 @@ function runRootTerminal(term) {
     return false;
   });
 
-  term.onData((e) => {
+  const processInput = (e) => {
+    // Reset commands replace xterm's buffer while its parser is still draining
+    // writes. The terminal extension owns that narrow transition and returns
+    // queued bytes here, so editing, control keys and Enter use this exact same
+    // production path rather than a second input algorithm.
+    if (term.bufferResetInput?.(e)) return;
     if (term._initialized && !term.locked && !term.busy) {
       if (e !== "\t") resetCompletion();
       switch (e) {
@@ -408,7 +413,12 @@ function runRootTerminal(term) {
       }
       term.scrollToBottom();
     }
+  };
+
+  term.setResetInputDrainer?.((queued) => {
+    for (const data of queued) processInput(data);
   });
+  term.onData(processInput);
 }
 
 function colorText(text, color) {

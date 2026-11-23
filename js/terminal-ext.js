@@ -52,6 +52,10 @@ const extend = (term) => {
   let visitReplay = [];
   let visitGeneration = 0;
   let activeExecutions = 0;
+  let resetRenderGeneration = 0;
+  let resetRenderActive = false;
+  let resetRenderInput = [];
+  let resetInputDrainer = null;
   term.history = [];
   term.historyCursor = -1;
   const historyReady = historyStore.ready.then(() => {
@@ -90,6 +94,36 @@ const extend = (term) => {
     term.history = historyStore.getSnapshot();
     visitReplay = [];
     term.historyCursor = -1;
+  };
+
+  // A reset replaces xterm's buffer asynchronously. Keep bytes that arrive
+  // after the reset command but before the renderer has consumed its final
+  // prompt, then return them to the one production input function in FIFO
+  // order. This boundary is independent of history durability.
+  term.setResetInputDrainer = (drainer) => {
+    resetInputDrainer = drainer;
+  };
+  term.bufferResetInput = (data) => {
+    if (!resetRenderActive) return false;
+    resetRenderInput.push(data);
+    return true;
+  };
+  const beginResetRender = () => {
+    resetRenderGeneration += 1;
+    resetRenderActive = true;
+  };
+  const finishResetRender = () => {
+    if (!resetRenderActive) return;
+    const generation = resetRenderGeneration;
+    // An empty write with a callback is an xterm parser-drain barrier for every
+    // reset and prompt write queued before it.
+    term.write("", () => {
+      if (!resetRenderActive || generation !== resetRenderGeneration) return;
+      resetRenderActive = false;
+      const queued = resetRenderInput;
+      resetRenderInput = [];
+      if (resetInputDrainer) resetInputDrainer(queued);
+    });
   };
 
   // User aliases are closure-owned so command code can only change them through
@@ -672,9 +706,8 @@ const extend = (term) => {
     }
   };
 
-  term.executeCommandLine = async (line, options = {}) => {
+  const executeCommandLine = async (line, options = {}, context) => {
     const settings = {
-      addToHistory: true,
       manageBusy: true,
       promptAfter: true,
       showLeadingNewline: true,
@@ -682,6 +715,10 @@ const extend = (term) => {
       scrollAfter: true,
       ...options,
     };
+    // addToHistory was historically a presentation option. It must not grant
+    // public callers a provenance exemption; only closure-private contexts can
+    // identify redraw and deep-link work as internal.
+    const isSubmission = context === "submission";
     const parsed = parseCommandLine(line);
     let historySettlement = Promise.resolve();
     let submission = null;
@@ -689,7 +726,7 @@ const extend = (term) => {
     let exitStatus;
 
     try {
-      if (settings.addToHistory) {
+      if (isSubmission) {
         activeExecutions += 1;
         ownsFirstExecution = true;
       }
@@ -698,9 +735,9 @@ const extend = (term) => {
       }
 
       // Start recording the original submitted text once before alias expansion,
-      // preloading, validation or dispatch. Internal execution paths opt out
-      // with addToHistory:false (deep links and resize replay).
-      if (parsed.line.length > 0 && settings.addToHistory) {
+      // preloading, validation or dispatch. Only closure-private deep-link and
+      // redraw calls carry an internal context that omits submission effects.
+      if (parsed.line.length > 0 && isSubmission) {
         submission = recordSubmittedCommand(String(line));
         historySettlement = submission.settlement;
       }
@@ -817,6 +854,11 @@ const extend = (term) => {
       if (ownsFirstExecution) {
         activeExecutions -= 1;
       }
+
+      // reset handlers synchronously replace the terminal buffer, while xterm
+      // parses those writes asynchronously. The final command-owned prompt is
+      // the one parser boundary that may release transition input.
+      finishResetRender();
     }
 
     // Completed execution owns replay independently of durable settlement.
@@ -830,6 +872,9 @@ const extend = (term) => {
     await historySettlement;
     return exitStatus;
   };
+
+  term.executeCommandLine = (line, options = {}) =>
+    executeCommandLine(line, options, "submission");
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -875,8 +920,7 @@ const extend = (term) => {
       for (const c of visitReplay) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
-          await term.executeCommandLine(c, {
-            addToHistory: false,
+          await executeCommandLine(c, {
             manageBusy: false,
             promptAfter: false,
             showLeadingNewline: false,
@@ -937,6 +981,7 @@ const extend = (term) => {
 
     term.user = user;
     if (!preserveHistory) {
+      beginResetRender();
       resetVisitHistory();
     }
     term.focus();
@@ -954,15 +999,14 @@ const extend = (term) => {
     // so every keystroke was echoed twice.
     if (replay && term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(term.deepLink)).cmd)) return;
     if (term.deepLink != "") {
-      return term.executeCommandLine(term.deepLink, {
-        addToHistory: false,
+      return executeCommandLine(term.deepLink, {
         promptAfter: false,
         showLeadingNewline: false,
         // Deep links are how visitors now reach a specific company or person,
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.
         trackAnalytics: !replay,
-      }).catch((error) => {
+      }, "internal").catch((error) => {
         console.error("Deep link failed", error);
       });
     }
