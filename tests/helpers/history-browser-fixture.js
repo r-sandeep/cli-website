@@ -11,6 +11,8 @@
   const executionTimingButton = document.querySelector("#run-execution-timing");
   const pendingResizeOutput = document.querySelector("#pending-resize-results");
   const pendingResizeButton = document.querySelector("#run-pending-resize");
+  const lifecycleOutput = document.querySelector("#lifecycle-repair-results");
+  const lifecycleButton = document.querySelector("#run-lifecycle-repair");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   // Helpers and existing controls always use the native factory, even while the
   // execution-timing fixture temporarily installs a transaction wrapper.
@@ -880,6 +882,166 @@
     passTo(pendingResizeOutput, "PASS next command and reload retain the exact newest-200 submission sequence");
   };
 
+  const runLifecycleRepairChecks = async () => {
+    localStorage.clear();
+
+    const failedName = name("lifecycle-sticky-failure");
+    const prior = { version: 1, entries: ["previous"] };
+    await seedRecord(failedName, prior);
+    let writeAttempts = 0;
+    const stickyFactory = wrappingFactory("quota");
+    const originalOpen = stickyFactory.open.bind(stickyFactory);
+    stickyFactory.open = (...args) => {
+      const request = originalOpen(...args);
+      let nativeSuccess = request.onsuccess;
+      Object.defineProperty(request, "onsuccess", {
+        configurable: true,
+        get: () => nativeSuccess,
+        set(handler) {
+          nativeSuccess = function () {
+            handler();
+            const database = request.result;
+            if (!database || database.__counted) return;
+            database.__counted = true;
+            const originalTransaction = database.transaction.bind(database);
+            database.transaction = (...transactionArgs) => {
+              const transaction = originalTransaction(...transactionArgs);
+              const originalObjectStore = transaction.objectStore.bind(transaction);
+              transaction.objectStore = (...storeArgs) => {
+                const store = originalObjectStore(...storeArgs);
+                const originalPut = store.put.bind(store);
+                store.put = (...putArgs) => {
+                  writeAttempts += 1;
+                  return originalPut(...putArgs);
+                };
+                return store;
+              };
+              return transaction;
+            };
+          };
+        },
+      });
+      return request;
+    };
+    const failed = createCommandHistoryStore({
+      databaseName: failedName,
+      indexedDB: stickyFactory,
+      timeoutMs: 80,
+    });
+    await failed.ready;
+    const first = failed.append("first");
+    const second = failed.append("second");
+    const third = failed.append("third");
+    await Promise.all([first, second, third]);
+    equal(failed.getSnapshot(), ["previous", "first", "second", "third"], "sticky failure memory");
+    equal(await readRecord(failedName), prior, "sticky failure leaves durable archive");
+    assert(writeAttempts === 1, `queued writes started after sticky failure: ${writeAttempts}`);
+    passTo(lifecycleOutput, "PASS failed append fences queued writes and preserves complete memory and durable state");
+
+    for (const seedSize of [0, 1, 199, 200]) {
+      const databaseName = name(`lifecycle-healthy-${seedSize}`);
+      const seed = Array.from({ length: seedSize }, (_, index) => `seed ${index}`);
+      await seedRecord(databaseName, { version: 1, entries: seed });
+      const firstStore = storeFor(databaseName);
+      const secondStore = storeFor(databaseName);
+      await Promise.all([firstStore.ready, secondStore.ready]);
+      await Promise.all([firstStore.append("duplicate"), secondStore.append("other")]);
+      await firstStore.append("duplicate");
+      firstStore.resetVisit();
+      await firstStore.append("after reset");
+      const expected = seed.concat("duplicate", "other", "duplicate", "after reset").slice(-200);
+      equal((await readRecord(databaseName)).entries, expected, `healthy archive ${seedSize}`);
+      equal(firstStore.getSnapshot(), ["after reset"], `independent reset ${seedSize}`);
+    }
+    passTo(lifecycleOutput, "PASS healthy interleaved appends and resets retain the exact newest-200 archive");
+
+    await deleteDatabase(COMMAND_HISTORY_DATABASE);
+    const held = holdingFactory();
+    const descriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    Object.defineProperty(window, "indexedDB", { configurable: true, value: held.factory });
+    const term = createTerminal();
+    await term.historyReady;
+    runRootTerminal(term);
+    held.controller.hold = true;
+    const execution = term.executeCommandLine("ping", { promptAfter: false });
+    await waitFor(() => !term.busy && held.controller.pending.length > 0, "completed ping did not reach held storage");
+    term.currentLine = "echo pending";
+    window.fitAddon.fit = () => { term.cols = 100; };
+    await term.resizeListener();
+    assert(term.rendered.some((line) => line.includes("pong")), "resize dropped completed pong output");
+    assert(term.currentLine === "echo pending", "resize lost pending input");
+    held.controller.releaseAll();
+    await execution;
+    assert(term.history.filter((line) => line === "ping").length === 1, "resize duplicated history");
+    passTo(lifecycleOutput, "PASS completed output survives resize before history settlement");
+    if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+    else delete window.indexedDB;
+
+    const exactName = name("lifecycle-exact");
+    await seedRecord(exactName, { version: 1, entries: [] });
+    const exactStore = storeFor(exactName);
+    await exactStore.ready;
+    const exact = "  echo spaced  ";
+    await exactStore.append(exact);
+    equal(exactStore.getSnapshot(), [exact], "exact visit snapshot");
+    equal((await readRecord(exactName)).entries, [exact], "exact durable snapshot");
+    const exactRestored = storeFor(exactName);
+    await exactRestored.ready;
+    equal(exactRestored.getSnapshot(), [exact], "exact restored snapshot");
+    const exactTerm = createTerminal();
+    exactTerm.historyReady = Promise.resolve().then(() => {
+      exactTerm.history = exactRestored.getSnapshot();
+      exactTerm.historyCursor = -1;
+    });
+    await exactTerm.historyReady;
+    runRootTerminal(exactTerm);
+    exactTerm.emit("\u001b[A");
+    assert(exactTerm.currentLine === exact, "ArrowUp did not preserve exact text");
+    exactTerm.emit("\r");
+    await waitFor(() => !exactTerm.busy, "exact recalled command did not finish");
+    await exactTerm.executeCommandLine("history", { promptAfter: false });
+    assert(exactTerm.rendered.some((line) => line.includes(`1000  ${exact}`)), "history changed exact text or numbering");
+    passTo(lifecycleOutput, "PASS exact submitted text survives restore ArrowUp execution and listing");
+
+    const healthyName = name("lifecycle-startup-healthy");
+    await seedRecord(healthyName, { version: 1, entries: ["echo healthy"] });
+    const healthy = createCommandHistoryStore({
+      databaseName: healthyName,
+      indexedDB: nativeIndexedDB,
+      initializationTimeoutMs: 50,
+    });
+    await healthy.ready;
+    equal(healthy.getSnapshot(), ["echo healthy"], "healthy startup restore");
+
+    let lateRequest;
+    const late = createCommandHistoryStore({
+      databaseName: name("lifecycle-startup-late"),
+      initializationTimeoutMs: 50,
+      indexedDB: { open() { lateRequest = {}; return lateRequest; } },
+    });
+    const started = performance.now();
+    await late.ready;
+    assert(performance.now() - started < 100, "startup fallback exceeded approved budget");
+    await late.append("ping");
+    equal(late.getSnapshot(), ["ping"], "startup fallback visit memory");
+    if (lateRequest && lateRequest.onsuccess) {
+      lateRequest.result = { objectStoreNames: { contains: () => true }, close() {} };
+      lateRequest.onsuccess();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    equal(late.getSnapshot(), ["ping"], "late initialization changed visit memory");
+    passTo(lifecycleOutput, "PASS startup restores before prompt or uses bounded fallback without late mutation");
+
+    await runPendingResizeChecks();
+    assert(pendingResizeOutput.textContent.includes("PASS next command and reload retain"), "pending/reset protections failed");
+    passTo(lifecycleOutput, "PASS pending execution reset callback activation and rapid-input protections remain intact");
+
+    assert(helpEntries["%history%"] === "saved in this browser; newest 200; ArrowUp recalls", "accepted help row changed");
+    assert(helpEntries["  Exact submitted text"].includes("leading and trailing spaces"), "exact-text help missing");
+    assert(helpEntries["  Browser storage unavailable"].includes("50 ms"), "fallback help missing");
+    passTo(lifecycleOutput, "PASS compatibility and saved-history documentation remain accurate");
+  };
+
   const runWriteExceptionChecks = async () => {
     const errors = [];
     const onError = (event) => {
@@ -1007,6 +1169,18 @@
       passTo(pendingResizeOutput, "PENDING RESIZE CHECKS COMPLETE");
     } catch (error) {
       passTo(pendingResizeOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
+
+  lifecycleButton.addEventListener("click", async () => {
+    lifecycleButton.disabled = true;
+    lifecycleOutput.replaceChildren();
+    pendingResizeOutput.replaceChildren();
+    try {
+      await runLifecycleRepairChecks();
+      passTo(lifecycleOutput, "LIFECYCLE REPAIR CHECKS COMPLETE");
+    } catch (error) {
+      passTo(lifecycleOutput, `FAIL ${error && error.stack ? error.stack : error}`);
     }
   });
 

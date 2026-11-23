@@ -23,6 +23,8 @@ const html = `<!doctype html>
   <div id="execution-timing-results" aria-live="polite"></div>
   <button id="run-pending-resize" type="button">Run pending resize checks</button>
   <div id="pending-resize-results" aria-live="polite"></div>
+  <button id="run-lifecycle-repair" type="button">Run lifecycle repair checks</button>
+  <div id="lifecycle-repair-results" aria-live="polite"></div>
   <button id="run-write-exceptions" type="button">Run write exception checks</button>
   <div id="write-exception-results" aria-live="polite"></div>
   <script src="/__asd_history/history.js"></script>
