@@ -1278,10 +1278,10 @@
     await resetTerm.historyReady;
     runRootTerminal(resetTerm);
     for (const reset of ["clear", "zsh"]) {
-      resetTerm.emit(reset);
+      for (const character of reset) resetTerm.emit(character);
       resetTerm.emit("\r");
       await waitFor(() => resetTerm.currentLine === "", `${reset} did not reach reset input state`);
-      resetTerm.emit("ping");
+      for (const character of "ping") resetTerm.emit(character);
       resetTerm.emit("\r");
       await waitFor(
         () => resetTerm.rendered.join("").includes("pong"),
@@ -1290,32 +1290,35 @@
       assert(!resetTerm.rendered.join("").includes("pingnip"), `${reset} corrupted immediate input`);
       resetTerm.rendered.length = 0;
     }
-    resetTerm.emit("upgrade");
+    for (const character of "upgrade") resetTerm.emit(character);
     resetTerm.emit("\r");
     await waitFor(() => !resetTerm.busy && !resetTerm.locked, "upgrade did not release production input");
-    resetTerm.emit("ping");
+    for (const character of "ping") resetTerm.emit(character);
     resetTerm.emit("\r");
     await waitFor(() => resetTerm.rendered.join("").includes("pong"), "post-upgrade ping did not execute");
     passTo(submissionScopeOutput, "PASS real xterm clear zsh and upgrade preserve immediate follow-up input");
 
     resetTerm.rendered.length = 0;
-    resetTerm.emit("clear");
+    for (const character of "clear") resetTerm.emit(character);
     resetTerm.emit("\r");
     await waitFor(() => resetTerm.currentLine === "", "editing reset did not reach input state");
-    resetTerm.emit("pign");
-    resetTerm.emit("\u007f\u007f");
-    resetTerm.emit("ng");
+    for (const character of "pign") resetTerm.emit(character);
+    resetTerm.emit("\u007f");
+    resetTerm.emit("\u007f");
+    resetTerm.emit("n");
+    resetTerm.emit("g");
     resetTerm.emit("\r");
     await waitFor(() => resetTerm.rendered.join("").includes("pong"), "edited reset input did not execute");
-    resetTerm.emit("cancelled");
+    for (const character of "cancelled") resetTerm.emit(character);
     resetTerm.emit("\u0003");
-    resetTerm.emit("ping");
+    for (const character of "ping") resetTerm.emit(character);
     resetTerm.emit("\r");
     await waitFor(() => !resetTerm.busy, "edited/reset input did not settle");
     assert(!resetTerm.history.includes("cancelled"), "cancelled input was recorded");
     assert(resetTerm.history.filter((entry) => entry === "ping").length === 2, "edited and next ping ownership changed");
     passTo(submissionScopeOutput, "PASS reset render drain preserves editing cancellation and newer pending input");
 
+    term.rendered.length = 0;
     await term.executeCommandLine("alias scopeping=ping", { promptAfter: false });
     await term.executeCommandLine("scopeping", { promptAfter: false });
     await term.executeCommandLine("history", { promptAfter: false });
