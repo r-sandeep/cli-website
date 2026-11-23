@@ -18,6 +18,8 @@
   const submissionScopeButton = document.querySelector("#run-submission-scope");
   const orderedInputOutput = document.querySelector("#ordered-input-results");
   const orderedInputButton = document.querySelector("#run-ordered-input");
+  const inputOwnershipOutput = document.querySelector("#input-ownership-results");
+  const inputOwnershipButton = document.querySelector("#run-input-ownership");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   // Helpers and existing controls always use the native factory, even while the
   // execution-timing fixture temporarily installs a transaction wrapper.
@@ -1527,6 +1529,147 @@
     await runLifecycleRepairChecks();
     completeStage("PASS branch activation analytics storage and late-settlement protections remain intact");
   };
+
+  const runInputOwnershipChecks = async () => {
+    await deleteDatabase(COMMAND_HISTORY_DATABASE);
+    const term = createTerminal(true);
+    await term.historyReady;
+    const startupInput = [];
+    let receive = (data) => startupInput.push(data);
+    runRootTerminal(term, {
+      pendingInput: startupInput,
+      setReceiver(receiver) { receive = receiver; },
+    });
+    const send = (text) => {
+      for (const character of text) term.emit(character);
+    };
+    const rendered = () => term.rendered.join("");
+    const promptCount = () => (rendered().match(/guest:rootpc/g) || []).length;
+    const durable = async () => {
+      const record = await readRecord(COMMAND_HISTORY_DATABASE);
+      return record?.entries || [];
+    };
+
+    const originalFetch = window.fetch;
+    let applicationPosts = 0;
+    window.fetch = (...args) => {
+      applicationPosts += 1;
+      return originalFetch(...args);
+    };
+    send("apply 1");
+    term.emit("\r");
+    await waitFor(
+      () => term.activeInput?.label.includes("What's your name?"),
+      "application name prompt did not take input ownership"
+    );
+    send("Ada");
+    term.emit("\r");
+    await waitFor(
+      () => term.activeInput?.label.includes("Email address"),
+      "answered application did not reach email prompt"
+    );
+    term.emit("\u0003");
+    await waitFor(
+      () => rendered().includes("Application cancelled.") && !term.locked && !term.busy,
+      "answered application cancellation did not settle"
+    );
+    assert(applicationPosts === 0, "cancelled application made a POST");
+    assert(!rendered().toLowerCase().includes("command not found: ada"), "form answer executed as a command");
+    assert(!term.history.includes("Ada"), "form answer entered recall history");
+    equal(term.history, ["apply 1"], "form answer changed shell recall");
+    equal(await durable(), ["apply 1"], "form answer changed durable history");
+    const promptsAfterCancel = promptCount();
+    send("ping");
+    term.emit("\r");
+    await waitFor(() => rendered().includes("pong") && !term.busy, "post-cancel ping did not execute");
+    assert(promptCount() === promptsAfterCancel + 1, "post-cancel command produced duplicate prompts");
+    window.fetch = originalFetch;
+    passTo(inputOwnershipOutput, "PASS answered form cancellation never executes or saves form input");
+
+    let releaseUpgrade;
+    let upgradeReleased = false;
+    term.timer = () =>
+      upgradeReleased
+        ? Promise.resolve()
+        : new Promise((resolve) => { releaseUpgrade = resolve; });
+    send("upgrade");
+    term.emit("\r");
+    await waitFor(() => term.locked && typeof releaseUpgrade === "function", "upgrade never entered its lock");
+    send("ping");
+    term.emit("\r");
+    term.emit("\u007f");
+    term._customKeyHandler?.({ key: "Tab", type: "keydown", preventDefault() {} });
+    assert(term.currentLine === "", "locked input changed the pending line");
+    equal(term.history, [], "upgrade lock retained shell input");
+    upgradeReleased = true;
+    releaseUpgrade();
+    await waitFor(() => !term.locked && !term.busy, "upgrade did not finish after timer release");
+    assert(!rendered().includes("Command not found: ing"), "locked upgrade input replayed a fragment");
+    assert(!term.history.includes("ping"), "locked upgrade input entered recall");
+    const durableAfterUpgrade = await durable();
+    assert(durableAfterUpgrade.includes("upgrade"), "upgrade submission was not durable");
+    assert(durableAfterUpgrade.filter((entry) => entry === "ping").length === 1, "locked input changed durable ping count");
+    send("ping");
+    term.emit("\r");
+    await waitFor(() => term.history.includes("ping") && !term.busy, "fresh post-upgrade ping did not execute");
+    assert((rendered().match(/pong/g) || []).length === 2, "locked ping produced output or fresh ping failed");
+    passTo(inputOwnershipOutput, "PASS upgrade lock discards input without deferred fragments");
+
+    term.rendered.length = 0;
+    send("clear");
+    term.emit("\r");
+    send("pign");
+    term.emit("\u007f");
+    term.emit("\u007f");
+    send("ng");
+    term.emit("\r");
+    await waitFor(() => rendered().includes("pong") && !term.busy, "reset FIFO did not preserve edited ping");
+    send("ech");
+    term._customKeyHandler?.({ key: "Tab", type: "keydown", preventDefault() {} });
+    await waitFor(() => term.currentLine === "echo ", "reset journey completion did not produce echo");
+    send("cedar");
+    term.emit("\r");
+    await waitFor(() => rendered().includes("cedar") && !term.busy, "completed reset journey did not execute cedar");
+    assert(!term.history.includes("pign"), "editing intermediate entered history");
+    assert(term.history.includes("ping") && term.history.includes("echo cedar"), "eligible reset input was dropped");
+    passTo(inputOwnershipOutput, "PASS startup and reset FIFO retain exact editing recall and completion");
+
+    const historyBeforeBusy = [...term.history];
+    term.busy = true;
+    send("busy-drop");
+    term.emit("\r");
+    term.busy = false;
+    term.setLifecycleInputResumer?.(() => {});
+    equal(term.history, historyBeforeBusy, "ordinary busy input became deferred work");
+    assert(!term.currentLine.includes("busy-drop"), "ordinary busy input changed pending text");
+    passTo(inputOwnershipOutput, "PASS ordinary busy and interactive input ownership remain unchanged");
+
+    const fallback = createCommandHistoryStore({
+      indexedDB: { open() { return {}; } },
+      initializationTimeoutMs: 0,
+    });
+    await fallback.ready;
+    await fallback.append("memory ping");
+    equal(fallback.getSnapshot(), ["memory ping"], "startup fallback did not retain visit memory");
+    passTo(inputOwnershipOutput, "PASS startup deadline and late callbacks preserve memory-only fallback");
+
+    const persisted = await durable();
+    assert(persisted.length <= 200, "input ownership journey exceeded retention cap");
+    assert(!persisted.includes("Ada") && !persisted.includes("busy-drop"), "discarded input reached durable history");
+    assert(window.dataLayer.every((event) => !JSON.stringify(event).includes("Ada")), "form answer entered analytics");
+    passTo(inputOwnershipOutput, "PASS activation replay analytics and exact saved state remain intact");
+  };
+
+  inputOwnershipButton.addEventListener("click", async () => {
+    inputOwnershipButton.disabled = true;
+    inputOwnershipOutput.replaceChildren();
+    try {
+      await runInputOwnershipChecks();
+      passTo(inputOwnershipOutput, "INPUT OWNERSHIP CHECKS COMPLETE");
+    } catch (error) {
+      passTo(inputOwnershipOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
 
   submissionScopeButton.addEventListener("click", async () => {
     submissionScopeButton.disabled = true;

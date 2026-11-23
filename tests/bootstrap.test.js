@@ -3,7 +3,7 @@ import { createBrowserEnv } from "./helpers/browser-env";
 
 let env;
 
-function loadBootstrap(overrides = {}) {
+function loadBootstrap(overrides = {}, beforeBootstrap) {
   const term = {
     loadAddon: vi.fn(),
     open: vi.fn(),
@@ -62,6 +62,7 @@ function loadBootstrap(overrides = {}) {
     },
   });
 
+  if (beforeBootstrap) beforeBootstrap({ env, term });
   env.loadScripts(["js/bootstrap.js"]);
 
   return {
@@ -81,6 +82,7 @@ function loadBootstrap(overrides = {}) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   if (env) {
     env.cleanup();
     env = null;
@@ -176,5 +178,55 @@ describe("bootstrap", () => {
     receive("x");
     expect(liveReceiver).toHaveBeenCalledWith("x");
     expect(state.term.onData).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the current two-argument startup once at the 50ms history deadline", async () => {
+    vi.useFakeTimers();
+    const request = {};
+    const close = vi.fn();
+    const indexedDB = { open: vi.fn(() => request) };
+    let store;
+    const state = loadBootstrap(
+      { indexedDB },
+      ({ env: browserEnv }) => {
+        browserEnv.loadScript("js/history.js");
+        const { createCommandHistoryStore } = browserEnv.exportValues([
+          "createCommandHistoryStore",
+        ]);
+        browserEnv.window.extend = (instance) => {
+          store = createCommandHistoryStore({ indexedDB });
+          instance.deepLink = "";
+          instance.historyReady = store.ready;
+        };
+      }
+    );
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+    const receive = state.term.onData.mock.calls[0][0];
+    receive("p");
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledWith(
+      state.term,
+      expect.objectContaining({ pendingInput: ["p"] })
+    );
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot()).toEqual([]);
+
+    request.result = {
+      close,
+      objectStoreNames: { contains: () => true },
+    };
+    request.onsuccess();
+    await Promise.resolve();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot()).toEqual([]);
+
+    await store.append("ping");
+    expect(store.getSnapshot()).toEqual(["ping"]);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
   });
 });

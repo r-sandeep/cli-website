@@ -36,6 +36,8 @@ const html = `<!doctype html>
   <div id="submission-scope-results" aria-live="polite"></div>
   <button id="run-ordered-input" type="button">Run ordered input checks</button>
   <div id="ordered-input-results" aria-live="polite"></div>
+  <button id="run-input-ownership" type="button">Run input ownership checks</button>
+  <div id="input-ownership-results" aria-live="polite"></div>
   <button id="run-write-exceptions" type="button">Run write exception checks</button>
   <div id="write-exception-results" aria-live="polite"></div>
   <script src="/__asd_history/xterm.js"></script>
