@@ -453,6 +453,11 @@ function runRootTerminal(term, inputHandoff = null) {
 
   if (inputHandoff) {
     inputHandoff.setReceiver((data) => {
+      // During a reset-render transition, preserve arrival order in the
+      // transition-owned queue. Routing a byte through lifecycleInput first
+      // would let the reset barrier reappend it behind newer bytes that have
+      // already arrived, producing cursor-corrupt permutations such as ingp.
+      if (!term.locked && term.bufferResetInput?.(data)) return;
       lifecycleInput.push(data);
       drainLifecycleInput();
     });
