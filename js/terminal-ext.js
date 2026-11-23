@@ -120,6 +120,10 @@ const extend = (term) => {
     return true;
   };
   const beginResetRender = () => {
+    // Submission acceptance may open this transition before asset preparation;
+    // init then enters the same transition when the reset handler dispatches.
+    // Keep one owner so bytes received in between are not discarded.
+    if (resetRenderActive) return;
     resetRenderGeneration += 1;
     resetRenderActive = true;
   };
@@ -756,6 +760,15 @@ const extend = (term) => {
       // User aliases expand exactly once, on the interactive line and before
       // pipeline parsing; redirects and replays never expand a second time.
       const expanded = expandUserAlias(parsed);
+      if (
+        isSubmission &&
+        ["clear", "zsh", "upgrade"].includes(expanded.cmd)
+      ) {
+        // Enter makes ordinary input busy before the reset handler reaches
+        // init. Begin the narrow reset-render transition now so input arriving
+        // in that gap is retained for the production parser-paced drainer.
+        beginResetRender();
+      }
       const parsedPipeline = Pipeline.parsePipeline(expanded.line);
 
       if (parsedPipeline) {

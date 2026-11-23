@@ -1482,8 +1482,15 @@
     resetTerm.emit("\u0003");
     resetTerm.emit("\u001b[A");
     await waitFor(() => resetTerm.currentLine === "ping", "ArrowUp did not recall the edited ping");
+    const pongCountBeforeRecall = (resetTerm.rendered.join("").match(/pong/g) || []).length;
     resetTerm.emit("\r");
-    await waitFor(() => resetTerm.history.filter((entry) => entry === "ping").length === 2, "recalled ping did not execute");
+    await waitFor(
+      () =>
+        !resetTerm.busy &&
+        resetTerm.history.filter((entry) => entry === "ping").length === 2 &&
+        (resetTerm.rendered.join("").match(/pong/g) || []).length === pongCountBeforeRecall + 1,
+      "recalled ping did not produce a fresh settled result"
+    );
     emitText(resetTerm, "ech");
     await waitFor(() => resetTerm.currentLine === "ech", "completion prefix was not received");
     pressActualKey(resetTerm, "Tab");
