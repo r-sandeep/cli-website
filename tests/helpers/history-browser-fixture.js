@@ -10,6 +10,9 @@
   const executionTimingOutput = document.querySelector("#execution-timing-results");
   const executionTimingButton = document.querySelector("#run-execution-timing");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
+  // Helpers and existing controls always use the native factory, even while the
+  // execution-timing fixture temporarily installs a transaction wrapper.
+  const nativeIndexedDB = indexedDB;
   let counter = 0;
 
   const name = (label) => `${prefix}-${label}-${counter++}`;
@@ -43,7 +46,7 @@
 
   const deleteDatabase = (databaseName) =>
     new Promise((resolve, reject) => {
-      const request = indexedDB.deleteDatabase(databaseName);
+      const request = nativeIndexedDB.deleteDatabase(databaseName);
       request.onsuccess = resolve;
       request.onerror = () => reject(request.error);
       request.onblocked = () => reject(new Error(`delete blocked: ${databaseName}`));
@@ -51,7 +54,7 @@
 
   const seedRecord = async (databaseName, record, storeName = "state") => {
     await deleteDatabase(databaseName);
-    const request = indexedDB.open(databaseName, 1);
+    const request = nativeIndexedDB.open(databaseName, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(storeName);
     const database = await requestResult(request);
     if (record !== undefined) {
@@ -63,7 +66,7 @@
   };
 
   const readRecord = async (databaseName) => {
-    const database = await requestResult(indexedDB.open(databaseName, 1));
+    const database = await requestResult(nativeIndexedDB.open(databaseName, 1));
     const transaction = database.transaction("state", "readonly");
     const record = await requestResult(
       transaction.objectStore("state").get("history")
