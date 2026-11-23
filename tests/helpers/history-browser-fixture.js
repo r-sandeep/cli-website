@@ -7,6 +7,8 @@
   const terminalButton = document.querySelector("#run-terminal");
   const writeExceptionOutput = document.querySelector("#write-exception-results");
   const writeExceptionButton = document.querySelector("#run-write-exceptions");
+  const executionTimingOutput = document.querySelector("#execution-timing-results");
+  const executionTimingButton = document.querySelector("#run-execution-timing");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   let counter = 0;
 
@@ -250,6 +252,63 @@
 
   const throwingPutFactory = () => wrappingFactory("quota");
 
+  const holdingFactory = () => {
+    const controller = {
+      hold: false,
+      pending: [],
+      releaseNext() {
+        const complete = this.pending.shift();
+        if (complete) complete();
+      },
+      releaseAll() {
+        while (this.pending.length > 0) this.releaseNext();
+      },
+    };
+    const factory = {
+      open(databaseName, version) {
+        const wrapper = {};
+        const request = indexedDB.open(databaseName, version);
+        request.onblocked = () => wrapper.onblocked?.();
+        request.onerror = () => {
+          wrapper.error = request.error;
+          wrapper.onerror?.();
+        };
+        request.onupgradeneeded = (event) => {
+          wrapper.result = request.result;
+          wrapper.transaction = request.transaction;
+          wrapper.onupgradeneeded?.(event);
+        };
+        request.onsuccess = () => {
+          const nativeDatabase = request.result;
+          wrapper.result = {
+            objectStoreNames: nativeDatabase.objectStoreNames,
+            close: () => nativeDatabase.close(),
+            set onversionchange(handler) { nativeDatabase.onversionchange = handler; },
+            transaction(storeName, mode) {
+              const nativeTransaction = nativeDatabase.transaction(storeName, mode);
+              const transaction = {
+                abort: () => nativeTransaction.abort(),
+                objectStore: (requestedStore) => nativeTransaction.objectStore(requestedStore),
+                set oncomplete(handler) {
+                  nativeTransaction.oncomplete = () => {
+                    if (controller.hold) controller.pending.push(handler);
+                    else handler();
+                  };
+                },
+                set onerror(handler) { nativeTransaction.onerror = handler; },
+                set onabort(handler) { nativeTransaction.onabort = handler; },
+              };
+              return transaction;
+            },
+          };
+          wrapper.onsuccess?.();
+        };
+        return wrapper;
+      },
+    };
+    return { controller, factory };
+  };
+
   const unavailableStorage = async () => {
     const denied = createCommandHistoryStore({
       get indexedDB() {
@@ -405,6 +464,172 @@
     await term.historyReady;
     runRootTerminal(term);
     return term;
+  };
+
+  let executionFixture;
+  const executionFixtureReady = (async () => {
+    const held = holdingFactory();
+    const descriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: held.factory,
+    });
+    const term = createTerminal();
+    await term.historyReady;
+    runRootTerminal(term);
+    held.controller.hold = true;
+    executionFixture = { ...held, descriptor, term };
+    executionTimingButton.disabled = false;
+  })();
+
+  const runExecutionTimingChecks = async ({ controller, descriptor, term }) => {
+    const originalOpen = window.open;
+    const opened = [];
+    window.open = (url, target) => {
+      opened.push({ url, target, active: navigator.userActivation.isActive });
+      const popup = originalOpen.call(window, url, target);
+      if (popup) popup.close();
+      return popup;
+    };
+
+    // This call is intentionally the first asynchronous action in the activated
+    // click task. Only completion delivery is held; production preload and
+    // dispatch remain untouched.
+    const agmExecution = term.executeCommandLine("agm", { promptAfter: false });
+    await waitFor(() => opened.length === 1, "agm did not call window.open");
+    equal(
+      [opened[0].url, opened[0].target],
+      ["http://annualmeeting.root.vc", "_blank"],
+      "agm destination and target"
+    );
+    assert(opened[0].active, "agm lost browser activation before opening");
+    assert(controller.pending.length > 0, "agm storage completion was not held");
+    controller.releaseNext();
+    await agmExecution;
+    window.open = originalOpen;
+    passTo(
+      executionTimingOutput,
+      "PASS agm opens its unchanged destination within browser activation before storage release"
+    );
+
+    const executeHeld = async (line, check, options = {}) => {
+      let settled = false;
+      const execution = term.executeCommandLine(line, {
+        promptAfter: false,
+        ...options,
+      });
+      execution.then(() => { settled = true; });
+      await waitFor(() => !term.busy, `${line} did not release busy state`);
+      check();
+      assert(!settled, `${line} resolved before history settlement`);
+      assert(controller.pending.length > 0, `${line} did not reach held settlement`);
+      controller.releaseNext();
+      const result = await execution;
+      return result;
+    };
+
+    const renderedCount = (text) =>
+      term.rendered.filter((line) => line.includes(text)).length;
+    await executeHeld("ping", () => assert(renderedCount("pong") === 1, "ping feedback"));
+    await executeHeld("echo invalid | head 0", () =>
+      assert(renderedCount("head: count must be a positive base-10 integer") === 1, "rejection feedback")
+    );
+
+    const nativePreload = term.preloadCommandAssets;
+    for (const line of ["cat missing", "echo pipeline | grep pipeline"]) {
+      term.preloadCommandAssets = async () => {
+        throw new Error("controlled preload failure");
+      };
+      await executeHeld(line, () =>
+        assert(
+          renderedCount("Command failed to load required assets. Please try again.") > 0,
+          `${line} preload feedback`
+        )
+      );
+    }
+    term.preloadCommandAssets = nativePreload;
+    commands.__asd_throw = () => { throw new Error("controlled command failure"); };
+    await executeHeld("__asd_throw", () =>
+      assert(
+        renderedCount("Command failed to load required assets. Please try again.") > 0,
+        "throw feedback"
+      )
+    );
+    delete commands.__asd_throw;
+    passTo(
+      executionTimingOutput,
+      "PASS all execution exits await bounded history settlement after ordinary feedback"
+    );
+
+    const observedExecutions = [];
+    const productionExecute = term.executeCommandLine.bind(term);
+    term.executeCommandLine = (...args) => {
+      const execution = productionExecute(...args);
+      observedExecutions.push(execution);
+      return execution;
+    };
+    const submit = async (line, resultText) => {
+      term.currentLine = line;
+      term.emit("\r");
+      await waitFor(() => renderedCount(resultText) > 0 && !term.busy, `${line} result missing`);
+    };
+    const pongBefore = renderedCount("pong");
+    await submit("ping", "pong");
+    const followupBefore = renderedCount("followup");
+    await submit("echo followup", "followup");
+    for (const character of "echo pending") term.emit(character);
+    assert(term.currentLine === "echo pending", "third pending line was not entered");
+    assert(renderedCount("pong") === pongBefore + 1, "ping executed more than once");
+    assert(renderedCount("followup") === followupBefore + 1, "followup executed more than once");
+    passTo(
+      executionTimingOutput,
+      "PASS production input executes follow-up commands while history settlement is pending"
+    );
+    controller.releaseAll();
+    await Promise.all(observedExecutions);
+    assert(term.currentLine === "echo pending", "late settlement erased newer pending input");
+    passTo(
+      executionTimingOutput,
+      "PASS late settlement preserves newer pending input and exact saved order"
+    );
+
+    await executeHeld("alias hp=ping", () => assert(term.getAlias("hp") === "ping", "alias unchanged"));
+    await executeHeld("hp", () => assert(renderedCount("pong") === pongBefore + 2, "alias dispatch"));
+    await executeHeld("echo one two | wc -l", () => assert(renderedCount("1") > 0, "pipeline result"));
+    await executeHeld("echo unused | head 0", () =>
+      assert(renderedCount("head: count must be a positive base-10 integer") > 0, "pipeline rejection")
+    );
+
+    const originalFetch = window.fetch;
+    let applicationPosts = 0;
+    window.fetch = (...args) => {
+      applicationPosts += 1;
+      return originalFetch(...args);
+    };
+    term.currentLine = "apply 1";
+    term.emit("\r");
+    await waitFor(() => term.activeInput, "application prompt did not start");
+    assert(term.rendered.some((line) => line.includes("What's your name?")), "application prompt missing");
+    term.emit("\u0003");
+    await waitFor(() => !term.locked && !term.busy, "application cancellation did not release input");
+    assert(term.rendered.some((line) => line.includes("Application cancelled.")), "cancellation output missing");
+    assert(applicationPosts === 0, "cancelled application posted data");
+    controller.releaseAll();
+    await Promise.all(observedExecutions.splice(0));
+    window.fetch = originalFetch;
+    await executeHeld("ping", () => assert(renderedCount("pong") === pongBefore + 3, "post-cancel ping"));
+    assert(!term.history.includes("Ada"), "form answer entered command history");
+    passTo(
+      executionTimingOutput,
+      "PASS alias pipeline rejection and interactive continuation contracts remain unchanged"
+    );
+
+    controller.hold = false;
+    const restored = createTerminal();
+    await restored.historyReady;
+    const expectedSuffix = term.history.slice(-200);
+    equal(restored.history, expectedSuffix, "restored submission order after held completions");
+    if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
   };
 
   const runTerminalChecks = async () => {
@@ -650,6 +875,17 @@
       window.removeEventListener("unhandledrejection", onRejection);
     }
   };
+
+  executionTimingButton.addEventListener("click", async () => {
+    executionTimingButton.disabled = true;
+    executionTimingOutput.replaceChildren();
+    try {
+      await runExecutionTimingChecks(executionFixture);
+      passTo(executionTimingOutput, "EXECUTION TIMING CHECKS COMPLETE");
+    } catch (error) {
+      passTo(executionTimingOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
 
   writeExceptionButton.addEventListener("click", async () => {
     writeExceptionButton.disabled = true;
