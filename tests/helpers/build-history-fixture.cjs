@@ -13,8 +13,14 @@ if (!fs.existsSync(dist)) {
 
 const html = `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Command history storage checks</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>Command history storage checks</title>
+  <link rel="stylesheet" href="/__asd_history/xterm.css">
+  <style>#actual-terminal { width: 960px; height: 420px; }</style>
+</head>
 <body>
+  <div id="actual-terminal" aria-label="Actual xterm reset fixture"></div>
   <button id="run-store" type="button">Run storage checks</button>
   <div id="store-results" aria-live="polite"></div>
   <button id="run-terminal" type="button">Run terminal checks</button>
@@ -30,6 +36,7 @@ const html = `<!doctype html>
   <div id="submission-scope-results" aria-live="polite"></div>
   <button id="run-write-exceptions" type="button">Run write exception checks</button>
   <div id="write-exception-results" aria-live="polite"></div>
+  <script src="/__asd_history/xterm.js"></script>
   <script src="/__asd_history/history.js"></script>
   <script src="/__asd_history/pipeline.js"></script>
   <script src="/__asd_history/terminal-ext.js"></script>
@@ -67,5 +74,13 @@ for (const source of [
 ]) {
   fs.copyFileSync(path.join(root, source), path.join(fixtureDir, path.basename(source)));
 }
+fs.copyFileSync(
+  path.join(root, "node_modules/@xterm/xterm/lib/xterm.js"),
+  path.join(fixtureDir, "xterm.js")
+);
+fs.copyFileSync(
+  path.join(root, "node_modules/@xterm/xterm/css/xterm.css"),
+  path.join(fixtureDir, "xterm.css")
+);
 fs.copyFileSync(fixtureSource, path.join(fixtureDir, "history-browser-fixture.js"));
 fs.writeFileSync(path.join(dist, "__asd_history.html"), html);

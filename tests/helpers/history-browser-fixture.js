@@ -423,10 +423,12 @@
     throw new Error(message);
   };
 
-  const createTerminal = () => {
+  const createTerminal = (actualRenderer = false) => {
     const handlers = new Set();
     const rendered = [];
-    const term = {
+    const term = actualRenderer
+      ? new Terminal({ cols: 100, rows: 24, scrollback: 1000 })
+      : {
       VERSION: 4,
       _initialized: false,
       buffer: { active: { cursorX: 0 } },
@@ -451,9 +453,39 @@
       },
       rendered,
     };
+    if (actualRenderer) {
+      term.open(document.querySelector("#actual-terminal"));
+      term.rendered = rendered;
+      const nativeWrite = term.write.bind(term);
+      const nativeWriteln = term.writeln.bind(term);
+      term.write = (value, callback) => {
+        rendered.push(String(value));
+        return nativeWrite(value, callback);
+      };
+      term.writeln = (value = "", callback) => {
+        rendered.push(`${value}\r\n`);
+        return nativeWriteln(value, callback);
+      };
+      term.emit = (data) => {
+        for (const handler of [...handlers]) handler(data);
+      };
+      const nativeOnData = term.onData.bind(term);
+      term.onData = (handler) => {
+        handlers.add(handler);
+        const nativeDisposable = nativeOnData(handler);
+        return {
+          dispose() {
+            handlers.delete(handler);
+            nativeDisposable.dispose();
+          },
+        };
+      };
+    }
     window.term = term;
     window.LOGO_TYPE = "ROOT";
-    window.fitAddon = { fit() {} };
+    window.fitAddon = actualRenderer
+      ? { fit() {} }
+      : { fit() {} };
     window.scheduleIdleTask = (task) => task();
     window.ensureASCIIArt = async () => {};
     window.ensureFileLoaded = async () => {};
@@ -1226,7 +1258,7 @@
     term.preloadCommandAssets = originalPreload;
     passTo(submissionScopeOutput, "PASS pending first execution and completed idle redraw retain distinct ownership");
 
-    const resetTerm = createTerminal();
+    const resetTerm = createTerminal(true);
     await resetTerm.historyReady;
     runRootTerminal(resetTerm);
     for (const reset of ["clear", "zsh"]) {
