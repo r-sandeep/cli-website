@@ -62,7 +62,7 @@ function _completionRows(candidates, width) {
   return rows;
 }
 
-function runRootTerminal(term) {
+function runRootTerminal(term, inputHandoff = null) {
   if (term._initialized) {
     return;
   }
@@ -283,6 +283,9 @@ function runRootTerminal(term) {
   term.attachCustomKeyEventHandler((event) => {
     if (event.key === "Tab") {
       event.preventDefault();
+      if (event.type === "keydown" && term.bufferResetInput?.("\t")) {
+        return false;
+      }
       // xterm asks about both phases in some browsers. Complete exactly once,
       // but consume every Tab phase so focus cannot move and no tab reaches
       // onData as input.
@@ -313,6 +316,9 @@ function runRootTerminal(term) {
     if (term._initialized && !term.locked && !term.busy) {
       if (e !== "\t") resetCompletion();
       switch (e) {
+        case "\t":
+          if (completeInput()) term.scrollToBottom();
+          break;
         case "\r": // Enter
           // Reset tab state
           term.tabIndex = 0;
@@ -415,10 +421,43 @@ function runRootTerminal(term) {
     }
   };
 
+  const lifecycleInput = inputHandoff?.pendingInput || [];
+  let lifecycleDraining = false;
+  const drainLifecycleInput = () => {
+    if (lifecycleDraining || term.busy || term.locked || lifecycleInput.length === 0) {
+      return;
+    }
+    lifecycleDraining = true;
+    const next = () => {
+      if (term.busy || term.locked || lifecycleInput.length === 0) {
+        lifecycleDraining = false;
+        return;
+      }
+      processInput(lifecycleInput.shift());
+      // Cursor-dependent input must observe all writes caused by the preceding
+      // event. xterm's empty-write callback is a parser completion barrier.
+      term.write("", next);
+    };
+    next();
+  };
+
   term.setResetInputDrainer?.((queued) => {
-    for (const data of queued) processInput(data);
+    lifecycleInput.push(...queued);
+    drainLifecycleInput();
   });
-  term.onData(processInput);
+  term.setLifecycleInputResumer?.(drainLifecycleInput);
+
+  if (inputHandoff) {
+    inputHandoff.setReceiver((data) => {
+      lifecycleInput.push(data);
+      drainLifecycleInput();
+    });
+    // The first prompt must be parsed before captured startup input reaches the
+    // production editor. Reception itself was installed synchronously.
+    term.write("", drainLifecycleInput);
+  } else {
+    term.onData(processInput);
+  }
 }
 
 function colorText(text, color) {

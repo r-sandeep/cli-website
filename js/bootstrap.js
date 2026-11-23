@@ -41,6 +41,19 @@
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
   extend(term);
+  // Receive input immediately, even while saved history is opening. The same
+  // subscription is handed to runRootTerminal after authoritative readiness,
+  // avoiding both dropped startup bytes and duplicate live listeners.
+  const pendingInput = [];
+  let inputReceiver = (data) => pendingInput.push(data);
+  const inputSubscription = term.onData((data) => inputReceiver(data));
+  const inputHandoff = {
+    inputSubscription,
+    pendingInput,
+    setReceiver(receiver) {
+      inputReceiver = receiver;
+    },
+  };
   window.deepLinkAssetPromise = Promise.resolve();
   if (term.deepLink) {
     window.deepLinkAssetPromise = term.preloadCommandAssets(term.deepLink).catch(
@@ -53,7 +66,7 @@
   // first init, prompt, deep link, or ordinary input handler so returned-visit
   // recall is usable immediately without executing any restored command.
   await term.historyReady;
-  runRootTerminal(term);
+  runRootTerminal(term, inputHandoff);
 
   window.scheduleIdleTask(() => {
     preloadASCIIArt();

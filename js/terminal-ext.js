@@ -56,6 +56,7 @@ const extend = (term) => {
   let resetRenderActive = false;
   let resetRenderInput = [];
   let resetInputDrainer = null;
+  let lifecycleInputResumer = null;
   term.history = [];
   term.historyCursor = -1;
   const historyReady = historyStore.ready.then(() => {
@@ -76,16 +77,23 @@ const extend = (term) => {
     // timing. Durable settlement is awaited only after command-owned UI cleanup.
     term.history = historyStore.getSnapshot();
     term.historyCursor = -1;
-    return {
+    const reservation = {
       generation: visitGeneration,
       line,
+      completed: false,
       settlement,
     };
+    // Reserve replay position when the submission is accepted, not when its
+    // handler happens to finish. Completion only makes this existing position
+    // eligible; it can never reorder overlapping commands.
+    visitReplay = visitReplay.concat(reservation).slice(-COMMAND_HISTORY_LIMIT);
+    return reservation;
   };
 
   const publishVisitReplay = (submission) => {
     if (!submission || submission.generation !== visitGeneration) return;
-    visitReplay = visitReplay.concat(submission.line).slice(-COMMAND_HISTORY_LIMIT);
+    if (!visitReplay.includes(submission)) return;
+    submission.completed = true;
   };
 
   const resetVisitHistory = () => {
@@ -102,6 +110,9 @@ const extend = (term) => {
   // order. This boundary is independent of history durability.
   term.setResetInputDrainer = (drainer) => {
     resetInputDrainer = drainer;
+  };
+  term.setLifecycleInputResumer = (resumer) => {
+    lifecycleInputResumer = resumer;
   };
   term.bufferResetInput = (data) => {
     if (!resetRenderActive) return false;
@@ -859,6 +870,7 @@ const extend = (term) => {
       // parses those writes asynchronously. The final command-owned prompt is
       // the one parser boundary that may release transition input.
       finishResetRender();
+      if (lifecycleInputResumer) lifecycleInputResumer();
     }
 
     // Completed execution owns replay independently of durable settlement.
@@ -917,7 +929,9 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of visitReplay) {
+      for (const reservation of visitReplay) {
+        if (!reservation.completed) continue;
+        const c = reservation.line;
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await executeCommandLine(c, {
