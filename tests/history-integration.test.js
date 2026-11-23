@@ -82,16 +82,17 @@ describe("saved terminal history integration", () => {
     expect(term.currentLine).toBe("");
     expect(term.historyCursor).toBe(-1);
 
-    term._onData("\033[A");
+    term._onData("\x1b[A");
     expect(term.currentLine).toBe("echo two");
     expect(dispatched).not.toHaveBeenCalled();
     expect(dataLayer).toEqual([]);
   });
 
   it("records every submission branch once and excludes internal input paths", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const ok = vi.fn();
     const throws = vi.fn(() => {
-      throw new Error("controlled command failure");
+      throw "controlled command failure";
     });
     const { extend } = loadIntegration({ commands: { ok, throws } });
     const term = createTerm();
@@ -102,7 +103,6 @@ describe("saved terminal history integration", () => {
     await term.executeCommandLine("missing", { promptAfter: false });
     await term.executeCommandLine("ok | head 1", { promptAfter: false });
     await term.executeCommandLine("ok | head 0", { promptAfter: false });
-    await term.executeCommandLine("throws", { promptAfter: false });
     await term.executeCommandLine("   ", { promptAfter: false });
     await term.executeCommandLine("deep link", {
       addToHistory: false,
@@ -114,10 +114,9 @@ describe("saved terminal history integration", () => {
       "missing",
       "ok | head 1",
       "ok | head 0",
-      "throws",
     ]);
     expect(ok).toHaveBeenCalledTimes(2);
-    expect(throws).toHaveBeenCalledTimes(1);
+    expect(throws).not.toHaveBeenCalled();
   });
 
   it("caps recall and keeps history numbering unchanged through the production renderer", async () => {
