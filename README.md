@@ -42,8 +42,8 @@ the newest 200 entries remain.
 
 History never leaves the browser. Initialization has one total 50 ms storage
 deadline. If browser storage is unavailable or does not respond within that
-budget—for example, in a private mode that blocks storage or when its quota is
-full—the terminal remains usable and keeps a visit-only in-memory history
+budget—for example, in a private mode that blocks storage or when its
+quota is full—the terminal remains usable and keeps a visit-only in-memory history
 instead. Late storage results are ignored and cannot replace that visit's
 history.
 
