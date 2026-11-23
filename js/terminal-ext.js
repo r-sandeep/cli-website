@@ -696,7 +696,7 @@ const extend = (term) => {
       // preloading, validation or dispatch. Internal execution paths opt out
       // with addToHistory:false (deep links and resize replay).
       if (parsed.line.length > 0 && settings.addToHistory) {
-        submission = recordSubmittedCommand(parsed.line);
+        submission = recordSubmittedCommand(String(line));
         historySettlement = submission.settlement;
       }
 
@@ -814,11 +814,15 @@ const extend = (term) => {
       }
     }
 
+    // Completed execution owns replay independently of durable settlement.
+    // Publish while this execution still owns its captured reset generation;
+    // persistence completion below may only settle the returned promise.
+    publishVisitReplay(submission);
+
     // Persistence completion belongs to the execution promise, not to command
     // responsiveness. All command-owned prompt/input/busy cleanup is complete
     // before this bounded wait, and nothing below may mutate terminal UI state.
     await historySettlement;
-    publishVisitReplay(submission);
     return exitStatus;
   };
 

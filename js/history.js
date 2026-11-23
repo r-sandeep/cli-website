@@ -12,6 +12,7 @@ const COMMAND_HISTORY_KEY = "history";
 const COMMAND_HISTORY_RECORD_VERSION = 1;
 const COMMAND_HISTORY_LIMIT = 200;
 const COMMAND_HISTORY_TIMEOUT_MS = 1000;
+const COMMAND_HISTORY_INITIALIZATION_TIMEOUT_MS = 50;
 
 const createCommandHistoryStore = (options = {}) => {
   const databaseName =
@@ -23,10 +24,19 @@ const createCommandHistoryStore = (options = {}) => {
       ? options.timeoutMs
       : COMMAND_HISTORY_TIMEOUT_MS;
 
+  const initializationTimeoutMs =
+    Number.isFinite(options.initializationTimeoutMs) &&
+    options.initializationTimeoutMs >= 0
+      ? options.initializationTimeoutMs
+      : Number.isFinite(options.timeoutMs) && options.timeoutMs >= 0
+        ? options.timeoutMs
+        : COMMAND_HISTORY_INITIALIZATION_TIMEOUT_MS;
+
   let entries = [];
   let database = null;
   let durable = true;
   let resetGeneration = 0;
+  let appendTail = Promise.resolve(false);
 
   const newest = (values) => values.slice(-COMMAND_HISTORY_LIMIT);
   const getSnapshot = () => entries.slice();
@@ -37,10 +47,7 @@ const createCommandHistoryStore = (options = {}) => {
     record.version === COMMAND_HISTORY_RECORD_VERSION &&
     Array.isArray(record.entries) &&
     record.entries.every(
-      (entry) =>
-        typeof entry === "string" &&
-        entry.length > 0 &&
-        entry.trim() === entry
+      (entry) => typeof entry === "string" && entry.trim().length > 0
     );
 
   const closeDatabase = () => {
@@ -59,14 +66,13 @@ const createCommandHistoryStore = (options = {}) => {
     closeDatabase();
   };
 
-  const openDatabase = () =>
+  const openDatabase = (initializationActive, registerCancel) =>
     new Promise((resolve) => {
       let settled = false;
       let request;
-      let timer;
 
       const finish = (result) => {
-        if (settled) {
+        if (settled || !initializationActive()) {
           if (result !== null) {
             try {
               result.close();
@@ -74,12 +80,17 @@ const createCommandHistoryStore = (options = {}) => {
               // A late successful open is closed without affecting the visit.
             }
           }
+          if (!settled) {
+            settled = true;
+            resolve(null);
+          }
           return;
         }
         settled = true;
-        clearTimeout(timer);
         resolve(result);
       };
+
+      registerCancel(() => finish(null));
 
       try {
         const indexedDBFactory = Object.prototype.hasOwnProperty.call(
@@ -101,11 +112,9 @@ const createCommandHistoryStore = (options = {}) => {
         return;
       }
 
-      timer = setTimeout(() => finish(null), timeoutMs);
-
       request.onupgradeneeded = (event) => {
         try {
-          if (event.oldVersion !== 0) {
+          if (!initializationActive() || event.oldVersion !== 0) {
             request.transaction.abort();
             return;
           }
@@ -198,10 +207,52 @@ const createCommandHistoryStore = (options = {}) => {
     });
 
   const initialResetGeneration = resetGeneration;
-  const ready = (async () => {
-    database = await openDatabase();
+  let initializationActive = true;
+  let initializationTransaction = null;
+  let cancelOpen = () => {};
+  let resolveReady;
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve;
+  });
+
+  const settleInitialization = () => {
+    if (!initializationActive) return;
+    initializationActive = false;
+    clearTimeout(initializationTimer);
+    resolveReady();
+  };
+
+  const abandonInitialization = () => {
+    if (!initializationActive) return;
+    initializationActive = false;
+    cancelOpen();
+    if (initializationTransaction !== null) {
+      try {
+        initializationTransaction.abort();
+      } catch (error) {
+        // The initialization transaction may already have settled.
+      }
+    }
+    useMemoryOnly();
+    resolveReady();
+  };
+
+  const initializationTimer = setTimeout(
+    abandonInitialization,
+    initializationTimeoutMs
+  );
+
+  (async () => {
+    database = await openDatabase(
+      () => initializationActive,
+      (cancel) => {
+        cancelOpen = cancel;
+      }
+    );
+    if (!initializationActive) return;
     if (database === null) {
       useMemoryOnly();
+      settleInitialization();
       return;
     }
 
@@ -211,10 +262,11 @@ const createCommandHistoryStore = (options = {}) => {
     let loadedValidRecord = false;
     let incompatible = false;
     const restored = await runTransaction("readwrite", (store, transaction, fail, active) => {
+      initializationTransaction = transaction;
       const request = store.get(COMMAND_HISTORY_KEY);
       request.onerror = fail;
       request.onsuccess = () => {
-        if (!active()) return;
+        if (!initializationActive || !active()) return;
         try {
           const record = request.result;
           if (record === undefined) {
@@ -240,6 +292,8 @@ const createCommandHistoryStore = (options = {}) => {
         }
       };
     });
+    initializationTransaction = null;
+    if (!initializationActive) return;
 
     // A valid record remains useful visit memory even if its transactional
     // normalization could not commit (for example quota exhaustion). A visit
@@ -255,59 +309,74 @@ const createCommandHistoryStore = (options = {}) => {
     if (!restored || incompatible) {
       useMemoryOnly();
     }
+    settleInitialization();
   })().catch(() => {
+    if (!initializationActive) return;
     useMemoryOnly();
+    settleInitialization();
   });
 
-  const append = async (entry) => {
-    if (typeof entry !== "string") return false;
-    const normalized = entry.trim();
-    if (normalized.length === 0) return false;
+  const append = (entry) => {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      return Promise.resolve(false);
+    }
 
     // Memory is authoritative for the active visit, including while a durable
-    // write is pending or after storage has failed.
-    entries = newest(entries.concat(normalized));
-    await ready;
-    if (!durable || database === null) return false;
+    // write is pending or after storage has failed. Preserve the exact accepted
+    // submission; trimming is only the nonblank predicate.
+    entries = newest(entries.concat(entry));
 
-    let incompatible = false;
-    const committed = await runTransaction("readwrite", (store, transaction, fail, active) => {
-      const get = store.get(COMMAND_HISTORY_KEY);
-      get.onerror = fail;
-      get.onsuccess = () => {
-        if (!active()) return;
-        try {
-          const record = get.result;
-          let durableEntries;
-          if (record === undefined) {
-            durableEntries = [];
-          } else if (validRecord(record)) {
-            durableEntries = record.entries;
-          } else {
-            incompatible = true;
+    const queuedAppend = appendTail.then(async () => {
+      await ready;
+      // Sticky availability is checked only when this delta reaches the head of
+      // the instance-local queue, before any later transaction is constructed.
+      if (!durable || database === null) return false;
+
+      let incompatible = false;
+      const committed = await runTransaction("readwrite", (store, transaction, fail, active) => {
+        const get = store.get(COMMAND_HISTORY_KEY);
+        get.onerror = fail;
+        get.onsuccess = () => {
+          if (!active()) return;
+          try {
+            const record = get.result;
+            let durableEntries;
+            if (record === undefined) {
+              durableEntries = [];
+            } else if (validRecord(record)) {
+              durableEntries = record.entries;
+            } else {
+              incompatible = true;
+              fail();
+              return;
+            }
+
+            const put = store.put(
+              {
+                version: COMMAND_HISTORY_RECORD_VERSION,
+                entries: newest(durableEntries.concat(entry)),
+              },
+              COMMAND_HISTORY_KEY
+            );
+            put.onerror = fail;
+          } catch (error) {
             fail();
-            return;
           }
+        };
+      });
 
-          const put = store.put(
-            {
-              version: COMMAND_HISTORY_RECORD_VERSION,
-              entries: newest(durableEntries.concat(normalized)),
-            },
-            COMMAND_HISTORY_KEY
-          );
-          put.onerror = fail;
-        } catch (error) {
-          fail();
-        }
-      };
+      if (!committed || incompatible) {
+        useMemoryOnly();
+        return false;
+      }
+      return true;
     });
 
-    if (!committed || incompatible) {
+    appendTail = queuedAppend.catch(() => {
       useMemoryOnly();
       return false;
-    }
-    return true;
+    });
+    return appendTail;
   };
 
   const resetVisit = () => {

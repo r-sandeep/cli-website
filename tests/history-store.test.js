@@ -107,12 +107,77 @@ describe("command history store memory fallback", () => {
     const store = loadStore(blocked);
     const pending = store.append("  echo original syntax  ");
 
-    expect(store.getSnapshot()).toEqual(["echo original syntax"]);
+    expect(store.getSnapshot()).toEqual(["  echo original syntax  "]);
     await expect(pending).resolves.toBe(false);
     store.resetVisit();
     expect(store.getSnapshot()).toEqual([]);
     await expect(store.append("echo after reset")).resolves.toBe(false);
     expect(store.getSnapshot()).toEqual(["echo after reset"]);
+  });
+
+  it("preserves exact nonblank strings and rejects whitespace-only input", async () => {
+    const store = loadStore(undefined);
+    await store.ready;
+
+    await expect(store.append("  echo spaced  ")).resolves.toBe(false);
+    await expect(store.append("\t  ")).resolves.toBe(false);
+
+    expect(store.getSnapshot()).toEqual(["  echo spaced  "]);
+  });
+
+  it("serializes queued appends and makes the first write failure sticky", async () => {
+    const fixture = callbackFactory(
+      { version: 1, entries: ["previous"] },
+      { throwOnPut: true }
+    );
+    const store = loadStore(fixture.factory);
+    await store.ready;
+
+    const first = store.append("first");
+    const second = store.append("second");
+    const third = store.append("third");
+
+    await expect(Promise.all([first, second, third])).resolves.toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(store.getSnapshot()).toEqual([
+      "previous",
+      "first",
+      "second",
+      "third",
+    ]);
+    expect(fixture.getRecord()).toEqual({ version: 1, entries: ["previous"] });
+    expect(fixture.getPutCalls()).toBe(1);
+  });
+
+  it("uses one initialization deadline and ignores late open completion", async () => {
+    let request;
+    let closed = 0;
+    const factory = {
+      open() {
+        request = {};
+        return request;
+      },
+    };
+    const store = loadStore(factory, 5);
+
+    await expect(store.ready).resolves.toBeUndefined();
+    await expect(store.append("echo after fallback")).resolves.toBe(false);
+    expect(store.getSnapshot()).toEqual(["echo after fallback"]);
+
+    request.result = {
+      objectStoreNames: { contains: () => true },
+      close() {
+        closed += 1;
+      },
+    };
+    request.onsuccess();
+    await Promise.resolve();
+
+    expect(closed).toBe(1);
+    expect(store.getSnapshot()).toEqual(["echo after fallback"]);
   });
 
   it("settles throwing and timed-out storage without accepting invalid entries", async () => {
