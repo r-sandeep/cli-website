@@ -460,6 +460,11 @@
       const nativeWriteln = term.writeln.bind(term);
       term.write = (value, callback) => {
         rendered.push(String(value));
+        if (callback && term.onResetDrainQueued) {
+          const onResetDrainQueued = term.onResetDrainQueued;
+          term.onResetDrainQueued = null;
+          onResetDrainQueued();
+        }
         return nativeWrite(value, callback);
       };
       term.writeln = (value = "", callback) => {
@@ -470,17 +475,28 @@
         for (const handler of [...handlers]) handler(data);
       };
       const nativeOnData = term.onData.bind(term);
-      term.onData = (handler) => {
-        handlers.add(handler);
-        const nativeDisposable = nativeOnData(handler);
-        return {
-          dispose() {
-            handlers.delete(handler);
-            nativeDisposable.dispose();
-          },
-        };
+      Object.defineProperty(term, "onData", {
+        configurable: true,
+        value(handler) {
+          handlers.add(handler);
+          const nativeDisposable = nativeOnData(handler);
+          return {
+            dispose() {
+              handlers.delete(handler);
+              nativeDisposable.dispose();
+            },
+          };
+        },
+      });
+      term.emit = (data) => {
+        for (const handler of [...handlers]) handler(data);
       };
     }
+    term.VERSION = 4;
+    term._initialized = false;
+    term.busy = false;
+    term.currentLine = "";
+    term.locked = false;
     window.term = term;
     window.LOGO_TYPE = "ROOT";
     window.fitAddon = actualRenderer
@@ -1264,27 +1280,40 @@
     for (const reset of ["clear", "zsh"]) {
       resetTerm.emit(reset);
       resetTerm.emit("\r");
+      await waitFor(() => resetTerm.currentLine === "", `${reset} did not reach reset input state`);
       resetTerm.emit("ping");
       resetTerm.emit("\r");
       await waitFor(
         () => resetTerm.rendered.join("").includes("pong"),
-        `${reset} immediate ping did not execute`
+        `${reset} immediate ping did not execute: line=${JSON.stringify(resetTerm.currentLine)} busy=${resetTerm.busy} locked=${resetTerm.locked} history=${JSON.stringify(resetTerm.history)} rendered=${JSON.stringify(resetTerm.rendered.slice(-20))}`
       );
       assert(!resetTerm.rendered.join("").includes("pingnip"), `${reset} corrupted immediate input`);
       resetTerm.rendered.length = 0;
     }
+    resetTerm.emit("upgrade");
+    resetTerm.emit("\r");
+    await waitFor(() => !resetTerm.busy && !resetTerm.locked, "upgrade did not release production input");
+    resetTerm.emit("ping");
+    resetTerm.emit("\r");
+    await waitFor(() => resetTerm.rendered.join("").includes("pong"), "post-upgrade ping did not execute");
     passTo(submissionScopeOutput, "PASS real xterm clear zsh and upgrade preserve immediate follow-up input");
 
-    resetTerm.emit("ecoh fixed");
-    resetTerm.emit("\u007f".repeat(8));
-    resetTerm.emit("echo fixed");
+    resetTerm.rendered.length = 0;
+    resetTerm.emit("clear");
     resetTerm.emit("\r");
+    await waitFor(() => resetTerm.currentLine === "", "editing reset did not reach input state");
+    resetTerm.emit("pign");
+    resetTerm.emit("\u007f\u007f");
+    resetTerm.emit("ng");
+    resetTerm.emit("\r");
+    await waitFor(() => resetTerm.rendered.join("").includes("pong"), "edited reset input did not execute");
     resetTerm.emit("cancelled");
     resetTerm.emit("\u0003");
     resetTerm.emit("ping");
     resetTerm.emit("\r");
     await waitFor(() => !resetTerm.busy, "edited/reset input did not settle");
     assert(!resetTerm.history.includes("cancelled"), "cancelled input was recorded");
+    assert(resetTerm.history.filter((entry) => entry === "ping").length === 2, "edited and next ping ownership changed");
     passTo(submissionScopeOutput, "PASS reset render drain preserves editing cancellation and newer pending input");
 
     await term.executeCommandLine("alias scopeping=ping", { promptAfter: false });
