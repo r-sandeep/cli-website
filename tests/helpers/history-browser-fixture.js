@@ -1531,11 +1531,14 @@
   };
 
   const runInputOwnershipChecks = async () => {
-    await deleteDatabase(COMMAND_HISTORY_DATABASE);
     const term = createTerminal(true);
     await term.historyReady;
     const startupInput = [];
     let receive = (data) => startupInput.push(data);
+    // Compose the same single bootstrap subscription used in production. The
+    // handoff swaps its receiver after readiness while collectInput may add its
+    // own temporary subscription for form-owned answers.
+    term.onData((data) => receive(data));
     runRootTerminal(term, {
       pendingInput: startupInput,
       setReceiver(receiver) { receive = receiver; },
@@ -1639,7 +1642,6 @@
     send("busy-drop");
     term.emit("\r");
     term.busy = false;
-    term.setLifecycleInputResumer?.(() => {});
     equal(term.history, historyBeforeBusy, "ordinary busy input became deferred work");
     assert(!term.currentLine.includes("busy-drop"), "ordinary busy input changed pending text");
     passTo(inputOwnershipOutput, "PASS ordinary busy and interactive input ownership remain unchanged");
