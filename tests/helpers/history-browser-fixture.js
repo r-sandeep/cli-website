@@ -79,7 +79,7 @@
   const storeFor = (databaseName, options = {}) =>
     createCommandHistoryStore({
       databaseName,
-      indexedDB,
+      indexedDB: nativeIndexedDB,
       timeoutMs: 80,
       ...options,
     });
@@ -182,7 +182,7 @@
     await incompatible.ready;
     await incompatible.append("memory only");
     equal(incompatible.getSnapshot(), ["memory only"], "incompatible schema memory fallback");
-    const database = await requestResult(indexedDB.open(schemaName, 1));
+    const database = await requestResult(nativeIndexedDB.open(schemaName, 1));
     assert(database.objectStoreNames.contains("other"), "incompatible schema retained");
     assert(!database.objectStoreNames.contains("state"), "incompatible schema not rewritten");
     database.close();
@@ -485,6 +485,8 @@
     runRootTerminal(term);
     held.controller.hold = true;
     executionFixture = { ...held, descriptor, term };
+    if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+    else delete window.indexedDB;
     executionTimingButton.disabled = false;
   })();
 
@@ -642,6 +644,7 @@
     const expectedSuffix = term.history.slice(-200);
     equal(restored.history, expectedSuffix, "restored submission order after held completions");
     if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+    else delete window.indexedDB;
   };
 
   const runTerminalChecks = async () => {
