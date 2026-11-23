@@ -37,6 +37,70 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+const HISTORY_STORAGE_KEY = "rootvc.history.v1";
+const HISTORY_LIMIT = 200;
+
+const _boundedHistory = (entries) => entries.slice(-HISTORY_LIMIT);
+
+const _parseStoredHistory = (serialized) => {
+  if (serialized === null) return [];
+
+  try {
+    const entries = JSON.parse(serialized);
+    if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string")) {
+      return [];
+    }
+    return _boundedHistory(entries);
+  } catch (error) {
+    return [];
+  }
+};
+
+// Keep each terminal's recall list independent while merging completed writes
+// through the shared browser value. Browser storage is deliberately best-effort:
+// memory is updated first and remains usable if access or quota checks fail.
+const createHistoryStore = () => {
+  let history = [];
+  let pending = [];
+
+  try {
+    history = _parseStoredHistory(
+      window.localStorage.getItem(HISTORY_STORAGE_KEY)
+    );
+  } catch (error) {
+    // Private browsing modes can deny even access to localStorage.
+  }
+
+  const snapshot = () => history.slice();
+
+  const append = (command) => {
+    if (typeof command !== "string" || command.trim() === "") {
+      return snapshot();
+    }
+
+    history = _boundedHistory([...history, command]);
+    pending = _boundedHistory([...pending, command]);
+
+    try {
+      const storage = window.localStorage;
+      const durable = _parseStoredHistory(
+        storage.getItem(HISTORY_STORAGE_KEY)
+      );
+      storage.setItem(
+        HISTORY_STORAGE_KEY,
+        JSON.stringify(_boundedHistory([...durable, ...pending]))
+      );
+      pending = [];
+    } catch (error) {
+      // Retain pending entries in memory so a later append can retry them.
+    }
+
+    return snapshot();
+  };
+
+  return { append, snapshot };
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
