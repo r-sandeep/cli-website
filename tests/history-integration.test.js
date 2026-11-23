@@ -56,15 +56,14 @@ function createTerminal(storage, { hash = "" } = {}) {
       getASCIIArtIdForCommand: vi.fn(() => null),
       getArt: vi.fn(() => ""),
       getPreloadFileForCommand: vi.fn(() => null),
-      help: {}, jobs: {}, portfolio: {}, team: {},
+      jobs: {}, portfolio: {}, team: {},
       preloadASCIIArt: vi.fn(() => Promise.resolve()),
       scheduleIdleTask: vi.fn(),
-      shortcuts: {},
       term,
     },
   });
   Object.defineProperty(env.window, "localStorage", { configurable: true, value: storage });
-  env.loadScripts(["js/pipeline.js", "js/bookmarks.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/pipeline.js", "js/bookmarks.js", "config/help.js", "config/commands.js", "js/terminal-ext.js"]);
   const { extend } = env.exportValues(["extend"]);
   extend(term);
   term.pos = () => term.currentLine.length;
@@ -116,6 +115,31 @@ describe("saved history terminal integration", () => {
       ])
     );
     expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(second.term.history);
+  });
+
+  it("shows the exact saved-history policy through production help after restoration", async () => {
+    const expectedFooter = [
+      "Saved command history:",
+      "History is saved in this browser.",
+      "Keep the most recent 200 commands.",
+      "Use ArrowUp to recall; run history to list.",
+      "Without storage, history lasts this visit.",
+      "Failed commands are saved too.",
+      "clear, zsh, and upgrade keep saved history.",
+    ];
+    const storage = sharedStorage();
+    const first = createTerminal(storage); environments.push(first.env);
+    await enter(first.term, "ping");
+
+    const returning = createTerminal(storage); environments.push(returning.env);
+    expect(returning.term.history).toEqual(["ping"]);
+    await enter(returning.term, "help");
+
+    const renderedLines = returning.term.writeln.mock.calls.map(([line]) => line);
+    const footerStart = renderedLines.indexOf(expectedFooter[0]);
+    expect(footerStart).toBeGreaterThan(-1);
+    expect(renderedLines.slice(footerStart, footerStart + expectedFooter.length)).toEqual(expectedFooter);
+    expect(returning.term.history).toEqual(["ping", "help"]);
   });
 
   it("records every non-empty branch before preload and excludes blank, deep-link, and replay input", async () => {

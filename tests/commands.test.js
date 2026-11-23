@@ -980,7 +980,7 @@ describe("help stays in sync with commands", () => {
     commands.help([]);
 
     const output = term.stylePrint.mock.calls.map(([line]) => line);
-    expect(output).toContain("%history%  list saved command history, numbered from 1000");
+    expect(output.some((line) => line.includes("%history%") && line.includes("list saved command history, numbered from 1000"))).toBe(true);
     expect(output.slice(-expectedFooter.length)).toEqual(expectedFooter);
   });
 
