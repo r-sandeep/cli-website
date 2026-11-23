@@ -1036,9 +1036,9 @@
     assert(pendingResizeOutput.textContent.includes("PASS next command and reload retain"), "pending/reset protections failed");
     passTo(lifecycleOutput, "PASS pending execution reset callback activation and rapid-input protections remain intact");
 
-    assert(helpEntries["%history%"] === "saved in this browser; newest 200; ArrowUp recalls", "accepted help row changed");
-    assert(helpEntries["  Exact submitted text"].includes("leading and trailing spaces"), "exact-text help missing");
-    assert(helpEntries["  Browser storage unavailable"].includes("50 ms"), "fallback help missing");
+    assert(help["%history%"] === "saved in this browser; newest 200; ArrowUp recalls", "accepted help row changed");
+    assert(help["  Exact submitted text"].includes("leading and trailing spaces"), "exact-text help missing");
+    assert(help["  Browser storage unavailable"].includes("50 ms"), "fallback help missing");
     passTo(lifecycleOutput, "PASS compatibility and saved-history documentation remain accurate");
   };
 
