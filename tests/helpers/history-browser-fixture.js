@@ -253,6 +253,9 @@
   const throwingPutFactory = () => wrappingFactory("quota");
 
   const holdingFactory = () => {
+    // Capture the native factory before this wrapper is installed on window;
+    // resolving the global `indexedDB` afterward would recurse into this wrapper.
+    const nativeIndexedDB = indexedDB;
     const controller = {
       hold: false,
       pending: [],
@@ -267,7 +270,7 @@
     const factory = {
       open(databaseName, version) {
         const wrapper = {};
-        const request = indexedDB.open(databaseName, version);
+        const request = nativeIndexedDB.open(databaseName, version);
         request.onblocked = () => wrapper.onblocked?.();
         request.onerror = () => {
           wrapper.error = request.error;
@@ -503,14 +506,13 @@
       "agm destination and target"
     );
     assert(opened[0].active, "agm lost browser activation before opening");
-    assert(controller.pending.length > 0, "agm storage completion was not held");
+    await waitFor(
+      () => controller.pending.length > 0,
+      "agm storage completion was not held"
+    );
     controller.releaseNext();
     await agmExecution;
     window.open = originalOpen;
-    passTo(
-      executionTimingOutput,
-      "PASS agm opens its unchanged destination within browser activation before storage release"
-    );
 
     const executeHeld = async (line, check, options = {}) => {
       let settled = false;
@@ -522,7 +524,10 @@
       await waitFor(() => !term.busy, `${line} did not release busy state`);
       check();
       assert(!settled, `${line} resolved before history settlement`);
-      assert(controller.pending.length > 0, `${line} did not reach held settlement`);
+      await waitFor(
+        () => controller.pending.length > 0,
+        `${line} did not reach held settlement`
+      );
       controller.releaseNext();
       const result = await execution;
       return result;
@@ -591,6 +596,10 @@
     passTo(
       executionTimingOutput,
       "PASS late settlement preserves newer pending input and exact saved order"
+    );
+    passTo(
+      executionTimingOutput,
+      "PASS agm opens its unchanged destination within browser activation before storage release"
     );
 
     await executeHeld("alias hp=ping", () => assert(term.getAlias("hp") === "ping", "alias unchanged"));
