@@ -1757,15 +1757,22 @@
     await seedRecord(healthyName, { version: 1, entries: ["echo prior"] });
     const healthy = createCommandHistoryStore({ databaseName: healthyName, indexedDB: nativeIndexedDB });
     await healthy.ready;
-    const healthyTerm = createTerminal(true);
-    const productionReady = healthy.ready.then(() => {
-      healthyTerm.history = healthy.getSnapshot();
-      healthyTerm.historyCursor = -1;
+    const descriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    const isolatedIndexedDB = {
+      open(databaseName, ...args) {
+        return nativeIndexedDB.open(databaseName === "rootvc.command-history" ? healthyName : databaseName, ...args);
+      },
+    };
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: isolatedIndexedDB,
     });
-    healthyTerm.historyReady = productionReady;
-    const healthyHandoff = makeHandoff(healthyTerm, ["e", "c", "h", "\t", "c", "e", "d", "a", "r", "\r"]);
+    const healthyTerm = createTerminal(true);
+    if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+    else delete window.indexedDB;
     await healthyTerm.historyReady;
     equal(healthyTerm.history, ["echo prior"], "healthy restoration did not precede first prompt");
+    const healthyHandoff = makeHandoff(healthyTerm, ["e", "c", "h", "\t", "c", "e", "d", "a", "r", "\r"]);
     runRootTerminal(healthyTerm, healthyHandoff.handoff);
     await settleCommand(healthyTerm, "cedar", 2);
     equal(
