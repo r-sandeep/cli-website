@@ -39,15 +39,27 @@ describe("browser-local history store", () => {
   it("preserves order and duplicates while bounding memory and storage to the newest 200 entries", () => {
     const { createHistoryStore, storage } = loadHistoryStore();
     const store = createHistoryStore();
-    const submitted = Array.from({ length: 199 }, (_, index) => `command-${index}`);
-    submitted.splice(80, 0, "duplicate", "duplicate");
+    const submitted = Array.from({ length: 201 }, (_, index) =>
+      index === 80 || index === 81 ? "duplicate" : `command-${index}`
+    );
+    const boundaries = new Set([1, 199, 200, 201]);
 
     expect(store.snapshot()).toEqual([]);
-    for (const command of submitted) store.append(command);
+    expect(store.append("")).toEqual([]);
+    expect(store.append("   ")).toEqual([]);
+    expect(storage.value(HISTORY_KEY)).toBeUndefined();
+
+    submitted.forEach((command, index) => {
+      store.append(command);
+      const count = index + 1;
+      if (!boundaries.has(count)) return;
+
+      const expected = submitted.slice(0, count).slice(-200);
+      expect(store.snapshot()).toEqual(expected);
+      expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(expected);
+    });
 
     const expectedAt201 = submitted.slice(-200);
-    expect(store.snapshot()).toEqual(expectedAt201);
-    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(expectedAt201);
 
     const restored = createHistoryStore();
     expect(restored.snapshot()).toEqual(expectedAt201);
@@ -116,6 +128,8 @@ describe("browser-local history store", () => {
     expect(() => store.append("first")).not.toThrow();
     expect(() => store.append("second")).not.toThrow();
     expect(store.snapshot()).toEqual(["first", "second"]);
+    expect(() => store.append("after-denial")).not.toThrow();
+    expect(store.snapshot()).toEqual(["first", "second", "after-denial"]);
   });
 
   it("keeps bounded in-memory history when reads are denied without attempting a write", () => {
@@ -131,6 +145,8 @@ describe("browser-local history store", () => {
     expect(() => store.append("first")).not.toThrow();
     expect(() => store.append("second")).not.toThrow();
     expect(store.snapshot()).toEqual(["first", "second"]);
+    expect(() => store.append("after-denial")).not.toThrow();
+    expect(store.snapshot()).toEqual(["first", "second", "after-denial"]);
     expect(storage.setItem).not.toHaveBeenCalled();
   });
 
