@@ -877,6 +877,77 @@ describe("runRootTerminal", () => {
     expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
+  it("completes captured startup Tab in parser order before submitting", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const callbacks = [];
+    const pendingInput = ["h", "e", "\t", "\r"];
+    const term = createTerm({
+      pos: vi.fn(() => term.currentLine.length),
+      write: vi.fn((_output, callback) => {
+        if (callback) callbacks.push(callback);
+      }),
+    });
+
+    runRootTerminal(term, {
+      pendingInput,
+      setReceiver: vi.fn(),
+    });
+
+    expect(term.currentLine).toBe("");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    callbacks.shift()();
+    expect(term.currentLine).toBe("h");
+    callbacks.shift()();
+    expect(term.currentLine).toBe("he");
+    callbacks.shift()();
+    expect(term.currentLine).toBe("help ");
+    expect(term.setCurrentLine).toHaveBeenCalledWith("help ");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+    callbacks.shift()();
+    expect(term.executeCommandLine).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).toHaveBeenCalledWith("help ");
+  });
+
+  it("queues live Tab behind admitted lifecycle input without overtaking", () => {
+    const { runRootTerminal } = loadTerminalScript({
+      commands: { echo: () => {} },
+    });
+    const callbacks = [];
+    const pendingInput = ["e"];
+    const handoff = {
+      pendingInput,
+      setReceiver: vi.fn((receiver) => {
+        handoff.receive = receiver;
+      }),
+    };
+    const term = createTerm({
+      bufferResetInput: vi.fn(() => false),
+      pos: vi.fn(() => term.currentLine.length),
+      write: vi.fn((_output, callback) => {
+        if (callback) callbacks.push(callback);
+      }),
+    });
+
+    runRootTerminal(term, handoff);
+    callbacks.shift()();
+    handoff.receive("c");
+    handoff.receive("h");
+    pressTab(term);
+    handoff.receive("c");
+    handoff.receive("e");
+    handoff.receive("d");
+    handoff.receive("a");
+    handoff.receive("r");
+    handoff.receive("\r");
+
+    while (callbacks.length > 0) callbacks.shift()();
+
+    expect(term.executeCommandLine).toHaveBeenCalledTimes(1);
+    expect(term.executeCommandLine).toHaveBeenCalledWith("echo cedar");
+    expect(term.currentLine).toBe("echo cedar");
+    expect(term.setCurrentLine).toHaveBeenCalledWith("echo ");
+  });
+
   it("keeps live handoff input within startup/reset ownership", () => {
     const { runRootTerminal } = loadTerminalScript();
     const callbacks = [];

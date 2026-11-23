@@ -280,13 +280,15 @@ function runRootTerminal(term, inputHandoff = null) {
     return true;
   };
 
+  let queueLifecycleCompletion = () => false;
+
   term.attachCustomKeyEventHandler((event) => {
     if (event.key === "Tab") {
       event.preventDefault();
       if (
         event.type === "keydown" &&
         !term.locked &&
-        term.bufferResetInput?.({ lifecycleCompletion: true })
+        queueLifecycleCompletion()
       ) {
         return false;
       }
@@ -427,6 +429,16 @@ function runRootTerminal(term, inputHandoff = null) {
   };
 
   const lifecycleInput = inputHandoff?.pendingInput || [];
+  if (inputHandoff) {
+    // Tab captured before the custom keyboard handler existed is xterm data,
+    // not ordinary live onData. Translate it once at the startup boundary so
+    // it uses the same parser-paced completion operation as a live keydown.
+    for (let index = 0; index < lifecycleInput.length; index += 1) {
+      if (lifecycleInput[index] === "\t") {
+        lifecycleInput[index] = { lifecycleCompletion: true };
+      }
+    }
+  }
   let lifecycleDraining = false;
   const drainLifecycleInput = () => {
     if (term.locked) {
@@ -457,6 +469,23 @@ function runRootTerminal(term, inputHandoff = null) {
       term.write("", next);
     };
     next();
+  };
+
+  queueLifecycleCompletion = () => {
+    const completionIntent = { lifecycleCompletion: true };
+    // Reset rendering owns its existing queue until it hands events back to
+    // this same lifecycle FIFO.
+    if (term.bufferResetInput?.(completionIntent)) return true;
+    if (lifecycleDraining || lifecycleInput.length > 0) {
+      // Preserve ordinary busy admission: consume Tab without retaining work
+      // that could run after another command releases ownership.
+      if (!term.busy) {
+        lifecycleInput.push(completionIntent);
+        drainLifecycleInput();
+      }
+      return true;
+    }
+    return false;
   };
 
   term.setResetInputDrainer?.((queued) => {
