@@ -877,6 +877,88 @@ describe("runRootTerminal", () => {
     expect(term.executeCommandLine).not.toHaveBeenCalled();
   });
 
+  it("keeps live handoff input within startup/reset ownership", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const callbacks = [];
+    const pendingInput = ["s"];
+    const handoff = {
+      pendingInput,
+      setReceiver: vi.fn((receiver) => {
+        handoff.receive = receiver;
+      }),
+    };
+    const term = createTerm({
+      bufferResetInput: vi.fn(() => false),
+      setLifecycleInputResumer: vi.fn(),
+      setResetInputDrainer: vi.fn(),
+      write: vi.fn((_output, callback) => {
+        if (callback) callbacks.push(callback);
+      }),
+    });
+
+    runRootTerminal(term, handoff);
+    expect(term.onData).not.toHaveBeenCalled();
+    expect(handoff.setReceiver).toHaveBeenCalledTimes(1);
+
+    // Startup bytes stay parser-paced, and a new eligible arrival retains FIFO.
+    callbacks.shift()();
+    handoff.receive("t");
+    expect(term.currentLine).toBe("s");
+    callbacks.shift()();
+    expect(term.currentLine).toBe("st");
+    callbacks.shift()();
+
+    // Form/upgrade ownership discards shell input immediately, including Tab.
+    term.locked = true;
+    handoff.receive("Ada");
+    handoff.receive("\r");
+    pressTab(term);
+    expect(term.currentLine).toBe("st");
+    expect(term.bufferResetInput).toHaveBeenCalledTimes(2);
+
+    // Ordinary busy input is not converted into deferred lifecycle work.
+    term.locked = false;
+    term.busy = true;
+    handoff.receive("p");
+    handoff.receive("\r");
+    term.busy = false;
+    term.setLifecycleInputResumer.mock.calls[0][0]();
+    expect(term.currentLine).toBe("st");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("drops admitted lifecycle tail when ownership transfers to a form", () => {
+    const { runRootTerminal } = loadTerminalScript();
+    const callbacks = [];
+    const pendingInput = ["a", "b"];
+    const handoff = {
+      pendingInput,
+      setReceiver: vi.fn((receiver) => {
+        handoff.receive = receiver;
+      }),
+    };
+    const term = createTerm({
+      setLifecycleInputResumer: vi.fn(),
+      setResetInputDrainer: vi.fn(),
+      write: vi.fn((_output, callback) => {
+        if (callback) callbacks.push(callback);
+      }),
+    });
+
+    runRootTerminal(term, handoff);
+    callbacks.shift()();
+    expect(term.currentLine).toBe("a");
+
+    term.locked = true;
+    callbacks.shift()();
+    term.locked = false;
+    term.setLifecycleInputResumer.mock.calls[0][0]();
+
+    expect(pendingInput).toEqual([]);
+    expect(term.currentLine).toBe("a");
+    expect(term.executeCommandLine).not.toHaveBeenCalled();
+  });
+
   it("debounces resize handling with requestAnimationFrame", () => {
     const rafCallbacks = [];
     const requestAnimationFrame = vi.fn((callback) => {

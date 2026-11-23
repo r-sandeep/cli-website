@@ -285,6 +285,7 @@ function runRootTerminal(term, inputHandoff = null) {
       event.preventDefault();
       if (
         event.type === "keydown" &&
+        !term.locked &&
         term.bufferResetInput?.({ lifecycleCompletion: true })
       ) {
         return false;
@@ -428,12 +429,25 @@ function runRootTerminal(term, inputHandoff = null) {
   const lifecycleInput = inputHandoff?.pendingInput || [];
   let lifecycleDraining = false;
   const drainLifecycleInput = () => {
-    if (lifecycleDraining || term.busy || term.locked || lifecycleInput.length === 0) {
+    if (term.locked) {
+      // Form answers and upgrade-era bytes belong to their existing owner (or
+      // are deliberately discarded). Never retain an already-admitted shell
+      // tail until that ownership ends.
+      lifecycleInput.length = 0;
+      lifecycleDraining = false;
+      return;
+    }
+    if (lifecycleDraining || term.busy || lifecycleInput.length === 0) {
       return;
     }
     lifecycleDraining = true;
     const next = () => {
-      if (term.busy || term.locked || lifecycleInput.length === 0) {
+      if (term.locked) {
+        lifecycleInput.length = 0;
+        lifecycleDraining = false;
+        return;
+      }
+      if (term.busy || lifecycleInput.length === 0) {
         lifecycleDraining = false;
         return;
       }
@@ -453,13 +467,27 @@ function runRootTerminal(term, inputHandoff = null) {
 
   if (inputHandoff) {
     inputHandoff.setReceiver((data) => {
+      // collectInput has its own onData subscription, while upgrade's lock
+      // intentionally discards input. In either case the shell receiver must
+      // not retain the event for execution after ownership ends.
+      if (term.locked) return;
+
       // During a reset-render transition, preserve arrival order in the
       // transition-owned queue. Routing a byte through lifecycleInput first
       // would let the reset barrier reappend it behind newer bytes that have
       // already arrived, producing cursor-corrupt permutations such as ingp.
-      if (!term.locked && term.bufferResetInput?.(data)) return;
-      lifecycleInput.push(data);
-      drainLifecycleInput();
+      if (term.bufferResetInput?.(data)) return;
+
+      // Only startup/reset input already owned by the lifecycle FIFO may join
+      // that FIFO. Ordinary live input keeps the established processInput busy
+      // gate instead of becoming a general deferred command queue.
+      if (lifecycleDraining || lifecycleInput.length > 0) {
+        if (term.busy) return;
+        lifecycleInput.push(data);
+        drainLifecycleInput();
+        return;
+      }
+      processInput(data);
     });
     // The first prompt must be parsed before captured startup input reaches the
     // production editor. Reception itself was installed synchronously.
