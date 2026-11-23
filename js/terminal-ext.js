@@ -50,6 +50,8 @@ const extend = (term) => {
   term._promptChar = "$";
   const historyStore = createCommandHistoryStore();
   let visitReplay = [];
+  let visitGeneration = 0;
+  let activeExecutions = 0;
   term.history = [];
   term.historyCursor = -1;
   term.historyReady = historyStore.ready.then(() => {
@@ -64,12 +66,21 @@ const extend = (term) => {
     // immediately so parsing, preloading and dispatch keep their established
     // timing. Durable settlement is awaited only after command-owned UI cleanup.
     term.history = historyStore.getSnapshot();
-    visitReplay = visitReplay.concat(line).slice(-COMMAND_HISTORY_LIMIT);
     term.historyCursor = -1;
-    return settlement;
+    return {
+      generation: visitGeneration,
+      line,
+      settlement,
+    };
+  };
+
+  const publishVisitReplay = (submission) => {
+    if (!submission || submission.generation !== visitGeneration) return;
+    visitReplay = visitReplay.concat(submission.line).slice(-COMMAND_HISTORY_LIMIT);
   };
 
   const resetVisitHistory = () => {
+    visitGeneration += 1;
     historyStore.resetVisit();
     term.history = historyStore.getSnapshot();
     visitReplay = [];
@@ -668,9 +679,15 @@ const extend = (term) => {
     };
     const parsed = parseCommandLine(line);
     let historySettlement = Promise.resolve();
+    let submission = null;
+    let ownsFirstExecution = false;
     let exitStatus;
 
     try {
+      if (settings.addToHistory) {
+        activeExecutions += 1;
+        ownsFirstExecution = true;
+      }
       if (settings.manageBusy) {
         term.busy = true;
       }
@@ -679,7 +696,8 @@ const extend = (term) => {
       // preloading, validation or dispatch. Internal execution paths opt out
       // with addToHistory:false (deep links and resize replay).
       if (parsed.line.length > 0 && settings.addToHistory) {
-        historySettlement = recordSubmittedCommand(parsed.line);
+        submission = recordSubmittedCommand(parsed.line);
+        historySettlement = submission.settlement;
       }
 
       // User aliases expand exactly once, on the interactive line and before
@@ -790,12 +808,17 @@ const extend = (term) => {
       if (settings.scrollAfter) {
         term.scrollToBottom();
       }
+
+      if (ownsFirstExecution) {
+        activeExecutions -= 1;
+      }
     }
 
     // Persistence completion belongs to the execution promise, not to command
     // responsiveness. All command-owned prompt/input/busy cleanup is complete
     // before this bounded wait, and nothing below may mutate terminal UI state.
     await historySettlement;
+    publishVisitReplay(submission);
     return exitStatus;
   };
 
@@ -822,6 +845,12 @@ const extend = (term) => {
     window.fitAddon.fit();
     if (term.cols === previousCols) {
       term.scrollToBottom();
+      return;
+    }
+    // A submitted command is not replayable until its first execution has
+    // completed. During that lifetime resize may fit the terminal, but must not
+    // reset the live input/output owner or dispatch a second copy.
+    if (activeExecutions > 0) {
       return;
     }
     term._initialized = false;
