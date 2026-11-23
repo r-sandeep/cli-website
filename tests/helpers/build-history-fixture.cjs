@@ -34,6 +34,8 @@ const html = `<!doctype html>
   <div id="submission-scope-status" aria-live="polite">LOADING</div>
   <button id="run-submission-scope" type="button" disabled>Run submission scope checks</button>
   <div id="submission-scope-results" aria-live="polite"></div>
+  <button id="run-ordered-input" type="button">Run ordered input checks</button>
+  <div id="ordered-input-results" aria-live="polite"></div>
   <button id="run-write-exceptions" type="button">Run write exception checks</button>
   <div id="write-exception-results" aria-live="polite"></div>
   <script src="/__asd_history/xterm.js"></script>

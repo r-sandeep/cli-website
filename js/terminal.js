@@ -283,7 +283,10 @@ function runRootTerminal(term, inputHandoff = null) {
   term.attachCustomKeyEventHandler((event) => {
     if (event.key === "Tab") {
       event.preventDefault();
-      if (event.type === "keydown" && term.bufferResetInput?.("\t")) {
+      if (
+        event.type === "keydown" &&
+        term.bufferResetInput?.({ lifecycleCompletion: true })
+      ) {
         return false;
       }
       // xterm asks about both phases in some browsers. Complete exactly once,
@@ -314,11 +317,12 @@ function runRootTerminal(term, inputHandoff = null) {
     // production path rather than a second input algorithm.
     if (!term.locked && term.bufferResetInput?.(e)) return;
     if (term._initialized && !term.locked && !term.busy) {
+      if (e?.lifecycleCompletion) {
+        if (completeInput()) term.scrollToBottom();
+        return;
+      }
       if (e !== "\t") resetCompletion();
       switch (e) {
-        case "\t":
-          if (completeInput()) term.scrollToBottom();
-          break;
         case "\r": // Enter
           // Reset tab state
           term.tabIndex = 0;

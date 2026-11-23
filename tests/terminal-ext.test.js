@@ -1660,6 +1660,44 @@ describe("terminal-ext", () => {
     expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
   });
 
+  it("reserves completed resize replay in submission order", async () => {
+    let releaseSlow;
+    let slowRuns = 0;
+    const calls = [];
+    const slow = vi.fn(() => {
+      calls.push("slow");
+      slowRuns += 1;
+      if (slowRuns === 1) {
+        return new Promise((resolve) => {
+          releaseSlow = resolve;
+        });
+      }
+    });
+    const fast = vi.fn(() => calls.push("fast"));
+    const { extend } = loadTerminalExt({ commands: { fast, slow } });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+
+    const slowExecution = term.executeCommandLine("slow", { promptAfter: false });
+    while (!releaseSlow) await Promise.resolve();
+    await term.executeCommandLine("fast", { promptAfter: false });
+    releaseSlow();
+    await slowExecution;
+
+    calls.length = 0;
+    env.window.__term = term;
+    fitTo(120);
+    await term.resizeListener();
+
+    expect(calls).toEqual(["slow", "fast"]);
+    expect(term.history).toEqual(["slow", "fast"]);
+    expect(env.window.dataLayer).toEqual([
+      { event: "commandSent", command: "fast", args: "" },
+      { event: "commandSent", command: "slow", args: "" },
+    ]);
+  });
+
   it.each([
     ["help caller", "help", ["caller"]],
     ["missing caller", null, null],

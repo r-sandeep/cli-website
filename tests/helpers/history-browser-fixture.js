@@ -16,6 +16,8 @@
   const submissionScopeStatus = document.querySelector("#submission-scope-status");
   const submissionScopeOutput = document.querySelector("#submission-scope-results");
   const submissionScopeButton = document.querySelector("#run-submission-scope");
+  const orderedInputOutput = document.querySelector("#ordered-input-results");
+  const orderedInputButton = document.querySelector("#run-ordered-input");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   // Helpers and existing controls always use the native factory, even while the
   // execution-timing fixture temporarily installs a transaction wrapper.
@@ -456,6 +458,12 @@
     if (actualRenderer) {
       term.open(document.querySelector("#actual-terminal"));
       term.rendered = rendered;
+      const nativeAttachCustomKeyEventHandler =
+        term.attachCustomKeyEventHandler.bind(term);
+      term.attachCustomKeyEventHandler = (handler) => {
+        term._customKeyHandler = handler;
+        return nativeAttachCustomKeyEventHandler(handler);
+      };
       const nativeWrite = term.write.bind(term);
       const nativeWriteln = term.writeln.bind(term);
       term.write = (value, callback) => {
@@ -1343,6 +1351,140 @@
     passTo(submissionScopeOutput, "PASS activation interactive continuation and earlier lifecycle protections remain intact");
   };
 
+  const emitText = (term, text) => {
+    for (const character of text) term.emit(character);
+  };
+
+  const pressActualKey = (term, key) => {
+    assert(typeof term._customKeyHandler === "function", `${key} handler was not installed`);
+    term._customKeyHandler({
+      altKey: false,
+      ctrlKey: false,
+      key,
+      metaKey: false,
+      preventDefault() {},
+      shiftKey: false,
+      type: "keydown",
+    });
+  };
+
+  const runOrderedInputChecks = async () => {
+    localStorage.clear();
+    window.dataLayer = [];
+
+    const replayTerm = createTerminal();
+    await replayTerm.historyReady;
+    runRootTerminal(replayTerm);
+    const priorSlow = commands.asdslow;
+    const priorFast = commands.asdfast;
+    let releaseSlow;
+    let slowRuns = 0;
+    const replayCalls = [];
+    commands.asdslow = () => {
+      replayCalls.push("slow");
+      slowRuns += 1;
+      if (slowRuns === 1) {
+        return new Promise((resolve) => { releaseSlow = resolve; });
+      }
+    };
+    commands.asdfast = () => replayCalls.push("fast");
+    try {
+      const slow = replayTerm.executeCommandLine("asdslow", { promptAfter: false });
+      await waitFor(() => typeof releaseSlow === "function", "slow execution did not start");
+      await replayTerm.executeCommandLine("asdfast", { promptAfter: false });
+      releaseSlow();
+      await slow;
+      replayCalls.length = 0;
+      window.fitAddon.fit = () => { replayTerm.cols += 1; };
+      await replayTerm.resizeListener();
+      equal(replayCalls, ["slow", "fast"], "overlapping replay used completion order");
+      equal(replayTerm.history.slice(-2), ["asdslow", "asdfast"], "overlapping recall order changed");
+    } finally {
+      if (priorSlow === undefined) delete commands.asdslow;
+      else commands.asdslow = priorSlow;
+      if (priorFast === undefined) delete commands.asdfast;
+      else commands.asdfast = priorFast;
+    }
+    passTo(orderedInputOutput, "PASS overlapping completion replays in exact submission order");
+
+    const retentionTerm = createTerminal();
+    await retentionTerm.historyReady;
+    runRootTerminal(retentionTerm);
+    const priorMark = commands.asdmark;
+    const replayedMarks = [];
+    commands.asdmark = (args) => replayedMarks.push(args[0]);
+    try {
+      for (let index = 0; index < 202; index += 1) {
+        await retentionTerm.executeCommandLine(`asdmark ${index}`, { promptAfter: false });
+      }
+      assert(retentionTerm.history.length === 200, "overlapping retention exceeded 200");
+      equal(retentionTerm.history[0], "asdmark 2", "reservation eviction removed the wrong entry");
+      replayedMarks.length = 0;
+      window.fitAddon.fit = () => { retentionTerm.cols += 1; };
+      await retentionTerm.resizeListener();
+      assert(replayedMarks.length === 200, "resize did not replay exact newest 200");
+      equal(replayedMarks[0], "2", "replay reservations kept an evicted entry");
+      retentionTerm.init("guest");
+      await retentionTerm.executeCommandLine("asdmark after-reset", { promptAfter: false });
+      replayedMarks.length = 0;
+      await retentionTerm.resizeListener();
+      equal(replayedMarks, ["after-reset"], "reset did not own replay reservations");
+    } finally {
+      if (priorMark === undefined) delete commands.asdmark;
+      else commands.asdmark = priorMark;
+    }
+    passTo(orderedInputOutput, "PASS replay reservations retain exact newest-200 and reset ownership");
+
+    const startupTerm = createTerminal(true);
+    await startupTerm.historyReady;
+    const startupInput = [..."ping", "\r"];
+    let startupReceiver = (data) => startupInput.push(data);
+    runRootTerminal(startupTerm, {
+      pendingInput: startupInput,
+      setReceiver(receiver) { startupReceiver = receiver; },
+    });
+    await waitFor(() => startupTerm.rendered.join("").includes("pong"), "startup input did not execute after prompt parsing");
+    assert(startupTerm.history.filter((entry) => entry === "ping").length === 1, "startup input executed more than once");
+    startupReceiver("x");
+    await waitFor(() => startupTerm.currentLine === "x", "startup handoff did not retain live input");
+    passTo(orderedInputOutput, "PASS startup receives input before readiness and executes after prompt parsing");
+
+    const resetTerm = createTerminal(true);
+    await resetTerm.historyReady;
+    runRootTerminal(resetTerm);
+    emitText(resetTerm, "zsh");
+    resetTerm.emit("\r");
+    emitText(resetTerm, "pign");
+    resetTerm.emit("\u007f");
+    resetTerm.emit("\u007f");
+    emitText(resetTerm, "ng");
+    resetTerm.emit("\r");
+    await waitFor(() => resetTerm.rendered.join("").includes("pong"), "parser-paced edited ping did not execute");
+    assert(!resetTerm.rendered.join("").includes("pingnip"), "reset burst reversed cursor input");
+    passTo(orderedInputOutput, "PASS real xterm reset bursts preserve exact input and result rows");
+
+    emitText(resetTerm, "cancelled");
+    resetTerm.emit("\u0003");
+    resetTerm.emit("\033[A");
+    await waitFor(() => resetTerm.currentLine === "ping", "ArrowUp did not recall the edited ping");
+    resetTerm.emit("\r");
+    await waitFor(() => resetTerm.history.filter((entry) => entry === "ping").length === 2, "recalled ping did not execute");
+    emitText(resetTerm, "ech");
+    await waitFor(() => resetTerm.currentLine === "ech", "completion prefix was not received");
+    pressActualKey(resetTerm, "Tab");
+    await waitFor(() => resetTerm.currentLine === "echo ", "ech did not uniquely complete to echo plus space");
+    emitText(resetTerm, "cedar");
+    resetTerm.emit("\r");
+    await waitFor(() => resetTerm.rendered.join("").includes("cedar"), "completed echo command did not render cedar");
+    assert(!resetTerm.history.includes("cancelled"), "cancelled lifecycle input entered history");
+    assert(resetTerm.history.includes("echo cedar"), "completed spelling was not stored");
+    passTo(orderedInputOutput, "PASS parser-paced editing cancellation recall and completion remain usable");
+
+    await runExecutionTimingChecks(executionFixture);
+    await runLifecycleRepairChecks();
+    passTo(orderedInputOutput, "PASS branch activation analytics storage and late-settlement protections remain intact");
+  };
+
   submissionScopeButton.addEventListener("click", async () => {
     submissionScopeButton.disabled = true;
     submissionScopeOutput.replaceChildren();
@@ -1351,6 +1493,17 @@
       passTo(submissionScopeOutput, "SUBMISSION SCOPE CHECKS COMPLETE");
     } catch (error) {
       passTo(submissionScopeOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
+
+  orderedInputButton.addEventListener("click", async () => {
+    orderedInputButton.disabled = true;
+    orderedInputOutput.replaceChildren();
+    try {
+      await runOrderedInputChecks();
+      passTo(orderedInputOutput, "ORDERED INPUT CHECKS COMPLETE");
+    } catch (error) {
+      passTo(orderedInputOutput, `FAIL ${error && error.stack ? error.stack : error}`);
     }
   });
 

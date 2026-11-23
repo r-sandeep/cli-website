@@ -7,6 +7,7 @@ function loadBootstrap(overrides = {}) {
   const term = {
     loadAddon: vi.fn(),
     open: vi.fn(),
+    onData: vi.fn(() => ({ dispose: vi.fn() })),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
@@ -109,7 +110,9 @@ describe("bootstrap", () => {
     );
     expect(state.extend).toHaveBeenCalledWith(state.term);
     expect(state.preloadCommandAssets).toHaveBeenCalledWith("whois lee");
-    expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal.mock.calls[0][0]).toBe(state.term);
+    expect(state.runRootTerminal.mock.calls[0][1].pendingInput).toEqual([]);
     expect(state.idleCalls).toHaveLength(1);
     expect(state.idleCalls[0].options).toEqual({ timeout: 1500 });
 
@@ -152,5 +155,26 @@ describe("bootstrap", () => {
 
     appendedScripts[1].onload();
     await rickrollPromise;
+  });
+
+  it("receives input while history is pending and hands it to terminal startup", async () => {
+    const state = loadBootstrap();
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+    const receive = state.term.onData.mock.calls[0][0];
+
+    receive("p");
+    receive("\r");
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+
+    state.releaseHistory();
+    await historyReadyTick();
+
+    const handoff = state.runRootTerminal.mock.calls[0][1];
+    expect(handoff.pendingInput).toEqual(["p", "\r"]);
+    const liveReceiver = vi.fn();
+    handoff.setReceiver(liveReceiver);
+    receive("x");
+    expect(liveReceiver).toHaveBeenCalledWith("x");
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
   });
 });
