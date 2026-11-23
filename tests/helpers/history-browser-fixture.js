@@ -1547,7 +1547,14 @@
       for (const character of text) term.emit(character);
     };
     const rendered = () => term.rendered.join("");
-    const promptCount = () => (rendered().match(/guest:rootpc/g) || []).length;
+    const promptCount = () => {
+      let count = 0;
+      for (let index = 0; index < term.buffer.active.length; index += 1) {
+        const line = term.buffer.active.getLine(index)?.translateToString(false) || "";
+        count += (line.match(/guest:rootpc/g) || []).length;
+      }
+      return count;
+    };
     const durable = async () => {
       const record = await readRecord(COMMAND_HISTORY_DATABASE);
       return record?.entries || [];
@@ -1578,7 +1585,7 @@
       "answered application cancellation did not settle"
     );
     assert(applicationPosts === 0, "cancelled application made a POST");
-    assert(promptCount() === promptsBeforeCancel, "cancellation printed an extra shell prompt");
+    assert(promptCount() === promptsBeforeCancel + 1, "cancellation did not render exactly one final prompt");
     assert(!rendered().toLowerCase().includes("command not found: ada"), "form answer executed as a command");
     assert(!term.history.includes("Ada"), "form answer entered recall history");
     equal(term.history, ["apply 1"], "form answer changed shell recall");
@@ -1593,7 +1600,7 @@
 
     let releaseUpgrade;
     let upgradeReleased = false;
-    term.timer = () =>
+    term.progressBar = () =>
       upgradeReleased
         ? Promise.resolve()
         : new Promise((resolve) => { releaseUpgrade = resolve; });
