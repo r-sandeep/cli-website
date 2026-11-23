@@ -61,8 +61,8 @@ const extend = (term) => {
   const recordSubmittedCommand = (line) => {
     const settlement = historyStore.append(line).catch(() => false);
     // append updates visit memory before its first await; reflect that snapshot
-    // immediately so parsing/preloading can keep their established timing while
-    // dispatch still waits for the bounded durable settlement below.
+    // immediately so parsing, preloading and dispatch keep their established
+    // timing. Durable settlement is awaited only after command-owned UI cleanup.
     term.history = historyStore.getSnapshot();
     visitReplay = visitReplay.concat(line).slice(-COMMAND_HISTORY_LIMIT);
     term.historyCursor = -1;
@@ -695,7 +695,6 @@ const extend = (term) => {
             term.writeln("");
           }
 
-          await historySettlement;
           term.stylePrint(validation.error.message);
 
           if (settings.trackAnalytics) {
@@ -708,7 +707,6 @@ const extend = (term) => {
           }
         } else {
           await term.preloadCommandAssets(validation.producer);
-          await historySettlement;
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
@@ -755,7 +753,6 @@ const extend = (term) => {
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
-        await historySettlement;
 
         if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
           term.writeln("");
@@ -795,6 +792,10 @@ const extend = (term) => {
       }
     }
 
+    // Persistence completion belongs to the execution promise, not to command
+    // responsiveness. All command-owned prompt/input/busy cleanup is complete
+    // before this bounded wait, and nothing below may mutate terminal UI state.
+    await historySettlement;
     return exitStatus;
   };
 
