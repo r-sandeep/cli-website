@@ -19,7 +19,7 @@ function createMemoryStorage(initial = {}) {
 }
 const helpContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(
-  `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts;`,
+  `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts; this.savedHistoryHelpLines = savedHistoryHelp;`,
   helpContext
 );
 
@@ -177,6 +177,7 @@ function loadCommands({
     // real table from config/help.js.
     help: Object.keys(help).length > 0 ? help : helpContext.helpEntries,
     shortcuts: helpContext.shortcutEntries,
+    savedHistoryHelp: helpContext.savedHistoryHelpLines,
     portfolio,
     buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
     colorText: (text) => text,
@@ -962,6 +963,48 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
+  });
+
+  it("renders the complete saved-history policy after the existing shortcuts", () => {
+    const expectedFooter = [
+      "Saved command history:",
+      "History is saved in this browser.",
+      "Keep the most recent 200 commands.",
+      "Use ArrowUp to recall; run history to list.",
+      "Without storage, history lasts this visit.",
+      "Failed commands are saved too.",
+      "clear, zsh, and upgrade keep saved history.",
+    ];
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output).toContain("%history%  list saved command history, numbered from 1000");
+    expect(output.slice(-expectedFooter.length)).toEqual(expectedFooter);
+  });
+
+  it("documents the same saved-history behavior in the source README", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const independentExpectedPhrases = [
+      "## Saved command history",
+      "saved in this browser",
+      "including failed commands",
+      "**ArrowUp**",
+      "run `history`",
+      "newest 200 commands",
+      "memory-only history for the current visit",
+      "`clear`, `zsh`, and `upgrade`",
+      "retain saved and recallable history",
+      "independent recall views",
+      "last completed write",
+      "is not uploaded by this feature",
+      "Existing command analytics remain unchanged",
+    ];
+
+    for (const phrase of independentExpectedPhrases) {
+      expect(readme).toContain(phrase);
+    }
   });
 
   it("renders the environment commands and complete expansion grammar", () => {

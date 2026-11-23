@@ -9,10 +9,21 @@ const shortcuts = {
   "Ctrl+U": "clear the whole line",
 };
 
+const savedHistoryHelp = [
+  "Saved command history:",
+  "History is saved in this browser.",
+  "Keep the most recent 200 commands.",
+  "Use ArrowUp to recall; run history to list.",
+  "Without storage, history lasts this visit.",
+  "Failed commands are saved too.",
+  "clear, zsh, and upgrade keep saved history.",
+];
+
 const help = {
   "%tui%": "open the keyboard-driven directory (q to return)",
   "%help%": "list all commands (you're looking at it)",
   "%version% [--json]": "show the terminal version and build date",
+  "%history%": "list saved command history, numbered from 1000",
   "%alias% [name[=value]]": "define, list, or query command aliases",
   "%unalias% name": "remove a command alias",
   "%bookmark% add NAME": "save the current directory as NAME",

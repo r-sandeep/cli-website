@@ -125,6 +125,10 @@ const commands = {
     Object.entries(shortcuts).forEach(function (kv) {
       term.stylePrint(`${kv[0]}: ${kv[1]}`);
     });
+    term.stylePrint("");
+    savedHistoryHelp.forEach(function (line) {
+      term.stylePrint(line);
+    });
   },
 
   // Prints the metadata fixed into the application bundle by build-assets.js.
