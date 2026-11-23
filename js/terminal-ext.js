@@ -112,7 +112,9 @@ const extend = (term) => {
   term.cwd = "~";
   term.sep = ":";
   term._promptChar = "$";
-  term.history = [];
+  const historyStore = createHistoryStore();
+  term.history = historyStore.snapshot();
+  term.visitHistory = [];
   term.historyCursor = -1;
   term.busy = false;
 
@@ -707,6 +709,10 @@ const extend = (term) => {
       ...options,
     };
     const parsed = parseCommandLine(line);
+    if (settings.addToHistory && parsed.line.length > 0) {
+      term.history = historyStore.append(parsed.line);
+      term.visitHistory = _boundedHistory([...term.visitHistory, parsed.line]);
+    }
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
@@ -726,10 +732,6 @@ const extend = (term) => {
             term.writeln("");
           }
 
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           term.stylePrint(validation.error.message);
 
           if (settings.trackAnalytics) {
@@ -745,10 +747,6 @@ const extend = (term) => {
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -798,10 +796,6 @@ const extend = (term) => {
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
@@ -873,7 +867,7 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+      for (const c of term.visitHistory) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await term.executeCommandLine(c, {
@@ -900,7 +894,7 @@ const extend = (term) => {
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
   // prompt instead of the welcome message. Announces open jobs if any exist.
-  term.init = (user = "guest", preserveHistory = false) => {
+  term.init = (user = "guest", preserveVisitHistory = false) => {
     window.fitAddon.fit();
     term.reset();
     term.printLogoType();
@@ -937,8 +931,8 @@ const extend = (term) => {
     }
 
     term.user = user;
-    if (!preserveHistory) {
-      term.history = [];
+    if (!preserveVisitHistory) {
+      term.visitHistory = [];
     }
     term.focus();
   };
