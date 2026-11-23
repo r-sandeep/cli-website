@@ -932,7 +932,7 @@ describe("help stays in sync with commands", () => {
       "%history%                              saved in this browser; newest 200; ArrowUp recalls"
     );
     expect(output).toContain(
-      "HISTORY DETAILS                       original submitted text and duplicates are saved; history numbers entries from 1000"
+      "HISTORY DETAILS                        original submitted text and duplicates are saved; history numbers entries from 1000"
     );
     expect(output).toContain("Browser storage unavailable");
     expect(output).toContain("keep visit-only memory history");
@@ -943,6 +943,19 @@ describe("help stays in sync with commands", () => {
     expect(output).toContain("%clear%, %zsh%, %upgrade%");
     expect(output).toContain("clear current recall and replay only; their submitted lines stay saved");
     expect(output).toContain("ArrowUp: recall commands saved in this browser");
+
+    const narrow = loadCommands({ help: helpContext.helpEntries });
+    narrow.term.cols = 79;
+    narrow.commands.help([]);
+    const narrowOutput = narrow.term.stylePrint.mock.calls.map(([line]) => line);
+    expect(narrowOutput).toContain("%history%");
+    expect(narrowOutput).toContain(
+      "saved in this browser; newest 200; ArrowUp recalls"
+    );
+    expect(narrowOutput).toContain("HISTORY DETAILS");
+    expect(narrowOutput).toContain(
+      "original submitted text and duplicates are saved; history numbers entries from 1000"
+    );
   });
 
   it("advertises no command that does not exist", () => {
