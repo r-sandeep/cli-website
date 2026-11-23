@@ -416,7 +416,7 @@
     equal(returned.history, ["echo saved one", "nosuchhistorycmd"], "restore order");
     assert(returned.currentLine === "", "restore leaves pending input empty");
     assert(window.dataLayer.length === 0, "restore emits no analytics");
-    returned.emit("\033[A");
+    returned.emit("\u001b[A");
     assert(returned.currentLine === "nosuchhistorycmd", "ArrowUp selects newest saved line");
     assert(window.dataLayer.length === 0, "recall alone emits no analytics");
     passTo(terminalOutput, "PASS restore precedes first prompt and never executes saved commands");
@@ -428,7 +428,7 @@
     assert(returned.history[0] === "missing 1", "oldest entry is evicted at 201");
     returned.historyCursor = -1;
     returned.currentLine = "";
-    for (let index = 0; index < 205; index += 1) returned.emit("\033[A");
+    for (let index = 0; index < 205; index += 1) returned.emit("\u001b[A");
     assert(returned.currentLine === "missing 1", "ArrowUp stops at retained oldest entry");
     await returned.executeCommandLine("history", { promptAfter: false });
     assert(returned.history.length === 200, "history self-inclusion preserves cap");
@@ -448,7 +448,7 @@
     await denied.executeCommandLine("echo one two | wc -l", { promptAfter: false });
     equal(denied.history, ["ping", "echo one two | wc -l"], "denied visit history");
     denied.currentLine = "";
-    denied.emit("\033[A");
+    denied.emit("\u001b[A");
     assert(denied.currentLine === "echo one two | wc -l", "denied recall remains usable");
     if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
     else delete window.indexedDB;
@@ -494,7 +494,7 @@
       await beforeReset.executeCommandLine(reset, { promptAfter: false });
       equal(beforeReset.history, [], `${reset} clears visit recall`);
       beforeReset.currentLine = "";
-      beforeReset.emit("\033[A");
+      beforeReset.emit("\u001b[A");
       assert(beforeReset.currentLine === "", `${reset} leaves ArrowUp empty`);
       const afterReset = await reopenTerminal();
       assert(afterReset.history.at(-1) === reset, `${reset} remains in saved archive`);
