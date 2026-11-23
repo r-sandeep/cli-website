@@ -48,9 +48,98 @@ const extend = (term) => {
   term.cwd = "~";
   term.sep = ":";
   term._promptChar = "$";
+  const historyStore = createCommandHistoryStore();
+  let visitReplay = [];
+  let visitGeneration = 0;
+  let activeExecutions = 0;
+  let resetRenderGeneration = 0;
+  let resetRenderActive = false;
+  let resetRenderInput = [];
+  let resetInputDrainer = null;
+  let lifecycleInputResumer = null;
   term.history = [];
   term.historyCursor = -1;
+  const historyReady = historyStore.ready.then(() => {
+    // The installed readiness operation owns startup restoration. If a caller
+    // deliberately replaces that operation before it settles, its late result
+    // must not overwrite the newer visit state.
+    if (term.historyReady !== historyReady) return;
+    term.history = historyStore.getSnapshot();
+    term.historyCursor = -1;
+  });
+  term.historyReady = historyReady;
   term.busy = false;
+
+  const recordSubmittedCommand = (line) => {
+    const settlement = historyStore.append(line).catch(() => false);
+    // append updates visit memory before its first await; reflect that snapshot
+    // immediately so parsing, preloading and dispatch keep their established
+    // timing. Durable settlement is awaited only after command-owned UI cleanup.
+    term.history = historyStore.getSnapshot();
+    term.historyCursor = -1;
+    const reservation = {
+      generation: visitGeneration,
+      line,
+      completed: false,
+      settlement,
+    };
+    // Reserve replay position when the submission is accepted, not when its
+    // handler happens to finish. Completion only makes this existing position
+    // eligible; it can never reorder overlapping commands.
+    visitReplay = visitReplay.concat(reservation).slice(-COMMAND_HISTORY_LIMIT);
+    return reservation;
+  };
+
+  const publishVisitReplay = (submission) => {
+    if (!submission || submission.generation !== visitGeneration) return;
+    if (!visitReplay.includes(submission)) return;
+    submission.completed = true;
+  };
+
+  const resetVisitHistory = () => {
+    visitGeneration += 1;
+    historyStore.resetVisit();
+    term.history = historyStore.getSnapshot();
+    visitReplay = [];
+    term.historyCursor = -1;
+  };
+
+  // A reset replaces xterm's buffer asynchronously. Keep bytes that arrive
+  // after the reset command but before the renderer has consumed its final
+  // prompt, then return them to the one production input function in FIFO
+  // order. This boundary is independent of history durability.
+  term.setResetInputDrainer = (drainer) => {
+    resetInputDrainer = drainer;
+  };
+  term.setLifecycleInputResumer = (resumer) => {
+    lifecycleInputResumer = resumer;
+  };
+  term.bufferResetInput = (data) => {
+    if (!resetRenderActive) return false;
+    resetRenderInput.push(data);
+    return true;
+  };
+  const beginResetRender = () => {
+    // Submission acceptance may open this transition before asset preparation;
+    // init then enters the same transition when the reset handler dispatches.
+    // Keep one owner so bytes received in between are not discarded.
+    if (resetRenderActive) return;
+    resetRenderGeneration += 1;
+    resetRenderActive = true;
+  };
+  const finishResetRender = () => {
+    if (!resetRenderActive) return;
+    const generation = resetRenderGeneration;
+    // An empty write with a callback is an xterm parser-drain barrier for every
+    // reset and prompt write queued before it.
+    term.write("", () => {
+      if (!resetRenderActive || generation !== resetRenderGeneration) return;
+      resetRenderActive = false;
+      const queued = resetRenderInput;
+      resetRenderInput = [];
+      if (resetInputDrainer) resetInputDrainer(queued);
+    });
+  };
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -632,9 +721,8 @@ const extend = (term) => {
     }
   };
 
-  term.executeCommandLine = async (line, options = {}) => {
+  const executeCommandLine = async (line, options = {}, context) => {
     const settings = {
-      addToHistory: true,
       manageBusy: true,
       promptAfter: true,
       showLeadingNewline: true,
@@ -642,17 +730,46 @@ const extend = (term) => {
       scrollAfter: true,
       ...options,
     };
+    // addToHistory was historically a presentation option. It must not grant
+    // public callers a provenance exemption; only closure-private contexts can
+    // identify redraw and deep-link work as internal.
+    const isSubmission = context === "submission";
     const parsed = parseCommandLine(line);
-    // User aliases expand exactly once, on the interactive line and before
-    // pipeline parsing; redirects and replays never expand a second time.
-    const expanded = expandUserAlias(parsed);
-    const parsedPipeline = Pipeline.parsePipeline(expanded.line);
+    let historySettlement = Promise.resolve();
+    let submission = null;
+    let ownsFirstExecution = false;
     let exitStatus;
 
     try {
+      if (isSubmission) {
+        activeExecutions += 1;
+        ownsFirstExecution = true;
+      }
       if (settings.manageBusy) {
         term.busy = true;
       }
+
+      // Start recording the original submitted text once before alias expansion,
+      // preloading, validation or dispatch. Only closure-private deep-link and
+      // redraw calls carry an internal context that omits submission effects.
+      if (parsed.line.length > 0 && isSubmission) {
+        submission = recordSubmittedCommand(String(line));
+        historySettlement = submission.settlement;
+      }
+
+      // User aliases expand exactly once, on the interactive line and before
+      // pipeline parsing; redirects and replays never expand a second time.
+      const expanded = expandUserAlias(parsed);
+      if (
+        isSubmission &&
+        ["clear", "zsh", "upgrade"].includes(expanded.cmd)
+      ) {
+        // Enter makes ordinary input busy before the reset handler reaches
+        // init. Begin the narrow reset-render transition now so input arriving
+        // in that gap is retained for the production parser-paced drainer.
+        beginResetRender();
+      }
+      const parsedPipeline = Pipeline.parsePipeline(expanded.line);
 
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
@@ -660,10 +777,6 @@ const extend = (term) => {
         if (!validation.ok) {
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           term.stylePrint(validation.error.message);
@@ -681,10 +794,6 @@ const extend = (term) => {
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -734,10 +843,6 @@ const extend = (term) => {
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
@@ -769,10 +874,32 @@ const extend = (term) => {
       if (settings.scrollAfter) {
         term.scrollToBottom();
       }
+
+      if (ownsFirstExecution) {
+        activeExecutions -= 1;
+      }
+
+      // reset handlers synchronously replace the terminal buffer, while xterm
+      // parses those writes asynchronously. The final command-owned prompt is
+      // the one parser boundary that may release transition input.
+      finishResetRender();
+      if (lifecycleInputResumer) lifecycleInputResumer();
     }
 
+    // Completed execution owns replay independently of durable settlement.
+    // Publish while this execution still owns its captured reset generation;
+    // persistence completion below may only settle the returned promise.
+    publishVisitReplay(submission);
+
+    // Persistence completion belongs to the execution promise, not to command
+    // responsiveness. All command-owned prompt/input/busy cleanup is complete
+    // before this bounded wait, and nothing below may mutate terminal UI state.
+    await historySettlement;
     return exitStatus;
   };
+
+  term.executeCommandLine = (line, options = {}) =>
+    executeCommandLine(line, options, "submission");
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -799,6 +926,12 @@ const extend = (term) => {
       term.scrollToBottom();
       return;
     }
+    // A submitted command is not replayable until its first execution has
+    // completed. During that lifetime resize may fit the terminal, but must not
+    // reset the live input/output owner or dispatch a second copy.
+    if (activeExecutions > 0) {
+      return;
+    }
     term._initialized = false;
     term.init(term.user, true);
     if (typeof preloadASCIIArt === "function") {
@@ -809,11 +942,12 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+      for (const reservation of visitReplay) {
+        if (!reservation.completed) continue;
+        const c = reservation.line;
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
-          await term.executeCommandLine(c, {
-            addToHistory: false,
+          await executeCommandLine(c, {
             manageBusy: false,
             promptAfter: false,
             showLeadingNewline: false,
@@ -874,7 +1008,8 @@ const extend = (term) => {
 
     term.user = user;
     if (!preserveHistory) {
-      term.history = [];
+      beginResetRender();
+      resetVisitHistory();
     }
     term.focus();
   };
@@ -891,15 +1026,14 @@ const extend = (term) => {
     // so every keystroke was echoed twice.
     if (replay && term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(term.deepLink)).cmd)) return;
     if (term.deepLink != "") {
-      return term.executeCommandLine(term.deepLink, {
-        addToHistory: false,
+      return executeCommandLine(term.deepLink, {
         promptAfter: false,
         showLeadingNewline: false,
         // Deep links are how visitors now reach a specific company or person,
         // so these are the arrivals worth counting. Fragments never fire a
         // pageview of their own, so without this they would be invisible.
         trackAnalytics: !replay,
-      }).catch((error) => {
+      }, "internal").catch((error) => {
         console.error("Deep link failed", error);
       });
     }

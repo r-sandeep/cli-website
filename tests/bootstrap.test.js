@@ -3,17 +3,23 @@ import { createBrowserEnv } from "./helpers/browser-env";
 
 let env;
 
-function loadBootstrap(overrides = {}) {
+function loadBootstrap(overrides = {}, beforeBootstrap) {
   const term = {
     loadAddon: vi.fn(),
     open: vi.fn(),
+    onData: vi.fn(() => ({ dispose: vi.fn() })),
   };
   const fitAddon = { fit: vi.fn() };
   const webLinksAddon = { open: vi.fn() };
   const preloadCommandAssets = vi.fn(() => Promise.resolve());
+  let releaseHistory;
+  const historyReady = new Promise((resolve) => {
+    releaseHistory = resolve;
+  });
   const extend = vi.fn((instance) => {
     instance.deepLink = "whois lee";
     instance.preloadCommandAssets = preloadCommandAssets;
+    instance.historyReady = historyReady;
   });
   const runRootTerminal = vi.fn();
   const preloadASCIIArt = vi.fn();
@@ -56,6 +62,7 @@ function loadBootstrap(overrides = {}) {
     },
   });
 
+  if (beforeBootstrap) beforeBootstrap({ env, term });
   env.loadScripts(["js/bootstrap.js"]);
 
   return {
@@ -66,6 +73,7 @@ function loadBootstrap(overrides = {}) {
     preloadCommandAssets,
     preloadFiles,
     requestIdleCallback,
+    releaseHistory,
     runRootTerminal,
     term,
     Terminal,
@@ -74,6 +82,7 @@ function loadBootstrap(overrides = {}) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   if (env) {
     env.cleanup();
     env = null;
@@ -81,10 +90,17 @@ afterEach(() => {
 });
 
 describe("bootstrap", () => {
+  const historyReadyTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
   it("boots the terminal and preloads deep-link assets before idle work", async () => {
     const state = loadBootstrap();
 
     await env.window.deepLinkAssetPromise;
+
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+    expect(state.idleCalls).toHaveLength(0);
+    state.releaseHistory();
+    await historyReadyTick();
 
     expect(state.term.open).toHaveBeenCalledWith(
       env.document.getElementById("terminal")
@@ -96,7 +112,9 @@ describe("bootstrap", () => {
     );
     expect(state.extend).toHaveBeenCalledWith(state.term);
     expect(state.preloadCommandAssets).toHaveBeenCalledWith("whois lee");
-    expect(state.runRootTerminal).toHaveBeenCalledWith(state.term);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal.mock.calls[0][0]).toBe(state.term);
+    expect(state.runRootTerminal.mock.calls[0][1].pendingInput).toEqual([]);
     expect(state.idleCalls).toHaveLength(1);
     expect(state.idleCalls[0].options).toEqual({ timeout: 1500 });
 
@@ -108,6 +126,8 @@ describe("bootstrap", () => {
 
   it("deduplicates optional script loading for aalib and rickroll", async () => {
     const state = loadBootstrap();
+    state.releaseHistory();
+    await historyReadyTick();
     const originalAppendChild = env.document.head.appendChild.bind(
       env.document.head
     );
@@ -137,5 +157,76 @@ describe("bootstrap", () => {
 
     appendedScripts[1].onload();
     await rickrollPromise;
+  });
+
+  it("receives input while history is pending and hands it to terminal startup", async () => {
+    const state = loadBootstrap();
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+    const receive = state.term.onData.mock.calls[0][0];
+
+    receive("p");
+    receive("\r");
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+
+    state.releaseHistory();
+    await historyReadyTick();
+
+    const handoff = state.runRootTerminal.mock.calls[0][1];
+    expect(handoff.pendingInput).toEqual(["p", "\r"]);
+    const liveReceiver = vi.fn();
+    handoff.setReceiver(liveReceiver);
+    receive("x");
+    expect(liveReceiver).toHaveBeenCalledWith("x");
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the current two-argument startup once at the 50ms history deadline", async () => {
+    vi.useFakeTimers();
+    const request = {};
+    const close = vi.fn();
+    const indexedDB = { open: vi.fn(() => request) };
+    let store;
+    const state = loadBootstrap(
+      { indexedDB },
+      ({ env: browserEnv }) => {
+        browserEnv.loadScript("js/history.js");
+        const { createCommandHistoryStore } = browserEnv.exportValues([
+          "createCommandHistoryStore",
+        ]);
+        browserEnv.window.extend = (instance) => {
+          store = createCommandHistoryStore({ indexedDB });
+          instance.deepLink = "";
+          instance.historyReady = store.ready;
+        };
+      }
+    );
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+    const receive = state.term.onData.mock.calls[0][0];
+    receive("p");
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(state.runRootTerminal).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
+    expect(state.runRootTerminal).toHaveBeenCalledWith(
+      state.term,
+      expect.objectContaining({ pendingInput: ["p"] })
+    );
+    expect(state.term.onData).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot()).toEqual([]);
+
+    request.result = {
+      close,
+      objectStoreNames: { contains: () => true },
+    };
+    request.onsuccess();
+    await Promise.resolve();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot()).toEqual([]);
+
+    await store.append("ping");
+    expect(store.getSnapshot()).toEqual(["ping"]);
+    expect(state.runRootTerminal).toHaveBeenCalledTimes(1);
   });
 });

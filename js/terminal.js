@@ -62,12 +62,14 @@ function _completionRows(candidates, width) {
   return rows;
 }
 
-function runRootTerminal(term) {
+function runRootTerminal(term, inputHandoff = null) {
   if (term._initialized) {
     return;
   }
 
-  term.init();
+  // Saved recall is restored before this function is entered. Preserve it while
+  // drawing the first visit so ArrowUp and history are ready at the first prompt.
+  term.init("guest", true);
   term._initialized = true;
   term.locked = false;
 
@@ -278,9 +280,18 @@ function runRootTerminal(term) {
     return true;
   };
 
+  let queueLifecycleCompletion = () => false;
+
   term.attachCustomKeyEventHandler((event) => {
     if (event.key === "Tab") {
       event.preventDefault();
+      if (
+        event.type === "keydown" &&
+        !term.locked &&
+        queueLifecycleCompletion()
+      ) {
+        return false;
+      }
       // xterm asks about both phases in some browsers. Complete exactly once,
       // but consume every Tab phase so focus cannot move and no tab reaches
       // onData as input.
@@ -302,8 +313,17 @@ function runRootTerminal(term) {
     return false;
   });
 
-  term.onData((e) => {
+  const processInput = (e) => {
+    // Reset commands replace xterm's buffer while its parser is still draining
+    // writes. The terminal extension owns that narrow transition and returns
+    // queued bytes here, so editing, control keys and Enter use this exact same
+    // production path rather than a second input algorithm.
+    if (!term.locked && term.bufferResetInput?.(e)) return;
     if (term._initialized && !term.locked && !term.busy) {
+      if (e?.lifecycleCompletion) {
+        if (completeInput()) term.scrollToBottom();
+        return;
+      }
       if (e !== "\t") resetCompletion();
       switch (e) {
         case "\r": // Enter
@@ -406,7 +426,104 @@ function runRootTerminal(term) {
       }
       term.scrollToBottom();
     }
+  };
+
+  const lifecycleInput = inputHandoff?.pendingInput || [];
+  if (inputHandoff) {
+    // Tab captured before the custom keyboard handler existed is xterm data,
+    // not ordinary live onData. Translate it once at the startup boundary so
+    // it uses the same parser-paced completion operation as a live keydown.
+    for (let index = 0; index < lifecycleInput.length; index += 1) {
+      if (lifecycleInput[index] === "\t") {
+        lifecycleInput[index] = { lifecycleCompletion: true };
+      }
+    }
+  }
+  let lifecycleDraining = false;
+  const drainLifecycleInput = () => {
+    if (term.locked) {
+      // Form answers and upgrade-era bytes belong to their existing owner (or
+      // are deliberately discarded). Never retain an already-admitted shell
+      // tail until that ownership ends.
+      lifecycleInput.length = 0;
+      lifecycleDraining = false;
+      return;
+    }
+    if (lifecycleDraining || term.busy || lifecycleInput.length === 0) {
+      return;
+    }
+    lifecycleDraining = true;
+    const next = () => {
+      if (term.locked) {
+        lifecycleInput.length = 0;
+        lifecycleDraining = false;
+        return;
+      }
+      if (term.busy || lifecycleInput.length === 0) {
+        lifecycleDraining = false;
+        return;
+      }
+      processInput(lifecycleInput.shift());
+      // Cursor-dependent input must observe all writes caused by the preceding
+      // event. xterm's empty-write callback is a parser completion barrier.
+      term.write("", next);
+    };
+    next();
+  };
+
+  queueLifecycleCompletion = () => {
+    const completionIntent = { lifecycleCompletion: true };
+    // Reset rendering owns its existing queue until it hands events back to
+    // this same lifecycle FIFO.
+    if (term.bufferResetInput?.(completionIntent)) return true;
+    if (lifecycleDraining || lifecycleInput.length > 0) {
+      // Preserve ordinary busy admission: consume Tab without retaining work
+      // that could run after another command releases ownership.
+      if (!term.busy) {
+        lifecycleInput.push(completionIntent);
+        drainLifecycleInput();
+      }
+      return true;
+    }
+    return false;
+  };
+
+  term.setResetInputDrainer?.((queued) => {
+    lifecycleInput.push(...queued);
+    drainLifecycleInput();
   });
+  term.setLifecycleInputResumer?.(drainLifecycleInput);
+
+  if (inputHandoff) {
+    inputHandoff.setReceiver((data) => {
+      // collectInput has its own onData subscription, while upgrade's lock
+      // intentionally discards input. In either case the shell receiver must
+      // not retain the event for execution after ownership ends.
+      if (term.locked) return;
+
+      // During a reset-render transition, preserve arrival order in the
+      // transition-owned queue. Routing a byte through lifecycleInput first
+      // would let the reset barrier reappend it behind newer bytes that have
+      // already arrived, producing cursor-corrupt permutations such as ingp.
+      if (term.bufferResetInput?.(data)) return;
+
+      // Only startup/reset input already owned by the lifecycle FIFO may join
+      // that FIFO. Ordinary live input keeps the established processInput busy
+      // gate instead of becoming a general deferred command queue.
+      if (lifecycleDraining || lifecycleInput.length > 0) {
+        if (term.busy) return;
+        lifecycleInput.push(data);
+        drainLifecycleInput();
+        return;
+      }
+      processInput(data);
+    });
+    // The first prompt must be parsed before captured startup input reaches the
+    // production editor. Reception itself was installed synchronously.
+    term.write("", drainLifecycleInput);
+  } else {
+    term.onData(processInput);
+  }
 }
 
 function colorText(text, color) {

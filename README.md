@@ -32,6 +32,27 @@ The terminal supports persistent named bookmarks for quick directory navigation:
 `NAME` must match `[A-Za-z0-9_-]+`. Bookmarks persist across page reloads in
 browser storage, with a maximum of 25 saved bookmarks.
 
+## Saved command history
+
+Every non-empty command submission is saved in this browser as its original
+text, including duplicates and unsuccessful submissions such as unknown
+commands. Leading and trailing spaces are retained exactly. On a later visit, **ArrowUp** recalls saved commands and `history`
+lists them in submission order using the existing numbering from 1000. Only
+the newest 200 entries remain.
+
+History never leaves the browser. Initialization has one total 50 ms storage
+deadline. If browser storage is unavailable or does not respond within that
+budget—for example, in a private mode that blocks storage or when its
+quota is full—the terminal remains usable and keeps a visit-only in-memory history
+instead. Late storage results are ignored and cannot replace that visit's
+history.
+
+Each open tab keeps independent recall while it is open. Their saved
+submissions are combined for later visits. The `clear`, `zsh`, and `upgrade`
+commands clear only the current tab's recall and resize replay; they do not
+delete saved history. Those reset commands' own submitted lines remain saved
+for the next visit, subject to the newest-200 limit.
+
 ## Output pipelines
 
 Pipe the output of any terminal command through one or more filters with
@@ -63,6 +84,7 @@ terminal for the corresponding manual page.
 ## Terminal editing shortcuts
 
 - **Tab** — complete commands, whois partners, tldr companies, and entries for cd, ls, cat, head, tail, less, or more; press twice to list ambiguous matches
+- **ArrowUp** — recall commands saved in this browser
 - **Alt+Left** — move to the start of the previous word
 - **Alt+Right** — move to the start of the next word
 - **Ctrl+W** — delete back to the start of the previous word

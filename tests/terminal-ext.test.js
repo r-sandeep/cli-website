@@ -21,7 +21,7 @@ function loadTerminalExt(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/history.js", "js/pipeline.js", "js/terminal-ext.js"]);
   return env.exportValues(["extend"]);
 }
 
@@ -88,7 +88,12 @@ function loadAliasTerminal() {
       term,
     },
   });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts([
+    "js/history.js",
+    "js/pipeline.js",
+    "config/commands.js",
+    "js/terminal-ext.js",
+  ]);
   const { commands, extend } = env.exportValues(["commands", "extend"]);
   extend(term);
   return { commands, extend, term };
@@ -315,10 +320,17 @@ describe("terminal-ext", () => {
     term.runDeepLink = vi.fn();
     env.window.__term = term;
     fitTo(120);
-    term.history = ["historical mutation"];
-    // Replay now runs each history line through executeCommandLine, so the
-    // replayed mutation happens at the dispatch seam.
     term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
+    await term.executeCommandLine("historical mutation", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    // The initial submission establishes replay eligibility; restore the active
+    // value so the assertion isolates resize replay's environment snapshot.
+    term.environment.set("KEEP", "value");
+    term.dispatchCommand.mockClear();
+    // Only commands submitted during this visit replay; restored recall is not
+    // part of this list, so this records the eligible mutation explicitly.
     const persistedBeforeResize = env.window.localStorage.getItem(
       environmentStorageKey
     );
@@ -526,8 +538,12 @@ describe("terminal-ext", () => {
     const { extend } = loadTerminalExt({ commands: { whois } });
     const term = createTerm();
     env.window.__term = term;
-    extend(term); // resets history, so it is set afterwards
-    term.history = ["whois lee"];
+    extend(term); // starts recall and visit replay empty
+    await term.executeCommandLine("whois lee", {
+      promptAfter: false,
+      showLeadingNewline: false,
+    });
+    whois.mockClear();
     term.init = vi.fn();
     term.prompt = vi.fn();
 
@@ -552,7 +568,13 @@ describe("terminal-ext", () => {
     const term = createTerm();
     env.window.__term = term;
     extend(term);
-    term.history = ["upgrade", "apply 1", "test", "claude", "whois lee"];
+    for (const line of ["upgrade", "apply 1", "test", "claude", "whois lee"]) {
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+    }
+    for (const command of Object.values(commands)) command.mockClear();
     fitTo(40);
     term.init = vi.fn();
     term.prompt = vi.fn();
@@ -850,7 +872,7 @@ describe("terminal-ext", () => {
     const term = createTerm();
     extend(term);
     term.environment.set("ACTIVE", "later value");
-    term.history = [
+    const replayLines = [
       "export TEMP=one",
       "export TEMP=two",
       "env",
@@ -869,6 +891,15 @@ describe("terminal-ext", () => {
       }
     };
     env.window.commands.unset = (args) => term.environment.unset(args[0]);
+    for (const line of replayLines) {
+      await term.executeCommandLine(line, {
+        promptAfter: false,
+        showLeadingNewline: false,
+      });
+    }
+    term.environment.set("ACTIVE", "later value");
+    term.environment.unset("TEMP");
+    term.writeln.mockClear();
     const persistedBefore = env.window.localStorage.getItem(environmentStorageKey);
 
     env.window.__term = term;
@@ -1563,43 +1594,40 @@ describe("terminal-ext", () => {
     expect(help).toHaveBeenCalledWith(["grouped"]);
   });
 
-  it("routes deep links through executeCommandLine without double prompts", () => {
-    const { extend } = loadTerminalExt();
+  it("routes deep links privately without adding recall or double prompts", async () => {
+    const whois = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { whois } });
     const term = createTerm();
 
     extend(term);
+    await term.historyReady;
     term.deepLink = "whois lee";
-    term.executeCommandLine = vi.fn(() => Promise.resolve());
-    term.runDeepLink();
+    await term.runDeepLink();
 
-    expect(term.executeCommandLine).toHaveBeenCalledWith("whois lee", {
-      addToHistory: false,
-      promptAfter: false,
-      showLeadingNewline: false,
-      // Deep links are the only way to address a specific company or person
-      // now, and a fragment fires no pageview of its own, so these arrivals
-      // would otherwise be invisible in analytics.
-      trackAnalytics: true,
-    });
+    expect(whois).toHaveBeenCalledWith(["lee"]);
+    expect(term.history).toEqual([]);
+    expect(env.window.dataLayer).toEqual([
+      { event: "commandSent", command: "whois", args: "lee" },
+    ]);
   });
 
-  it("does not re-count a deep link when a resize replays it", () => {
+  it("does not re-count or record a deep link when a resize replays it", async () => {
     // xterm clears its buffer on resize, so resizeListener reruns the deep link
     // to redraw the output. That is the same visit — counting it again inflates
     // every deep-link arrival by one per resize, and mobile browsers fire
     // resize just from showing and hiding the address bar.
-    const { extend } = loadTerminalExt();
+    const whois = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { whois } });
     const term = createTerm();
 
     extend(term);
+    await term.historyReady;
     term.deepLink = "whois lee";
-    term.executeCommandLine = vi.fn(() => Promise.resolve());
-    term.runDeepLink({ replay: true });
+    await term.runDeepLink({ replay: true });
 
-    expect(term.executeCommandLine).toHaveBeenCalledWith(
-      "whois lee",
-      expect.objectContaining({ trackAnalytics: false })
-    );
+    expect(whois).toHaveBeenCalledWith(["lee"]);
+    expect(term.history).toEqual([]);
+    expect(env.window.dataLayer || []).toEqual([]);
   });
 
   it("replays alias-backed history through execution without submission side effects", async () => {
@@ -1630,6 +1658,44 @@ describe("terminal-ext", () => {
     expect(term.write).toHaveBeenCalledWith("\r\nguest:rootpc ~ $ run tail\r\n");
     expect(term.write).toHaveBeenLastCalledWith("\r\nguest:rootpc ~ $ ");
     expect(term.scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it("reserves completed resize replay in submission order", async () => {
+    let releaseSlow;
+    let slowRuns = 0;
+    const calls = [];
+    const slow = vi.fn(() => {
+      calls.push("slow");
+      slowRuns += 1;
+      if (slowRuns === 1) {
+        return new Promise((resolve) => {
+          releaseSlow = resolve;
+        });
+      }
+    });
+    const fast = vi.fn(() => calls.push("fast"));
+    const { extend } = loadTerminalExt({ commands: { fast, slow } });
+    const term = createTerm();
+    extend(term);
+    await term.historyReady;
+
+    const slowExecution = term.executeCommandLine("slow", { promptAfter: false });
+    while (!releaseSlow) await Promise.resolve();
+    await term.executeCommandLine("fast", { promptAfter: false });
+    releaseSlow();
+    await slowExecution;
+
+    calls.length = 0;
+    env.window.__term = term;
+    fitTo(120);
+    await term.resizeListener();
+
+    expect(calls).toEqual(["slow", "fast"]);
+    expect(term.history).toEqual(["slow", "fast"]);
+    expect(env.window.dataLayer).toEqual([
+      { event: "commandSent", command: "fast", args: "" },
+      { event: "commandSent", command: "slow", args: "" },
+    ]);
   });
 
   it.each([

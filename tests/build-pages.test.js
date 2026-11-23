@@ -295,6 +295,16 @@ describe("script load order", () => {
     );
   });
 
+  it("the app bundle loads history storage before terminal integration", () => {
+    const { appBundleSources, staticAssets } = buildAssetsModule;
+    expect(appBundleSources).toContain("js/history.js");
+    expect(appBundleSources.indexOf("js/history.js")).toBeLessThan(
+      appBundleSources.indexOf("js/terminal-ext.js")
+    );
+    expect(staticAssets).not.toContain("tests/helpers/history-browser-fixture.js");
+    expect(staticAssets).not.toContain("tests/helpers/build-history-fixture.cjs");
+  });
+
   it("the app bundle loads pipeline helpers before terminal integration", () => {
     const { appBundleSources } = buildAssetsModule;
     expect(appBundleSources).toContain("js/pipeline.js");
