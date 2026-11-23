@@ -3,6 +3,8 @@
 
   const output = document.querySelector("#store-results");
   const button = document.querySelector("#run-store");
+  const terminalOutput = document.querySelector("#terminal-results");
+  const terminalButton = document.querySelector("#run-terminal");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   let counter = 0;
 
@@ -15,11 +17,12 @@
     const right = JSON.stringify(expected);
     if (left !== right) throw new Error(`${message}: ${left} !== ${right}`);
   };
-  const pass = (line) => {
+  const passTo = (target, line) => {
     const row = document.createElement("div");
     row.textContent = line;
-    output.appendChild(row);
+    target.appendChild(row);
   };
+  const pass = (line) => passTo(output, line);
 
   const requestResult = (request) =>
     new Promise((resolve, reject) => {
@@ -335,6 +338,217 @@
     window.fetch = originalFetch;
     navigator.sendBeacon = originalSendBeacon;
   };
+
+  const waitFor = async (predicate, message) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    throw new Error(message);
+  };
+
+  const createTerminal = () => {
+    const handlers = new Set();
+    const rendered = [];
+    const term = {
+      VERSION: 4,
+      _initialized: false,
+      buffer: { active: { cursorX: 0 } },
+      busy: false,
+      cols: 80,
+      currentLine: "",
+      focus() {},
+      loadAddon() {},
+      locked: false,
+      open() {},
+      reset() { rendered.length = 0; },
+      scrollToBottom() {},
+      write(value) { rendered.push(String(value)); },
+      writeln(value = "") { rendered.push(`${value}\r\n`); },
+      attachCustomKeyEventHandler(handler) { this._customKeyHandler = handler; },
+      onData(handler) {
+        handlers.add(handler);
+        return { dispose: () => handlers.delete(handler) };
+      },
+      emit(data) {
+        for (const handler of [...handlers]) handler(data);
+      },
+      rendered,
+    };
+    window.term = term;
+    window.LOGO_TYPE = "ROOT";
+    window.fitAddon = { fit() {} };
+    window.scheduleIdleTask = (task) => task();
+    window.ensureASCIIArt = async () => {};
+    window.ensureFileLoaded = async () => {};
+    window.preloadASCIIArt = async () => {};
+    window.dataLayer = [];
+    extend(term);
+    // The fixture is line-oriented and keeps its synthetic cursor at the end of
+    // input; production setCurrentLine/onData/execute handlers remain unchanged.
+    term.pos = () => term.currentLine.length;
+    term.timer = async () => {};
+    term.progressBar = async () => {};
+    term.dottedPrint = async (text, _count, newline = true) =>
+      term.write(`${text}${newline ? "\r\n" : ""}`);
+    term.delayPrint = async (text) => term.write(text);
+    term.delayStylePrint = async (text, _delay, wrap) => term.stylePrint(text, wrap);
+    return term;
+  };
+
+  const reopenTerminal = async () => {
+    const term = createTerminal();
+    await term.historyReady;
+    runRootTerminal(term);
+    return term;
+  };
+
+  const runTerminalChecks = async () => {
+    localStorage.clear();
+    await deleteDatabase(COMMAND_HISTORY_DATABASE);
+
+    const first = await reopenTerminal();
+    assert(first.history.length === 0, "fresh terminal starts empty");
+    await first.executeCommandLine("echo saved one", { promptAfter: false });
+    await first.executeCommandLine("nosuchhistorycmd", { promptAfter: false });
+
+    const returned = await reopenTerminal();
+    equal(returned.history, ["echo saved one", "nosuchhistorycmd"], "restore order");
+    assert(returned.currentLine === "", "restore leaves pending input empty");
+    assert(window.dataLayer.length === 0, "restore emits no analytics");
+    returned.emit("\033[A");
+    assert(returned.currentLine === "nosuchhistorycmd", "ArrowUp selects newest saved line");
+    assert(window.dataLayer.length === 0, "recall alone emits no analytics");
+    passTo(terminalOutput, "PASS restore precedes first prompt and never executes saved commands");
+
+    for (let index = 0; index < 201; index += 1) {
+      await returned.executeCommandLine(`missing ${index}`, { promptAfter: false });
+    }
+    assert(returned.history.length === 200, "terminal recall is capped at 200");
+    assert(returned.history[0] === "missing 1", "oldest entry is evicted at 201");
+    returned.historyCursor = -1;
+    returned.currentLine = "";
+    for (let index = 0; index < 205; index += 1) returned.emit("\033[A");
+    assert(returned.currentLine === "missing 1", "ArrowUp stops at retained oldest entry");
+    await returned.executeCommandLine("history", { promptAfter: false });
+    assert(returned.history.length === 200, "history self-inclusion preserves cap");
+    assert(returned.rendered.some((line) => line.includes("1000  missing 2")), "history starts at 1000");
+    assert(returned.rendered.some((line) => line.includes("1199  history")), "history ends at 1199");
+    passTo(terminalOutput, "PASS full 200-entry listing and ArrowUp boundary");
+
+    const descriptor = Object.getOwnPropertyDescriptor(window, "indexedDB");
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      get() { throw new DOMException("denied", "SecurityError"); },
+    });
+    const denied = createTerminal();
+    await denied.historyReady;
+    runRootTerminal(denied);
+    await denied.executeCommandLine("ping", { promptAfter: false });
+    await denied.executeCommandLine("echo one two | wc -l", { promptAfter: false });
+    equal(denied.history, ["ping", "echo one two | wc -l"], "denied visit history");
+    denied.currentLine = "";
+    denied.emit("\033[A");
+    assert(denied.currentLine === "echo one two | wc -l", "denied recall remains usable");
+    if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+    else delete window.indexedDB;
+
+    const quotaFactory = wrappingFactory("quota");
+    Object.defineProperty(window, "indexedDB", {
+      configurable: true,
+      value: quotaFactory,
+    });
+    const quota = createTerminal();
+    await quota.historyReady;
+    runRootTerminal(quota);
+    await quota.executeCommandLine("ping", { promptAfter: false });
+    await quota.executeCommandLine("history", { promptAfter: false });
+    await quota.executeCommandLine("echo after quota", { promptAfter: false });
+    equal(quota.history.slice(-3), ["ping", "history", "echo after quota"], "quota visit history");
+    if (descriptor) Object.defineProperty(window, "indexedDB", descriptor);
+    passTo(terminalOutput, "PASS denied storage and quota failure retain usable visit history");
+
+    const replayed = await reopenTerminal();
+    assert(replayed.environment.get("OLD") === undefined, "restored commands have not executed");
+    const replayAnalytics = window.dataLayer.length;
+    let nextCols = 100;
+    window.fitAddon.fit = () => { replayed.cols = nextCols; };
+    await replayed.resizeListener();
+    assert(replayed.environment.get("OLD") === undefined, "resize does not execute restored archive");
+    assert(window.dataLayer.length === replayAnalytics, "resize restore emits no analytics");
+    await replayed.executeCommandLine("export VISIT=one", { promptAfter: false });
+    const historyBeforeResize = [...replayed.history];
+    const analyticsBeforeResize = window.dataLayer.map((entry) => ({ ...entry }));
+    nextCols = 120;
+    await replayed.resizeListener();
+    equal(replayed.history, historyBeforeResize, "resize does not append history");
+    equal(window.dataLayer, analyticsBeforeResize, "resize does not duplicate analytics");
+    assert(replayed.environment.get("VISIT") === "one", "visit environment survives resize");
+    await replayed.executeCommandLine("ping", { promptAfter: false });
+    assert(replayed.rendered.some((line) => line.includes("pong")), "next command remains usable");
+    passTo(terminalOutput, "PASS resize replays only this visit and preserves next command");
+
+    for (const reset of ["clear", "zsh", "upgrade"]) {
+      const beforeReset = await reopenTerminal();
+      await beforeReset.executeCommandLine("echo before reset", { promptAfter: false });
+      await beforeReset.executeCommandLine(reset, { promptAfter: false });
+      equal(beforeReset.history, [], `${reset} clears visit recall`);
+      beforeReset.currentLine = "";
+      beforeReset.emit("\033[A");
+      assert(beforeReset.currentLine === "", `${reset} leaves ArrowUp empty`);
+      const afterReset = await reopenTerminal();
+      assert(afterReset.history.at(-1) === reset, `${reset} remains in saved archive`);
+      await afterReset.executeCommandLine("ping", { promptAfter: false });
+      assert(afterReset.rendered.some((line) => line.includes("pong")), `${reset} preserves command use`);
+    }
+    passTo(terminalOutput, "PASS clear, zsh and upgrade clear visit only and preserve saved history");
+
+    const compatible = await reopenTerminal();
+    await compatible.executeCommandLine("alias hp=ping", { promptAfter: false });
+    await compatible.executeCommandLine("hp", { promptAfter: false });
+    assert(compatible.getAlias("hp") === "ping", "alias representation preserved");
+    await compatible.executeCommandLine("export KEEP=value", { promptAfter: false });
+    assert(compatible.environment.get("KEEP") === "value", "environment preserved");
+    const cwd = compatible.cwd;
+    await compatible.executeCommandLine("bookmark add home", { promptAfter: false });
+    await compatible.executeCommandLine("go home", { promptAfter: false });
+    assert(compatible.cwd === cwd, "bookmark retains cwd representation");
+    const historyBeforeDeepLink = [...compatible.history];
+    compatible.deepLink = "ping";
+    await compatible.runDeepLink();
+    equal(compatible.history, historyBeforeDeepLink, "deep link is excluded from history");
+    passTo(terminalOutput, "PASS aliases, variables, bookmarks and deep links remain compatible");
+
+    const analyticsTerm = await reopenTerminal();
+    window.dataLayer = [];
+    const pingResult = await analyticsTerm.executeCommandLine("ping", { promptAfter: false });
+    assert(pingResult === undefined, "ordinary return value unchanged");
+    equal(window.dataLayer, [{ event: "commandSent", command: "ping", args: "" }], "ordinary analytics payload");
+    const countBeforeReplay = window.dataLayer.length;
+    let analyticsCols = 110;
+    window.fitAddon.fit = () => { analyticsTerm.cols = analyticsCols; };
+    await analyticsTerm.resizeListener();
+    assert(window.dataLayer.length === countBeforeReplay, "replay emits no analytics");
+    analyticsTerm.deepLink = "ping";
+    await analyticsTerm.runDeepLink();
+    assert(window.dataLayer.length === countBeforeReplay + 1, "arrival deep link emits once");
+    const apply = analyticsTerm.executeCommandLine("apply 1", { promptAfter: false });
+    await waitFor(() => analyticsTerm.activeInput, "application input did not start");
+    analyticsTerm.emit("\u0003");
+    assert((await apply) === 1, "interactive cancellation return remains 1");
+    passTo(terminalOutput, "PASS analytics counts, payloads and interactive return values");
+  };
+
+  terminalButton.addEventListener("click", async () => {
+    terminalButton.disabled = true;
+    terminalOutput.replaceChildren();
+    try {
+      await runTerminalChecks();
+      passTo(terminalOutput, "TERMINAL CHECKS COMPLETE");
+    } catch (error) {
+      passTo(terminalOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
 
   button.addEventListener("click", async () => {
     button.disabled = true;
