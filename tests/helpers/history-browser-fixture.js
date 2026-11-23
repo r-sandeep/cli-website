@@ -20,6 +20,8 @@
   const orderedInputButton = document.querySelector("#run-ordered-input");
   const inputOwnershipOutput = document.querySelector("#input-ownership-results");
   const inputOwnershipButton = document.querySelector("#run-input-ownership");
+  const startupCompletionOutput = document.querySelector("#startup-completion-results");
+  const startupCompletionButton = document.querySelector("#run-startup-completion");
   const prefix = `asd-history-${Date.now()}-${Math.random()}`;
   // Helpers and existing controls always use the native factory, even while the
   // execution-timing fixture temporarily installs a transaction wrapper.
@@ -1685,6 +1687,106 @@
     assert(window.dataLayer.every((event) => !JSON.stringify(event).includes("Ada")), "form answer entered analytics");
     passTo(inputOwnershipOutput, "PASS activation replay analytics and exact saved state remain intact");
   };
+
+  const runStartupCompletionChecks = async () => {
+    const makeHandoff = (term, captured = []) => {
+      const pendingInput = [...captured];
+      let receive = (data) => pendingInput.push(data);
+      term.onData((data) => receive(data));
+      return {
+        pendingInput,
+        send(data) { receive(data); },
+        handoff: {
+          pendingInput,
+          setReceiver(receiver) { receive = receiver; },
+        },
+      };
+    };
+    const sendText = (handoff, text) => {
+      for (const character of text) handoff.send(character);
+    };
+    const settleCommand = async (term, output, historyLength) => {
+      await waitFor(
+        () => term.rendered.join("").includes(output) && !term.busy && term.history.length === historyLength,
+        `startup completion did not settle ${output}: line=${JSON.stringify(term.currentLine)} history=${JSON.stringify(term.history)} rendered=${JSON.stringify(term.rendered.slice(-30))}`
+      );
+    };
+
+    const captured = createTerminal(true);
+    await captured.historyReady;
+    const capturedHandoff = makeHandoff(captured, ["e", "c", "h", "\t", "c", "e", "d", "a", "r", "\r"]);
+    runRootTerminal(captured, capturedHandoff.handoff);
+    await settleCommand(captured, "cedar", 1);
+    equal(captured.history, ["echo cedar"], "captured startup Tab saved an incomplete or duplicate submission");
+    assert(captured.rendered.join("").includes("echo cedar"), "captured completion did not render the exact command");
+    passTo(startupCompletionOutput, "PASS captured startup Tab executes the exact completed submission once");
+
+    const lifecycle = createTerminal(true);
+    await lifecycle.historyReady;
+    const lifecycleHandoff = makeHandoff(lifecycle, ["e"]);
+    runRootTerminal(lifecycle, lifecycleHandoff.handoff);
+    lifecycleHandoff.send("c");
+    lifecycleHandoff.send("h");
+    pressActualKey(lifecycle, "Tab");
+    sendText(lifecycleHandoff, "cedar");
+    lifecycleHandoff.send("\r");
+    await settleCommand(lifecycle, "cedar", 1);
+    equal(lifecycle.history, ["echo cedar"], "lifecycle Tab overtook queued input or completed twice");
+    passTo(startupCompletionOutput, "PASS lifecycle Tab follows queued input and parser completion in order");
+
+    const healthyName = name("startup-completion-healthy");
+    await seedRecord(healthyName, { version: 1, entries: ["echo prior"] });
+    const healthy = createCommandHistoryStore({ databaseName: healthyName, indexedDB: nativeIndexedDB });
+    await healthy.ready;
+    const healthyTerm = createTerminal(true);
+    const productionReady = healthy.ready.then(() => {
+      healthyTerm.history = healthy.getSnapshot();
+      healthyTerm.historyCursor = -1;
+    });
+    healthyTerm.historyReady = productionReady;
+    const healthyHandoff = makeHandoff(healthyTerm, ["e", "c", "h", "\t", "c", "e", "d", "a", "r", "\r"]);
+    await healthyTerm.historyReady;
+    runRootTerminal(healthyTerm, healthyHandoff.handoff);
+    await waitFor(() => healthyTerm.currentLine === "echo cedar" || healthyTerm.busy, "healthy startup did not drain completed input");
+    equal(healthyTerm.history, ["echo prior"], "healthy restoration did not precede first prompt");
+    passTo(startupCompletionOutput, "PASS healthy startup restores before prompt and saves the complete ordered result");
+
+    const fallbackStore = createCommandHistoryStore({
+      indexedDB: { open() { return {}; } },
+      initializationTimeoutMs: 50,
+    });
+    await fallbackStore.ready;
+    await fallbackStore.append("echo cedar");
+    await fallbackStore.append("ping");
+    equal(fallbackStore.getSnapshot(), ["echo cedar", "ping"], "50ms fallback did not retain completed input and follow-up");
+    passTo(startupCompletionOutput, "PASS 50ms fallback remains usable and late callbacks leave saved data intact");
+
+    const ownership = createTerminal(true);
+    await ownership.historyReady;
+    runRootTerminal(ownership);
+    emitText(ownership, "ech");
+    pressActualKey(ownership, "Tab");
+    await waitFor(() => ownership.currentLine === "echo ", "normal completion lost its separator");
+    ownership.busy = true;
+    pressActualKey(ownership, "Tab");
+    ownership.busy = false;
+    ownership.locked = true;
+    pressActualKey(ownership, "Tab");
+    ownership.locked = false;
+    assert(ownership.currentLine === "echo ", "busy or locked Tab changed pending input");
+    passTo(startupCompletionOutput, "PASS reset normal completion busy lock and form ownership remain unchanged");
+  };
+
+  startupCompletionButton.addEventListener("click", async () => {
+    startupCompletionButton.disabled = true;
+    startupCompletionOutput.replaceChildren();
+    try {
+      await runStartupCompletionChecks();
+      passTo(startupCompletionOutput, "STARTUP COMPLETION CHECKS COMPLETE");
+    } catch (error) {
+      passTo(startupCompletionOutput, `FAIL ${error && error.stack ? error.stack : error}`);
+    }
+  });
 
   inputOwnershipButton.addEventListener("click", async () => {
     inputOwnershipButton.disabled = true;
