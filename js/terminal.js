@@ -67,7 +67,9 @@ function runRootTerminal(term) {
     return;
   }
 
-  term.init();
+  // Saved recall is restored before this function is entered. Preserve it while
+  // drawing the first visit so ArrowUp and history are ready at the first prompt.
+  term.init("guest", true);
   term._initialized = true;
   term.locked = false;
 

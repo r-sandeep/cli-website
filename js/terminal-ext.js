@@ -48,9 +48,29 @@ const extend = (term) => {
   term.cwd = "~";
   term.sep = ":";
   term._promptChar = "$";
+  const historyStore = createCommandHistoryStore();
+  let visitReplay = [];
   term.history = [];
   term.historyCursor = -1;
+  term.historyReady = historyStore.ready.then(() => {
+    term.history = historyStore.getSnapshot();
+    term.historyCursor = -1;
+  });
   term.busy = false;
+
+  const recordSubmittedCommand = async (line) => {
+    await historyStore.append(line);
+    term.history = historyStore.getSnapshot();
+    visitReplay = visitReplay.concat(line).slice(-COMMAND_HISTORY_LIMIT);
+    term.historyCursor = -1;
+  };
+
+  const resetVisitHistory = () => {
+    historyStore.resetVisit();
+    term.history = historyStore.getSnapshot();
+    visitReplay = [];
+    term.historyCursor = -1;
+  };
 
   // User aliases are closure-owned so command code can only change them through
   // the storage-first methods below. Entry arrays preserve prototype-shaped
@@ -654,16 +674,19 @@ const extend = (term) => {
         term.busy = true;
       }
 
+      // Record the original submitted text once, before alias expansion,
+      // preloading, validation or dispatch can fail. Internal execution paths
+      // opt out with addToHistory:false (deep links and resize replay).
+      if (parsed.line.length > 0 && settings.addToHistory) {
+        await recordSubmittedCommand(parsed.line);
+      }
+
       if (parsedPipeline) {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           term.stylePrint(validation.error.message);
@@ -681,10 +704,6 @@ const extend = (term) => {
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -734,10 +753,6 @@ const extend = (term) => {
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
@@ -809,7 +824,7 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while environment
     // mutations replayed from history never persist a second time.
     await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+      for (const c of visitReplay) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await term.executeCommandLine(c, {
@@ -874,7 +889,7 @@ const extend = (term) => {
 
     term.user = user;
     if (!preserveHistory) {
-      term.history = [];
+      resetVisitHistory();
     }
     term.focus();
   };
