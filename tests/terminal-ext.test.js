@@ -1594,43 +1594,40 @@ describe("terminal-ext", () => {
     expect(help).toHaveBeenCalledWith(["grouped"]);
   });
 
-  it("routes deep links through executeCommandLine without double prompts", () => {
-    const { extend } = loadTerminalExt();
+  it("routes deep links privately without adding recall or double prompts", async () => {
+    const whois = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { whois } });
     const term = createTerm();
 
     extend(term);
+    await term.historyReady;
     term.deepLink = "whois lee";
-    term.executeCommandLine = vi.fn(() => Promise.resolve());
-    term.runDeepLink();
+    await term.runDeepLink();
 
-    expect(term.executeCommandLine).toHaveBeenCalledWith("whois lee", {
-      addToHistory: false,
-      promptAfter: false,
-      showLeadingNewline: false,
-      // Deep links are the only way to address a specific company or person
-      // now, and a fragment fires no pageview of its own, so these arrivals
-      // would otherwise be invisible in analytics.
-      trackAnalytics: true,
-    });
+    expect(whois).toHaveBeenCalledWith(["lee"]);
+    expect(term.history).toEqual([]);
+    expect(env.window.dataLayer).toEqual([
+      { event: "commandSent", command: "whois", args: "lee" },
+    ]);
   });
 
-  it("does not re-count a deep link when a resize replays it", () => {
+  it("does not re-count or record a deep link when a resize replays it", async () => {
     // xterm clears its buffer on resize, so resizeListener reruns the deep link
     // to redraw the output. That is the same visit — counting it again inflates
     // every deep-link arrival by one per resize, and mobile browsers fire
     // resize just from showing and hiding the address bar.
-    const { extend } = loadTerminalExt();
+    const whois = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { whois } });
     const term = createTerm();
 
     extend(term);
+    await term.historyReady;
     term.deepLink = "whois lee";
-    term.executeCommandLine = vi.fn(() => Promise.resolve());
-    term.runDeepLink({ replay: true });
+    await term.runDeepLink({ replay: true });
 
-    expect(term.executeCommandLine).toHaveBeenCalledWith(
-      "whois lee",
-      expect.objectContaining({ trackAnalytics: false })
-    );
+    expect(whois).toHaveBeenCalledWith(["lee"]);
+    expect(term.history).toEqual([]);
+    expect(env.window.dataLayer || []).toEqual([]);
   });
 
   it("replays alias-backed history through execution without submission side effects", async () => {

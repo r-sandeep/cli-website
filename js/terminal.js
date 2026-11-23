@@ -309,7 +309,7 @@ function runRootTerminal(term) {
     // writes. The terminal extension owns that narrow transition and returns
     // queued bytes here, so editing, control keys and Enter use this exact same
     // production path rather than a second input algorithm.
-    if (term.bufferResetInput?.(e)) return;
+    if (!term.locked && term.bufferResetInput?.(e)) return;
     if (term._initialized && !term.locked && !term.busy) {
       if (e !== "\t") resetCompletion();
       switch (e) {

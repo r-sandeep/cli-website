@@ -25,6 +25,9 @@ const html = `<!doctype html>
   <div id="pending-resize-results" aria-live="polite"></div>
   <button id="run-lifecycle-repair" type="button">Run lifecycle repair checks</button>
   <div id="lifecycle-repair-results" aria-live="polite"></div>
+  <div id="submission-scope-status" aria-live="polite">LOADING</div>
+  <button id="run-submission-scope" type="button" disabled>Run submission scope checks</button>
+  <div id="submission-scope-results" aria-live="polite"></div>
   <button id="run-write-exceptions" type="button">Run write exception checks</button>
   <div id="write-exception-results" aria-live="polite"></div>
   <script src="/__asd_history/history.js"></script>

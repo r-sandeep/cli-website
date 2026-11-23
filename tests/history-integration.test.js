@@ -116,16 +116,19 @@ describe("saved terminal history integration", () => {
     await term.executeCommandLine("ok | head 1", { promptAfter: false });
     await term.executeCommandLine("ok | head 0", { promptAfter: false });
     await term.executeCommandLine("   ", { promptAfter: false });
-    await term.executeCommandLine("deep link", {
+    await term.executeCommandLine("public suppressed option", {
       addToHistory: false,
       promptAfter: false,
     });
+    term.deepLink = "actual deep link";
+    await term.runDeepLink();
 
     expect(term.history).toEqual([
       "ok",
       "missing",
       "ok | head 1",
       "ok | head 0",
+      "public suppressed option",
     ]);
     expect(ok).toHaveBeenCalledTimes(2);
     expect(throws).not.toHaveBeenCalled();
