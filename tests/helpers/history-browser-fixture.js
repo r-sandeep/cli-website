@@ -99,8 +99,8 @@
         submitted.push(command);
         await store.append(command);
       }
-      submitted.splice(150, 0, submitted[101]);
-      await store.append(submitted[150]);
+      submitted.push(submitted[101]);
+      await store.append(submitted[submitted.length - 1]);
       const expected = submitted.slice(-200);
       equal(store.getSnapshot(), expected, `full local sequence ${run}`);
       equal((await readRecord(databaseName)).entries, expected, `full durable sequence ${run}`);

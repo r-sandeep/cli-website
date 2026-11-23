@@ -199,6 +199,7 @@ const createCommandHistoryStore = (options = {}) => {
     database.onversionchange = () => useMemoryOnly();
 
     let loaded = [];
+    let loadedValidRecord = false;
     let incompatible = false;
     const restored = await runTransaction("readwrite", (store, transaction) => {
       const request = store.get(COMMAND_HISTORY_KEY);
@@ -221,6 +222,7 @@ const createCommandHistoryStore = (options = {}) => {
         }
 
         loaded = newest(record.entries);
+        loadedValidRecord = true;
         if (loaded.length !== record.entries.length) {
           const put = store.put(
             { version: COMMAND_HISTORY_RECORD_VERSION, entries: loaded },
@@ -237,16 +239,19 @@ const createCommandHistoryStore = (options = {}) => {
       };
     });
 
-    if (!restored || incompatible) {
-      useMemoryOnly();
-      return;
+    // A valid record remains useful visit memory even if its transactional
+    // normalization could not commit (for example quota exhaustion). A visit
+    // reset during opening is an ownership fence: late storage completion must
+    // not refill the cleared local snapshot.
+    if (
+      loadedValidRecord &&
+      resetGeneration === initialResetGeneration
+    ) {
+      entries = newest(loaded.concat(entries));
     }
 
-    // Appends accepted while storage was opening stay at the end of the loaded
-    // archive. A visit reset during opening is an ownership fence: late storage
-    // completion must not refill the cleared local snapshot.
-    if (resetGeneration === initialResetGeneration) {
-      entries = newest(loaded.concat(entries));
+    if (!restored || incompatible) {
+      useMemoryOnly();
     }
   })().catch(() => {
     useMemoryOnly();
