@@ -889,6 +889,7 @@ describe("runRootTerminal", () => {
     };
     const term = createTerm({
       bufferResetInput: vi.fn(() => false),
+      pos: vi.fn(() => term.currentLine.length),
       setLifecycleInputResumer: vi.fn(),
       setResetInputDrainer: vi.fn(),
       write: vi.fn((_output, callback) => {
@@ -909,12 +910,13 @@ describe("runRootTerminal", () => {
     callbacks.shift()();
 
     // Form/upgrade ownership discards shell input immediately, including Tab.
+    const resetBufferCallsBeforeLock = term.bufferResetInput.mock.calls.length;
     term.locked = true;
     handoff.receive("Ada");
     handoff.receive("\r");
     pressTab(term);
     expect(term.currentLine).toBe("st");
-    expect(term.bufferResetInput).toHaveBeenCalledTimes(2);
+    expect(term.bufferResetInput).toHaveBeenCalledTimes(resetBufferCallsBeforeLock);
 
     // Ordinary busy input is not converted into deferred lifecycle work.
     term.locked = false;
