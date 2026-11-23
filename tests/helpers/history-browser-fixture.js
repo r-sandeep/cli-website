@@ -1723,15 +1723,23 @@
 
     const lifecycle = createTerminal(true);
     await lifecycle.historyReady;
+    const lifecycleInitialHistory = [...lifecycle.history];
     const lifecycleHandoff = makeHandoff(lifecycle, ["e"]);
     runRootTerminal(lifecycle, lifecycleHandoff.handoff);
+    // Release the first prompt barrier so the initial character owns an active
+    // parser-paced drain before the remaining events arrive.
+    await waitFor(() => lifecycle.currentLine === "e", "lifecycle drain did not admit its first character");
     lifecycleHandoff.send("c");
     lifecycleHandoff.send("h");
     pressActualKey(lifecycle, "Tab");
     sendText(lifecycleHandoff, "cedar");
     lifecycleHandoff.send("\r");
-    await settleCommand(lifecycle, "cedar", 1);
-    equal(lifecycle.history, ["echo cedar"], "lifecycle Tab overtook queued input or completed twice");
+    await settleCommand(lifecycle, "cedar", lifecycleInitialHistory.length + 1);
+    equal(
+      lifecycle.history,
+      [...lifecycleInitialHistory, "echo cedar"],
+      "lifecycle Tab overtook queued input or completed twice"
+    );
     passTo(startupCompletionOutput, "PASS lifecycle Tab follows queued input and parser completion in order");
 
     const healthyName = name("startup-completion-healthy");
