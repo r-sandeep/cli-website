@@ -427,6 +427,14 @@
     throw new Error(message);
   };
 
+  const waitForAsync = async (predicate, message) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (await predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    throw new Error(message);
+  };
+
   const createTerminal = (actualRenderer = false) => {
     const handlers = new Set();
     const rendered = [];
@@ -1620,6 +1628,10 @@
     assert(term.currentLine === "", "upgrade completion did not leave an empty pending line");
     assert(!rendered().includes("Command not found: ing"), "locked upgrade input replayed a fragment");
     assert(!term.history.includes("ping"), "locked upgrade input entered recall");
+    await waitForAsync(
+      async () => (await durable()).includes("upgrade"),
+      "upgrade submission did not settle durably"
+    );
     const durableAfterUpgrade = await durable();
     equal(term.history, [], "upgrade did not clear visit recall");
     assert(durableAfterUpgrade.includes("upgrade"), "upgrade submission was not durable");
