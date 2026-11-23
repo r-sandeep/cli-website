@@ -468,7 +468,16 @@
       rendered,
     };
     if (actualRenderer) {
-      term.open(document.querySelector("#actual-terminal"));
+      const actualHost = document.createElement("div");
+      actualHost.style.width = "100%";
+      actualHost.style.height = "100%";
+      document.querySelector("#actual-terminal").append(actualHost);
+      term.open(actualHost);
+      const nativeDispose = term.dispose.bind(term);
+      term.dispose = () => {
+        nativeDispose();
+        actualHost.remove();
+      };
       term.rendered = rendered;
       const nativeAttachCustomKeyEventHandler =
         term.attachCustomKeyEventHandler.bind(term);
@@ -1720,6 +1729,7 @@
     equal(captured.history, ["echo cedar"], "captured startup Tab saved an incomplete or duplicate submission");
     assert(captured.rendered.join("").includes("echo cedar"), "captured completion did not render the exact command");
     passTo(startupCompletionOutput, "PASS captured startup Tab executes the exact completed submission once");
+    captured.dispose();
 
     const lifecycle = createTerminal(true);
     await lifecycle.historyReady;
@@ -1741,6 +1751,7 @@
       "lifecycle Tab overtook queued input or completed twice"
     );
     passTo(startupCompletionOutput, "PASS lifecycle Tab follows queued input and parser completion in order");
+    lifecycle.dispose();
 
     const healthyName = name("startup-completion-healthy");
     await seedRecord(healthyName, { version: 1, entries: ["echo prior"] });
@@ -1754,10 +1765,16 @@
     healthyTerm.historyReady = productionReady;
     const healthyHandoff = makeHandoff(healthyTerm, ["e", "c", "h", "\t", "c", "e", "d", "a", "r", "\r"]);
     await healthyTerm.historyReady;
-    runRootTerminal(healthyTerm, healthyHandoff.handoff);
-    await waitFor(() => healthyTerm.currentLine === "echo cedar" || healthyTerm.busy, "healthy startup did not drain completed input");
     equal(healthyTerm.history, ["echo prior"], "healthy restoration did not precede first prompt");
+    runRootTerminal(healthyTerm, healthyHandoff.handoff);
+    await settleCommand(healthyTerm, "cedar", 2);
+    equal(
+      healthyTerm.history,
+      ["echo prior", "echo cedar"],
+      "healthy startup did not save the complete ordered result"
+    );
     passTo(startupCompletionOutput, "PASS healthy startup restores before prompt and saves the complete ordered result");
+    healthyTerm.dispose();
 
     const fallbackStore = createCommandHistoryStore({
       indexedDB: { open() { return {}; } },
