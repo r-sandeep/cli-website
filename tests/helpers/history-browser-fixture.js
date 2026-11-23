@@ -599,8 +599,15 @@
       executionTimingOutput,
       "PASS production input executes follow-up commands while history settlement is pending"
     );
-    controller.releaseAll();
-    await Promise.all(observedExecutions);
+    const rapidExecutions = observedExecutions.splice(0);
+    for (const execution of rapidExecutions) {
+      await waitFor(
+        () => controller.pending.length > 0,
+        "rapid submission did not reach held settlement"
+      );
+      controller.releaseNext();
+      await execution;
+    }
     assert(term.currentLine === "echo pending", "late settlement erased newer pending input");
     passTo(
       executionTimingOutput,
