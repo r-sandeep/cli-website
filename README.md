@@ -36,13 +36,16 @@ browser storage, with a maximum of 25 saved bookmarks.
 
 Every non-empty command submission is saved in this browser as its original
 text, including duplicates and unsuccessful submissions such as unknown
-commands. On a later visit, **ArrowUp** recalls saved commands and `history`
+commands. Leading and trailing spaces are retained exactly. On a later visit, **ArrowUp** recalls saved commands and `history`
 lists them in submission order using the existing numbering from 1000. Only
 the newest 200 entries remain.
 
-History never leaves the browser. If browser storage is unavailable—for
-example, in a private mode that blocks storage or when its quota is full—the
-terminal remains usable and keeps a visit-only in-memory history instead.
+History never leaves the browser. Initialization has one total 50 ms storage
+deadline. If browser storage is unavailable or does not respond within that
+budget—for example, in a private mode that blocks storage or when its quota is
+full—the terminal remains usable and keeps a visit-only in-memory history
+instead. Late storage results are ignored and cannot replace that visit's
+history.
 
 Each open tab keeps independent recall while it is open. Their saved
 submissions are combined for later visits. The `clear`, `zsh`, and `upgrade`

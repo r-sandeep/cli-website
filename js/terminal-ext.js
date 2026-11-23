@@ -54,10 +54,15 @@ const extend = (term) => {
   let activeExecutions = 0;
   term.history = [];
   term.historyCursor = -1;
-  term.historyReady = historyStore.ready.then(() => {
+  const historyReady = historyStore.ready.then(() => {
+    // The installed readiness operation owns startup restoration. If a caller
+    // deliberately replaces that operation before it settles, its late result
+    // must not overwrite the newer visit state.
+    if (term.historyReady !== historyReady) return;
     term.history = historyStore.getSnapshot();
     term.historyCursor = -1;
   });
+  term.historyReady = historyReady;
   term.busy = false;
 
   const recordSubmittedCommand = (line) => {
