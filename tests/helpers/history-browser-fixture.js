@@ -1470,14 +1470,17 @@
     resetTerm.emit("\u007f");
     emitText(resetTerm, "ng");
     resetTerm.emit("\r");
-    await waitFor(() => resetTerm.rendered.join("").includes("pong"), "parser-paced edited ping did not execute");
+    await waitFor(
+      () => resetTerm.rendered.join("").includes("pong"),
+      `parser-paced edited ping did not execute: line=${JSON.stringify(resetTerm.currentLine)} busy=${resetTerm.busy} locked=${resetTerm.locked} history=${JSON.stringify(resetTerm.history)} rendered=${JSON.stringify(resetTerm.rendered.slice(-30))}`
+    );
     assert(!resetTerm.rendered.join("").includes("pingnip"), "reset burst reversed cursor input");
     completeStage("PASS real xterm reset bursts preserve exact input and result rows");
 
     stage("editing cancellation recall and completion");
     emitText(resetTerm, "cancelled");
     resetTerm.emit("\u0003");
-    resetTerm.emit("\033[A");
+    resetTerm.emit("\u001b[A");
     await waitFor(() => resetTerm.currentLine === "ping", "ArrowUp did not recall the edited ping");
     resetTerm.emit("\r");
     await waitFor(() => resetTerm.history.filter((entry) => entry === "ping").length === 2, "recalled ping did not execute");
