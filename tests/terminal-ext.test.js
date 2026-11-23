@@ -316,6 +316,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     fitTo(120);
     term.history = ["historical mutation"];
+    term.visitHistory = ["historical mutation"];
     // Replay now runs each history line through executeCommandLine, so the
     // replayed mutation happens at the dispatch seam.
     term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
@@ -511,6 +512,7 @@ describe("terminal-ext", () => {
     fitTo(120);
     term.defineAlias("launch", "tui");
     term.history = [line];
+    term.visitHistory = [line];
     term.deepLink = line;
     term.init = vi.fn(); term.prompt = vi.fn();
     await term.resizeListener();
@@ -528,6 +530,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     extend(term); // resets history, so it is set afterwards
     term.history = ["whois lee"];
+    term.visitHistory = ["whois lee"];
     term.init = vi.fn();
     term.prompt = vi.fn();
 
@@ -553,6 +556,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     extend(term);
     term.history = ["upgrade", "apply 1", "test", "claude", "whois lee"];
+    term.visitHistory = [...term.history];
     fitTo(40);
     term.init = vi.fn();
     term.prompt = vi.fn();
@@ -857,6 +861,7 @@ describe("terminal-ext", () => {
       "unset TEMP",
       "env",
     ];
+    term.visitHistory = [...term.history];
     term.runDeepLink = vi.fn();
     env.window.commands.export = (args) => {
       const assignment = args[0];

@@ -62,12 +62,15 @@ const _parseStoredHistory = (serialized) => {
 const createHistoryStore = () => {
   let history = [];
   let pending = [];
+  let storage = null;
 
   try {
+    storage = window.localStorage;
     history = _parseStoredHistory(
-      window.localStorage.getItem(HISTORY_STORAGE_KEY)
+      storage.getItem(HISTORY_STORAGE_KEY)
     );
   } catch (error) {
+    storage = null;
     // Private browsing modes can deny even access to localStorage.
   }
 
@@ -81,8 +84,9 @@ const createHistoryStore = () => {
     history = _boundedHistory([...history, command]);
     pending = _boundedHistory([...pending, command]);
 
+    if (!storage) return snapshot();
+
     try {
-      const storage = window.localStorage;
       const durable = _parseStoredHistory(
         storage.getItem(HISTORY_STORAGE_KEY)
       );

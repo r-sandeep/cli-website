@@ -776,7 +776,7 @@ const commands = {
     term.dispatchCommand("open", ["welcome.htm"]);
   },
 
-  // Reinitializes the terminal, clearing history and resetting the prompt.
+  // Reinitializes the display and prompt while retaining command history.
   clear: function () {
     term.init();
   },
