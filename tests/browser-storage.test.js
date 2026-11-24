@@ -40,6 +40,90 @@ function loadHelper() {
 }
 
 describe("browser setting storage priority", () => {
+  it.each([
+    ["generic error", () => new Error("permission denied")],
+    [
+      "security error",
+      () => new DOMException("storage access denied", "SecurityError"),
+    ],
+    ["null", () => null],
+    ["undefined", () => undefined],
+    [
+      "quota-like message without quota name",
+      () => Object.assign(new Error("quota exceeded"), { code: 22 }),
+    ],
+  ])(
+    "does not inspect history or retry after a non-quota %s",
+    (_label, createFailure) => {
+      const history = JSON.stringify(["ping", "pwd"]);
+      const values = new Map([
+        [HISTORY_KEY, history],
+        ["rootvc.aliases", JSON.stringify([["old", "pwd"]])],
+        ["sentinel", "keep"],
+      ]);
+      const before = Object.fromEntries(values);
+      const failure = createFailure();
+      let denyNextTargetWrite = true;
+      const storage = {
+        getItem: vi.fn((key) => values.get(key) ?? null),
+        setItem: vi.fn((key, value) => {
+          if (key === "rootvc.aliases" && denyNextTargetWrite) {
+            denyNextTargetWrite = false;
+            throw failure;
+          }
+          values.set(key, String(value));
+        }),
+        removeItem: vi.fn((key) => values.delete(key)),
+      };
+      const write = loadHelper();
+
+      let caught = Symbol("not thrown");
+      try {
+        write(storage, "rootvc.aliases", JSON.stringify([["p", "ping"]]));
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBe(failure);
+      expect(storage.setItem).toHaveBeenCalledTimes(1);
+      expect(storage.getItem).not.toHaveBeenCalled();
+      expect(storage.removeItem).not.toHaveBeenCalled();
+      expect(Object.fromEntries(values)).toEqual(before);
+
+      const next = JSON.stringify([["p", "ping"]]);
+      expect(() => write(storage, "rootvc.aliases", next)).not.toThrow();
+      expect(values.get("rootvc.aliases")).toBe(next);
+      expect(values.get(HISTORY_KEY)).toBe(history);
+      expect(values.get("sentinel")).toBe("keep");
+    }
+  );
+
+  it.each(["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"])(
+    "recognizes %s by exception name across realms",
+    (name) => {
+      const history = JSON.stringify(["ping"]);
+      const values = new Map([[HISTORY_KEY, history]]);
+      let attempts = 0;
+      const storage = {
+        getItem: vi.fn((key) => values.get(key) ?? null),
+        setItem: vi.fn((key, value) => {
+          if (key === "rootvc.aliases" && attempts++ === 0) {
+            throw { name, message: "capacity" };
+          }
+          values.set(key, String(value));
+        }),
+        removeItem: vi.fn((key) => values.delete(key)),
+      };
+      const setting = JSON.stringify([["p", "ping"]]);
+
+      loadHelper()(storage, "rootvc.aliases", setting);
+
+      expect(values.get("rootvc.aliases")).toBe(setting);
+      expect(values.has(HISTORY_KEY)).toBe(false);
+      expect(storage.setItem).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it("keeps exact history bytes on an ordinary setting write", () => {
     const history = JSON.stringify(["ping"]);
     const setting = JSON.stringify([["p", "ping"]]);
@@ -138,8 +222,9 @@ describe("browser setting storage priority", () => {
     const write = loadHelper();
 
     expect(() => write(storage, "rootvc.aliases", "candidate")).toThrow(
-      "target denied"
+      initialQuota
     );
+    expect(targetAttempts).toBe(2);
     expect(values.get(HISTORY_KEY)).toBe(newer);
     expect(values.has("rootvc.aliases")).toBe(false);
   });

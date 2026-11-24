@@ -3,7 +3,7 @@ import { createBrowserEnv } from "./helpers/browser-env";
 
 let env;
 
-function loadTerminalExt(globals = {}) {
+function loadTerminalExt(globals = {}, { includeBrowserStorage = true } = {}) {
   env = createBrowserEnv({
     globals: {
       LOGO_TYPE: "ROOT",
@@ -21,7 +21,11 @@ function loadTerminalExt(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/browser-storage.js", "js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts([
+    ...(includeBrowserStorage ? ["js/browser-storage.js"] : []),
+    "js/pipeline.js",
+    "js/terminal-ext.js",
+  ]);
   return env.exportValues(["extend"]);
 }
 
@@ -104,6 +108,77 @@ afterEach(() => {
 
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
+
+  it.each([
+    ["alias", "rootvc.aliases"],
+    ["environment", environmentStorageKey],
+  ])(
+    "keeps %s direct-script state and history after one non-quota denial",
+    (kind, targetKey) => {
+      const { extend } = loadTerminalExt({}, { includeBrowserStorage: false });
+      const history = JSON.stringify(["ping", "pwd"]);
+      const aliasPayload = JSON.stringify([["old", "pwd"]]);
+      const environmentPayload = JSON.stringify({
+        version: 1,
+        variables: [["OLD", "kept"]],
+      });
+      const storage = env.window.localStorage;
+      storage.setItem("rootvc.history.v1", history);
+      storage.setItem("rootvc.aliases", aliasPayload);
+      storage.setItem(environmentStorageKey, environmentPayload);
+      storage.setItem("sentinel", "keep");
+      const before = {
+        history: storage.getItem("rootvc.history.v1"),
+        aliases: storage.getItem("rootvc.aliases"),
+        environment: storage.getItem(environmentStorageKey),
+        sentinel: storage.getItem("sentinel"),
+      };
+      const denial = new env.window.DOMException("denied", "SecurityError");
+      const originalSetItem = env.window.Storage.prototype.setItem;
+      let targetAttempts = 0;
+      const setItem = vi
+        .spyOn(env.window.Storage.prototype, "setItem")
+        .mockImplementation(function (key, value) {
+          if (key === targetKey && targetAttempts++ === 0) throw denial;
+          return originalSetItem.call(this, key, value);
+        });
+      const getItem = vi.spyOn(env.window.Storage.prototype, "getItem");
+      const removeItem = vi.spyOn(env.window.Storage.prototype, "removeItem");
+      const term = createTerm();
+      extend(term);
+      getItem.mockClear();
+
+      if (kind === "alias") {
+        expect(() => term.defineAlias("p", "ping")).toThrow(denial);
+        expect(term.getAliases()).toEqual([["old", "pwd"]]);
+      } else {
+        expect(term.environment.set("NEW", "value")).toEqual({
+          ok: false,
+          code: "storage",
+          message: "Environment variables could not be saved. Storage is unavailable.",
+        });
+        expect(term.environment.entries()).toEqual([["OLD", "kept"]]);
+      }
+
+      expect(setItem).toHaveBeenCalledTimes(1);
+      expect(getItem).not.toHaveBeenCalled();
+      expect(removeItem).not.toHaveBeenCalled();
+      expect({
+        history: storage.getItem("rootvc.history.v1"),
+        aliases: storage.getItem("rootvc.aliases"),
+        environment: storage.getItem(environmentStorageKey),
+        sentinel: storage.getItem("sentinel"),
+      }).toEqual(before);
+      expect(term.history).toEqual(["ping", "pwd"]);
+
+      setItem.mockClear();
+      expect(
+        kind === "alias"
+          ? term.defineAlias("p", "ping")
+          : term.environment.set("NEW", "value").ok
+      ).toBe(true);
+    }
+  );
 
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
