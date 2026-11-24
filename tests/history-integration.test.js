@@ -75,7 +75,7 @@ function createTerminal(storage, { hash = "" } = {}) {
     },
   });
   Object.defineProperty(env.window, "localStorage", { configurable: true, value: storage });
-  env.loadScripts(["js/pipeline.js", "js/bookmarks.js", "config/help.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/browser-storage.js", "js/pipeline.js", "js/bookmarks.js", "config/help.js", "config/commands.js", "js/terminal-ext.js"]);
   const { extend } = env.exportValues(["extend"]);
   extend(term);
   term.pos = () => term.currentLine.length;
@@ -542,7 +542,7 @@ describe("saved history terminal integration", () => {
       configurable: true,
       get: storageFactory,
     });
-    env.loadScripts(["js/pipeline.js", "js/bookmarks.js", "config/commands.js", "js/terminal-ext.js"]);
+    env.loadScripts(["js/browser-storage.js", "js/pipeline.js", "js/bookmarks.js", "config/commands.js", "js/terminal-ext.js"]);
     env.exportValues(["extend"]).extend(term);
     term.pos = () => term.currentLine.length;
     env.loadScript("js/terminal.js");

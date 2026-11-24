@@ -34,6 +34,7 @@ const vendorScripts = [
 // referenced at the top level of a later file must be defined by an earlier
 // one. config/commands.js reads `firm`, `team`, and `portfolio` at top level.
 const appBundleSources = [
+  "js/browser-storage.js",
   "js/terminal.js",
   "js/pipeline.js",
   "js/terminal-ext.js",
@@ -256,7 +257,7 @@ async function main(buildTime = new Date()) {
   }
 
   await buildAppBundle(buildInfo);
-  const tuiSource = ["config/firm.js", "config/portfolio.js", "config/team.js", "config/jobs.js", "js/tui-art.js", "js/tui.js"]
+  const tuiSource = ["js/browser-storage.js", "config/firm.js", "config/portfolio.js", "config/team.js", "config/jobs.js", "js/tui-art.js", "js/tui.js"]
     .map(readText).join("\n;\n");
   writeText("js/tui.bundle.js", await minifyJavaScript(tuiSource));
   await buildRickRollBundle();

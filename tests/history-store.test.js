@@ -34,7 +34,7 @@ function loadHistoryStore(storage = memoryStorage()) {
     configurable: true,
     value: storage,
   });
-  env.loadScript("js/terminal-ext.js");
+  env.loadScripts(["js/browser-storage.js", "js/terminal-ext.js"]);
   const { createHistoryStore } = env.exportValues(["createHistoryStore"]);
   return { createHistoryStore, storage };
 }
@@ -133,7 +133,7 @@ describe("browser-local history store", () => {
         throw new Error("access denied");
       }),
     });
-    env.loadScript("js/terminal-ext.js");
+    env.loadScripts(["js/browser-storage.js", "js/terminal-ext.js"]);
     const { createHistoryStore } = env.exportValues(["createHistoryStore"]);
 
     const store = createHistoryStore();

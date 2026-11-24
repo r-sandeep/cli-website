@@ -16,7 +16,7 @@ let env;
 
 function loadStore(storage = memoryStorage()) {
   env = createBrowserEnv();
-  env.loadScripts(["js/bookmarks.js"]);
+  env.loadScripts(["js/browser-storage.js", "js/bookmarks.js"]);
   const { createBookmarkStore } = env.exportValues(["createBookmarkStore"]);
   return { createBookmarkStore, storage, store: createBookmarkStore(storage) };
 }

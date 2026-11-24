@@ -44,6 +44,11 @@ memory-only history for the current visit. `clear`, `zsh`, and `upgrade` reset
 the display but retain saved and recallable history, including the reset
 command itself.
 
+Saved aliases, environment variables, bookmarks, and appearance settings take
+priority when browser storage is full. If one of those settings fits only after
+saved history is removed, the browser discards the durable history list while
+the current tab keeps its complete bounded recall history in memory.
+
 Open tabs keep independent recall views. Before a tab saves a command, it
 rereads durable history so sequential saves from other tabs are retained;
 truly overlapping writes use the last completed write. Saved history is kept

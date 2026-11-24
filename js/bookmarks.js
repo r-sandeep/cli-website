@@ -24,7 +24,11 @@ function createBookmarkStore(storage) {
 
   function persist(nextBookmarks) {
     try {
-      activeStorage.setItem(BOOKMARK_STORAGE_KEY, JSON.stringify(nextBookmarks));
+      writeBrowserSetting(
+        activeStorage,
+        BOOKMARK_STORAGE_KEY,
+        JSON.stringify(nextBookmarks)
+      );
       bookmarks = nextBookmarks;
       return true;
     } catch (_) {

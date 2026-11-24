@@ -21,7 +21,7 @@ function loadTerminalExt(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/browser-storage.js", "js/pipeline.js", "js/terminal-ext.js"]);
   return env.exportValues(["extend"]);
 }
 
@@ -88,7 +88,7 @@ function loadAliasTerminal() {
       term,
     },
   });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/browser-storage.js", "js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
   const { commands, extend } = env.exportValues(["commands", "extend"]);
   extend(term);
   return { commands, extend, term };

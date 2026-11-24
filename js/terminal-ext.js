@@ -37,7 +37,6 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
-const HISTORY_STORAGE_KEY = "rootvc.history.v1";
 const HISTORY_LIMIT = 200;
 
 const _boundedHistory = (entries) => entries.slice(-HISTORY_LIMIT);
@@ -66,7 +65,7 @@ const createHistoryStore = () => {
   try {
     storage = window.localStorage;
     history = _parseStoredHistory(
-      storage.getItem(HISTORY_STORAGE_KEY)
+      storage.getItem(ROOTVC_HISTORY_STORAGE_KEY)
     );
   } catch (error) {
     storage = null;
@@ -86,10 +85,10 @@ const createHistoryStore = () => {
 
     try {
       const durable = _parseStoredHistory(
-        storage.getItem(HISTORY_STORAGE_KEY)
+        storage.getItem(ROOTVC_HISTORY_STORAGE_KEY)
       );
       storage.setItem(
-        HISTORY_STORAGE_KEY,
+        ROOTVC_HISTORY_STORAGE_KEY,
         JSON.stringify(_boundedHistory([...durable, command]))
       );
     } catch (error) {
@@ -158,7 +157,7 @@ const extend = (term) => {
     const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
       compareAliasNames(left, right)
     );
-    window.localStorage.setItem(aliasStorageKey, JSON.stringify(entries));
+    writeBrowserSetting(window.localStorage, aliasStorageKey, JSON.stringify(entries));
   };
 
   term.getAliases = () =>
@@ -260,7 +259,7 @@ const extend = (term) => {
 
     try {
       const serialized = serializeEnvironment(candidate);
-      window.localStorage.setItem(ENV_STORAGE_KEY, serialized);
+      writeBrowserSetting(window.localStorage, ENV_STORAGE_KEY, serialized);
     } catch (_error) {
       return environmentResult(
         false,

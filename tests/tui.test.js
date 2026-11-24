@@ -14,6 +14,7 @@ function setup(hash = "") {
     this.open = false;
   };
   env.loadScripts([
+    "js/browser-storage.js",
     "config/firm.js",
     "config/portfolio.js",
     "config/team.js",
