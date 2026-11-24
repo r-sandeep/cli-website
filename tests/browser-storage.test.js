@@ -197,6 +197,48 @@ describe("browser setting storage priority", () => {
     });
   });
 
+  it("does not restore stale history after nested recovery consumes a newer write", () => {
+    const original = JSON.stringify(["old"]);
+    const values = new Map([[HISTORY_KEY, original]]);
+    let outerAttempts = 0;
+    let innerAttempts = 0;
+    let write;
+    let historyStore;
+    const outerQuota = new DOMException("outer full", "QuotaExceededError");
+    const innerQuota = new DOMException("inner full", "QuotaExceededError");
+    const storage = {
+      getItem: vi.fn((key) => values.get(key) ?? null),
+      removeItem: vi.fn((key) => values.delete(key)),
+      setItem: vi.fn((key, value) => {
+        if (key === "outer") {
+          if (outerAttempts++ === 0) throw outerQuota;
+          historyStore.append("newer");
+          write(storage, "inner", "kept");
+          throw new Error("outer retry denied");
+        }
+        if (key === "inner" && innerAttempts++ === 0) throw innerQuota;
+        values.set(key, String(value));
+      }),
+    };
+    env = createBrowserEnv();
+    Object.defineProperty(env.window, "localStorage", {
+      configurable: true,
+      value: storage,
+    });
+    env.loadScripts(["js/browser-storage.js", "js/terminal-ext.js"]);
+    ({ writeBrowserSetting: write, createHistoryStore: historyStore } =
+      env.exportValues(["writeBrowserSetting", "createHistoryStore"]));
+    historyStore = historyStore();
+
+    expect(() => write(storage, "outer", "candidate")).toThrow(outerQuota);
+    expect(historyStore.snapshot()).toEqual(["old", "newer"]);
+    expect(values.get("inner")).toBe("kept");
+    expect(values.has(HISTORY_KEY)).toBe(false);
+
+    historyStore.append("after");
+    expect(JSON.parse(values.get(HISTORY_KEY))).toEqual(["after"]);
+  });
+
   it("does not overwrite newer history during failed-setting rollback", () => {
     const original = JSON.stringify(["old"]);
     const newer = JSON.stringify(["newer"]);
