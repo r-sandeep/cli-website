@@ -24,7 +24,11 @@ function createBookmarkStore(storage) {
 
   function persist(nextBookmarks) {
     try {
-      writeBrowserSetting(
+      const writeSetting =
+        typeof writeBrowserSetting === "function"
+          ? writeBrowserSetting
+          : (targetStorage, key, value) => targetStorage.setItem(key, value);
+      writeSetting(
         activeStorage,
         BOOKMARK_STORAGE_KEY,
         JSON.stringify(nextBookmarks)

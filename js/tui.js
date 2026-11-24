@@ -114,7 +114,11 @@
     document.documentElement.style.colorScheme =
       id === "paper" ? "light" : "dark";
     try {
-      writeBrowserSetting(localStorage, "root-tui-theme", id);
+      const writeSetting =
+        typeof writeBrowserSetting === "function"
+          ? writeBrowserSetting
+          : (storage, key, value) => storage.setItem(key, value);
+      writeSetting(localStorage, "root-tui-theme", id);
     } catch (_) {
       /* Storage can be disabled. */
     }
