@@ -187,7 +187,8 @@ describe("browser setting storage priority", () => {
     } else {
       expect(term.environment.set("SAVED", "kept")).toEqual({
         ok: true,
-        value: "kept",
+        code: "updated",
+        message: "",
       });
       expect(term.environment.get("SAVED")).toBe("kept");
     }
@@ -201,7 +202,7 @@ describe("browser setting storage priority", () => {
 
   it("lets the production bookmark store persist under shared pressure", () => {
     const history = JSON.stringify(["ping", "pwd"]);
-    const expected = JSON.stringify([{ name: "checkpoint", path: "~" }]);
+    const expected = JSON.stringify([["checkpoint", "~"]]);
     const storage = sharedQuotaStorage(expected.length + "keep".length + "[]".length, {
       [HISTORY_KEY]: history,
       sentinel: "keep",
