@@ -7,6 +7,7 @@ const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
 const testJobs = { ...productionJobs, 2: ["Platform Engineer"] };
+const browserStorageSource = readFileSync("js/browser-storage.js", "utf8");
 const bookmarkSource = readFileSync("js/bookmarks.js", "utf8");
 
 function createMemoryStorage(initial = {}) {
@@ -19,7 +20,7 @@ function createMemoryStorage(initial = {}) {
 }
 const helpContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(
-  `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts;`,
+  `${readFileSync("config/help.js", "utf8")}\nthis.helpEntries = help; this.shortcutEntries = shortcuts; this.savedHistoryHelpLines = savedHistoryHelp;`,
   helpContext
 );
 
@@ -177,12 +178,14 @@ function loadCommands({
     // real table from config/help.js.
     help: Object.keys(help).length > 0 ? help : helpContext.helpEntries,
     shortcuts: helpContext.shortcutEntries,
+    savedHistoryHelp: helpContext.savedHistoryHelpLines,
     portfolio,
     buildInfo: Object.freeze({ version: "1.2.3-test", buildDate: "2030-04-05" }),
     colorText: (text) => text,
     localStorage: storage,
     window: { location },
   });
+  vm.runInContext(browserStorageSource, context);
   vm.runInContext(bookmarkSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);
@@ -962,6 +965,25 @@ describe("help stays in sync with commands", () => {
     expect(output.some((line) => line.includes("%bookmark% list"))).toBe(true);
     expect(output.some((line) => line.includes("%bookmark% remove NAME"))).toBe(true);
     expect(output.some((line) => line.includes("%go% NAME"))).toBe(true);
+  });
+
+  it("renders the complete saved-history policy after the existing shortcuts", () => {
+    const expectedFooter = [
+      "Saved command history:",
+      "History is saved in this browser.",
+      "Keep the most recent 200 commands.",
+      "Use ArrowUp to recall; run history to list.",
+      "Without storage, history lasts this visit.",
+      "Failed commands are saved too.",
+      "clear, zsh, and upgrade keep saved history.",
+    ];
+    const { commands, term } = loadCommands({ help: helpContext.helpEntries });
+
+    commands.help([]);
+
+    const output = term.stylePrint.mock.calls.map(([line]) => line);
+    expect(output.some((line) => line.includes("%history%") && line.includes("list saved command history, numbered from 1000"))).toBe(true);
+    expect(output.slice(-expectedFooter.length)).toEqual(expectedFooter);
   });
 
   it("renders the environment commands and complete expansion grammar", () => {

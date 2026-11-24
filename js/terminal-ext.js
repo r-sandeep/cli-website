@@ -37,6 +37,124 @@ const _parseCommandLine = (line) => {
   return tokens;
 };
 
+const HISTORY_LIMIT = 200;
+
+// Production bundles load browser-storage.js first. Keep terminal-ext.js
+// independently executable for the long-standing direct-script integration
+// seam while preserving the same bounded recovery policy.
+const _writeTerminalSetting =
+  typeof writeBrowserSetting === "function"
+    ? writeBrowserSetting
+    : (storage, targetKey, serializedCandidate) => {
+        try {
+          storage.setItem(targetKey, serializedCandidate);
+        } catch (originalError) {
+          const errorName = originalError?.name;
+          if (
+            errorName !== "QuotaExceededError" &&
+            errorName !== "NS_ERROR_DOM_QUOTA_REACHED"
+          ) {
+            throw originalError;
+          }
+
+          let originalHistory;
+          try {
+            originalHistory = storage.getItem("rootvc.history.v1");
+            const entries = JSON.parse(originalHistory);
+            if (
+              !Array.isArray(entries) ||
+              entries.length === 0 ||
+              entries.some((entry) => typeof entry !== "string")
+            ) {
+              throw originalError;
+            }
+            if (typeof storage.removeItem === "function") {
+              storage.removeItem("rootvc.history.v1");
+            } else {
+              storage.setItem("rootvc.history.v1", "");
+            }
+          } catch (_) {
+            throw originalError;
+          }
+          try {
+            storage.setItem(targetKey, serializedCandidate);
+          } catch (_) {
+            // Never restore a page-local snapshot after yielding shared
+            // durable history; another page may have completed a newer write.
+            throw originalError;
+          }
+        }
+      };
+
+const _historyStorageKey =
+  typeof ROOTVC_HISTORY_STORAGE_KEY === "string"
+    ? ROOTVC_HISTORY_STORAGE_KEY
+    : "rootvc.history.v1";
+
+const _boundedHistory = (entries) => entries.slice(-HISTORY_LIMIT);
+
+const _parseStoredHistory = (serialized) => {
+  if (serialized === null) return [];
+
+  try {
+    const entries = JSON.parse(serialized);
+    if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string")) {
+      return [];
+    }
+    return _boundedHistory(entries);
+  } catch (error) {
+    return [];
+  }
+};
+
+// Keep each terminal's recall list independent while merging completed writes
+// through the shared browser value. Browser storage is deliberately best-effort:
+// memory is updated first and remains usable if access or quota checks fail.
+const createHistoryStore = () => {
+  let history = [];
+  let storage = null;
+
+  try {
+    storage = window.localStorage;
+    history = _parseStoredHistory(
+      storage.getItem(_historyStorageKey)
+    );
+  } catch (error) {
+    storage = null;
+    // Private browsing modes can deny even access to localStorage.
+  }
+
+  const snapshot = () => history.slice();
+
+  const append = (command) => {
+    if (typeof command !== "string" || command.trim() === "") {
+      return snapshot();
+    }
+
+    history = _boundedHistory([...history, command]);
+
+    if (!storage) return snapshot();
+
+    try {
+      const durable = _parseStoredHistory(
+        storage.getItem(_historyStorageKey)
+      );
+      storage.setItem(
+        _historyStorageKey,
+        JSON.stringify(_boundedHistory([...durable, command]))
+      );
+    } catch (error) {
+      // Keep the failed entry in this visit's memory, but do not retry it with
+      // a later command. A later append gets a fresh durable snapshot so a
+      // fitting command can recover without overwriting completed tab writes.
+    }
+
+    return snapshot();
+  };
+
+  return { append, snapshot };
+};
+
 const extend = (term) => {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -48,7 +166,9 @@ const extend = (term) => {
   term.cwd = "~";
   term.sep = ":";
   term._promptChar = "$";
-  term.history = [];
+  const historyStore = createHistoryStore();
+  term.history = historyStore.snapshot();
+  term.visitHistory = [];
   term.historyCursor = -1;
   term.busy = false;
 
@@ -85,11 +205,24 @@ const extend = (term) => {
     userAliases = new Map();
   }
 
+  let aliasPersistenceEnabled = true;
+  let currentVisitReplayIndex = -1;
+  let replaySettingFailure = false;
+  let visitReplaySettingFailures = [];
+  const markVisitSettingFailure = () => {
+    if (currentVisitReplayIndex >= 0) {
+      visitReplaySettingFailures[currentVisitReplayIndex] = true;
+    }
+  };
   const persistAliases = (nextAliases) => {
+    if (replaySettingFailure) {
+      throw new Error("Alias persistence failed during the original submission");
+    }
+    if (!aliasPersistenceEnabled) return;
     const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
       compareAliasNames(left, right)
     );
-    window.localStorage.setItem(aliasStorageKey, JSON.stringify(entries));
+    _writeTerminalSetting(window.localStorage, aliasStorageKey, JSON.stringify(entries));
   };
 
   term.getAliases = () =>
@@ -107,7 +240,12 @@ const extend = (term) => {
 
     const nextAliases = new Map(userAliases);
     nextAliases.set(name, value);
-    persistAliases(nextAliases);
+    try {
+      persistAliases(nextAliases);
+    } catch (error) {
+      markVisitSettingFailure();
+      throw error;
+    }
     userAliases = nextAliases;
     return true;
   };
@@ -119,7 +257,12 @@ const extend = (term) => {
 
     const nextAliases = new Map(userAliases);
     nextAliases.delete(name);
-    persistAliases(nextAliases);
+    try {
+      persistAliases(nextAliases);
+    } catch (error) {
+      markVisitSettingFailure();
+      throw error;
+    }
     userAliases = nextAliases;
     return true;
   };
@@ -184,6 +327,13 @@ const extend = (term) => {
   const environmentResult = (ok, code, message = "") => ({ ok, code, message });
   let environmentPersistenceEnabled = true;
   const persistEnvironmentCandidate = (candidate) => {
+    if (replaySettingFailure) {
+      return environmentResult(
+        false,
+        "storage",
+        "Environment variables could not be saved. Storage is unavailable."
+      );
+    }
     if (!environmentPersistenceEnabled) {
       environmentVariables = candidate;
       return environmentResult(true, "updated");
@@ -191,8 +341,9 @@ const extend = (term) => {
 
     try {
       const serialized = serializeEnvironment(candidate);
-      window.localStorage.setItem(ENV_STORAGE_KEY, serialized);
+      _writeTerminalSetting(window.localStorage, ENV_STORAGE_KEY, serialized);
     } catch (_error) {
+      markVisitSettingFailure();
       return environmentResult(
         false,
         "storage",
@@ -255,17 +406,23 @@ const extend = (term) => {
 
   // The replay may be asynchronous (resize replays each history line through
   // executeCommandLine so aliases and pipelines apply); the guard is held for
-  // its whole duration and restored afterwards.
-  const replayWithoutEnvironmentSideEffects = async (replay) => {
+  // its whole duration and restores alias/environment state afterwards.
+  const replayWithoutSettingSideEffects = async (replay) => {
+    const activeAliases = userAliases;
     const activeVariables = environmentVariables;
-    const previousPersistenceSetting = environmentPersistenceEnabled;
+    const previousAliasPersistenceSetting = aliasPersistenceEnabled;
+    const previousEnvironmentPersistenceSetting = environmentPersistenceEnabled;
+    userAliases = new Map(activeAliases);
     environmentVariables = new Map(activeVariables);
+    aliasPersistenceEnabled = false;
     environmentPersistenceEnabled = false;
     try {
       await replay();
     } finally {
+      userAliases = activeAliases;
       environmentVariables = activeVariables;
-      environmentPersistenceEnabled = previousPersistenceSetting;
+      aliasPersistenceEnabled = previousAliasPersistenceSetting;
+      environmentPersistenceEnabled = previousEnvironmentPersistenceSetting;
     }
   };
 
@@ -643,6 +800,20 @@ const extend = (term) => {
       ...options,
     };
     const parsed = parseCommandLine(line);
+    if (settings.addToHistory && parsed.line.length > 0) {
+      term.history = historyStore.append(parsed.line);
+      term.historyCursor = -1;
+    }
+    const registerVisitHistory = () => {
+      if (settings.addToHistory && parsed.line.length > 0) {
+        // Saved recall history is bounded, but this list represents everything
+        // already rendered during the current visit. Keep the whole visit so a
+        // later column-changing resize does not silently drop older output.
+        term.visitHistory = [...term.visitHistory, parsed.line];
+        visitReplaySettingFailures.push(false);
+        currentVisitReplayIndex = term.visitHistory.length - 1;
+      }
+    };
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
@@ -658,12 +829,9 @@ const extend = (term) => {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
+          registerVisitHistory();
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (parsed.line.length > 0 && settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           term.stylePrint(validation.error.message);
@@ -678,13 +846,10 @@ const extend = (term) => {
           }
         } else {
           await term.preloadCommandAssets(validation.producer);
+          registerVisitHistory();
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
-          }
-
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
           }
 
           const capture = _captureTerminalOutput(term);
@@ -728,16 +893,13 @@ const extend = (term) => {
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
+        registerVisitHistory();
 
         if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
           term.writeln("");
         }
 
         if (parsed.line.length > 0) {
-          if (settings.addToHistory) {
-            term.history.push(parsed.line);
-          }
-
           // Commands may own an interactive continuation. Await its final
           // status so standalone prompt cleanup observes the same lifecycle as
           // a piped producer.
@@ -757,6 +919,7 @@ const extend = (term) => {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
+      currentVisitReplayIndex = -1;
       if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
         term.prompt();
         term.clearCurrentLine(true);
@@ -806,10 +969,12 @@ const extend = (term) => {
     }
     await term.runDeepLink({ replay: true });
     // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
-    await replayWithoutEnvironmentSideEffects(async () => {
-      for (const c of term.history) {
+    // pipelines apply exactly as they did interactively, while alias and
+    // environment mutations replayed from history never persist a second time.
+    await replayWithoutSettingSideEffects(async () => {
+      for (let index = 0; index < term.visitHistory.length; index += 1) {
+        const c = term.visitHistory[index];
+        replaySettingFailure = visitReplaySettingFailures[index] === true;
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await term.executeCommandLine(c, {
@@ -822,6 +987,7 @@ const extend = (term) => {
           });
         }
       }
+      replaySettingFailure = false;
     });
     // A form (collectInput) still owns the keyboard, so put its question and
     // what has been typed back on screen rather than a misleading shell prompt.
@@ -836,7 +1002,7 @@ const extend = (term) => {
 
   // Resets the terminal to its initial state. If VERSION < 4, shows an upgrade
   // prompt instead of the welcome message. Announces open jobs if any exist.
-  term.init = (user = "guest", preserveHistory = false) => {
+  term.init = (user = "guest", preserveVisitHistory = false) => {
     window.fitAddon.fit();
     term.reset();
     term.printLogoType();
@@ -873,8 +1039,9 @@ const extend = (term) => {
     }
 
     term.user = user;
-    if (!preserveHistory) {
-      term.history = [];
+    if (!preserveVisitHistory) {
+      term.visitHistory = [];
+      visitReplaySettingFailures = [];
     }
     term.focus();
   };

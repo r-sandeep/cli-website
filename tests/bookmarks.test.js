@@ -16,7 +16,7 @@ let env;
 
 function loadStore(storage = memoryStorage()) {
   env = createBrowserEnv();
-  env.loadScripts(["js/bookmarks.js"]);
+  env.loadScripts(["js/browser-storage.js", "js/bookmarks.js"]);
   const { createBookmarkStore } = env.exportValues(["createBookmarkStore"]);
   return { createBookmarkStore, storage, store: createBookmarkStore(storage) };
 }
@@ -174,6 +174,49 @@ describe("bookmark store", () => {
     expect(store.list()).toEqual({ ok: false, error: "storage" });
     expect(store.add("home", "/home")).toEqual({ ok: false, error: "storage" });
     expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("keeps history and bookmark state unchanged after a non-quota denial", () => {
+    const history = JSON.stringify(["ping", "pwd"]);
+    const serialized = JSON.stringify([["home", "/home"]]);
+    const values = new Map([
+      ["rootvc.history.v1", history],
+      [STORAGE_KEY, serialized],
+      ["sentinel", "keep"],
+    ]);
+    let denyNextBookmarkWrite = true;
+    const storage = {
+      getItem: vi.fn((key) => values.get(key) ?? null),
+      setItem: vi.fn((key, value) => {
+        if (key === STORAGE_KEY && denyNextBookmarkWrite) {
+          denyNextBookmarkWrite = false;
+          throw new DOMException("denied", "SecurityError");
+        }
+        values.set(key, String(value));
+      }),
+      removeItem: vi.fn((key) => values.delete(key)),
+    };
+    const { store } = loadStore(storage);
+    storage.getItem.mockClear();
+
+    expect(store.add("work", "/work")).toEqual({
+      ok: false,
+      error: "storage",
+    });
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.getItem).not.toHaveBeenCalled();
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    expect(Object.fromEntries(values)).toEqual({
+      "rootvc.history.v1": history,
+      [STORAGE_KEY]: serialized,
+      sentinel: "keep",
+    });
+    expect(store.lookup("home")).toEqual({ ok: true, path: "/home" });
+    expect(store.lookup("work")).toEqual({ ok: false, error: "not-found" });
+
+    expect(store.add("work", "/work")).toEqual({ ok: true });
+    expect(store.lookup("work")).toEqual({ ok: true, path: "/work" });
+    expect(values.get("rootvc.history.v1")).toBe(history);
   });
 
   it("keeps memory and persisted state unchanged when writes throw", () => {

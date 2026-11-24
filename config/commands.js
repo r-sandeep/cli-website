@@ -125,6 +125,10 @@ const commands = {
     Object.entries(shortcuts).forEach(function (kv) {
       term.stylePrint(`${kv[0]}: ${kv[1]}`);
     });
+    term.stylePrint("");
+    savedHistoryHelp.forEach(function (line) {
+      term.stylePrint(line);
+    });
   },
 
   // Prints the metadata fixed into the application bundle by build-assets.js.
@@ -776,7 +780,7 @@ const commands = {
     term.dispatchCommand("open", ["welcome.htm"]);
   },
 
-  // Reinitializes the terminal, clearing history and resetting the prompt.
+  // Reinitializes the display and prompt while retaining command history.
   clear: function () {
     term.init();
   },

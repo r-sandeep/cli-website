@@ -3,7 +3,7 @@ import { createBrowserEnv } from "./helpers/browser-env";
 
 let env;
 
-function loadTerminalExt(globals = {}) {
+function loadTerminalExt(globals = {}, { includeBrowserStorage = true } = {}) {
   env = createBrowserEnv({
     globals: {
       LOGO_TYPE: "ROOT",
@@ -21,7 +21,11 @@ function loadTerminalExt(globals = {}) {
       ...globals,
     },
   });
-  env.loadScripts(["js/pipeline.js", "js/terminal-ext.js"]);
+  env.loadScripts([
+    ...(includeBrowserStorage ? ["js/browser-storage.js"] : []),
+    "js/pipeline.js",
+    "js/terminal-ext.js",
+  ]);
   return env.exportValues(["extend"]);
 }
 
@@ -88,7 +92,7 @@ function loadAliasTerminal() {
       term,
     },
   });
-  env.loadScripts(["js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
+  env.loadScripts(["js/browser-storage.js", "js/pipeline.js", "config/commands.js", "js/terminal-ext.js"]);
   const { commands, extend } = env.exportValues(["commands", "extend"]);
   extend(term);
   return { commands, extend, term };
@@ -104,6 +108,116 @@ afterEach(() => {
 
 describe("terminal-ext", () => {
   const environmentStorageKey = "rootvc.cli.environment.v1";
+
+  it.each([
+    ["alias", "rootvc.aliases"],
+    ["environment", environmentStorageKey],
+  ])(
+    "keeps %s direct-script state and history after one non-quota denial",
+    (kind, targetKey) => {
+      const { extend } = loadTerminalExt({}, { includeBrowserStorage: false });
+      const history = JSON.stringify(["ping", "pwd"]);
+      const aliasPayload = JSON.stringify([["old", "pwd"]]);
+      const environmentPayload = JSON.stringify({
+        version: 1,
+        variables: [["OLD", "kept"]],
+      });
+      const storage = env.window.localStorage;
+      storage.setItem("rootvc.history.v1", history);
+      storage.setItem("rootvc.aliases", aliasPayload);
+      storage.setItem(environmentStorageKey, environmentPayload);
+      storage.setItem("sentinel", "keep");
+      const before = {
+        history: storage.getItem("rootvc.history.v1"),
+        aliases: storage.getItem("rootvc.aliases"),
+        environment: storage.getItem(environmentStorageKey),
+        sentinel: storage.getItem("sentinel"),
+      };
+      const denial = new env.window.DOMException("denied", "SecurityError");
+      const originalSetItem = env.window.Storage.prototype.setItem;
+      let targetAttempts = 0;
+      const setItem = vi
+        .spyOn(env.window.Storage.prototype, "setItem")
+        .mockImplementation(function (key, value) {
+          if (key === targetKey && targetAttempts++ === 0) throw denial;
+          return originalSetItem.call(this, key, value);
+        });
+      const getItem = vi.spyOn(env.window.Storage.prototype, "getItem");
+      const removeItem = vi.spyOn(env.window.Storage.prototype, "removeItem");
+      const term = createTerm();
+      extend(term);
+      getItem.mockClear();
+
+      if (kind === "alias") {
+        expect(() => term.defineAlias("p", "ping")).toThrow(denial);
+        expect(term.getAliases()).toEqual([["old", "pwd"]]);
+      } else {
+        expect(term.environment.set("NEW", "value")).toEqual({
+          ok: false,
+          code: "storage",
+          message: "Environment variables could not be saved. Storage is unavailable.",
+        });
+        expect(term.environment.entries()).toEqual([["OLD", "kept"]]);
+      }
+
+      expect(setItem).toHaveBeenCalledTimes(1);
+      expect(getItem).not.toHaveBeenCalled();
+      expect(removeItem).not.toHaveBeenCalled();
+      expect({
+        history: storage.getItem("rootvc.history.v1"),
+        aliases: storage.getItem("rootvc.aliases"),
+        environment: storage.getItem(environmentStorageKey),
+        sentinel: storage.getItem("sentinel"),
+      }).toEqual(before);
+      expect(term.history).toEqual(["ping", "pwd"]);
+
+      setItem.mockClear();
+      expect(
+        kind === "alias"
+          ? term.defineAlias("p", "ping")
+          : term.environment.set("NEW", "value").ok
+      ).toBe(true);
+    }
+  );
+
+  it("leaves yielded history released after a direct-script quota retry fails", () => {
+    const { extend } = loadTerminalExt({}, { includeBrowserStorage: false });
+    const storage = env.window.localStorage;
+    const history = JSON.stringify(["ping", "pwd"]);
+    storage.setItem("rootvc.history.v1", history);
+    storage.setItem("sentinel", "keep");
+    const originalSetItem = env.window.Storage.prototype.setItem;
+    let aliasAttempts = 0;
+    const initialQuota = new env.window.DOMException(
+      "full",
+      "QuotaExceededError"
+    );
+    const setItem = vi
+      .spyOn(env.window.Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "rootvc.aliases") {
+          aliasAttempts += 1;
+          if (aliasAttempts === 1) throw initialQuota;
+          if (aliasAttempts === 2) throw new Error("retry denied");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+    const term = createTerm();
+    extend(term);
+
+    expect(() => term.defineAlias("p", "ping")).toThrow(initialQuota);
+    expect(aliasAttempts).toBe(2);
+    expect(storage.getItem("rootvc.history.v1")).toBeNull();
+    expect(storage.getItem("rootvc.aliases")).toBeNull();
+    expect(storage.getItem("sentinel")).toBe("keep");
+    expect(term.history).toEqual(["ping", "pwd"]);
+    expect(term.getAliases()).toEqual([]);
+
+    setItem.mockRestore();
+    expect(term.defineAlias("p", "ping")).toBe(true);
+    expect(term.getAlias("p")).toBe("ping");
+    expect(storage.getItem("rootvc.history.v1")).toBeNull();
+  });
 
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
@@ -316,6 +430,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     fitTo(120);
     term.history = ["historical mutation"];
+    term.visitHistory = ["historical mutation"];
     // Replay now runs each history line through executeCommandLine, so the
     // replayed mutation happens at the dispatch seam.
     term.dispatchCommand = vi.fn(() => term.environment.set("KEEP", "replayed"));
@@ -511,6 +626,7 @@ describe("terminal-ext", () => {
     fitTo(120);
     term.defineAlias("launch", "tui");
     term.history = [line];
+    term.visitHistory = [line];
     term.deepLink = line;
     term.init = vi.fn(); term.prompt = vi.fn();
     await term.resizeListener();
@@ -528,6 +644,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     extend(term); // resets history, so it is set afterwards
     term.history = ["whois lee"];
+    term.visitHistory = ["whois lee"];
     term.init = vi.fn();
     term.prompt = vi.fn();
 
@@ -542,6 +659,34 @@ describe("terminal-ext", () => {
     expect(whois).toHaveBeenCalledWith(["lee"]);
   });
 
+  it("replays every rendered command after a visit exceeds the saved-history limit", async () => {
+    const ping = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { ping } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+
+    for (let index = 0; index < 201; index += 1) {
+      await term.executeCommandLine("ping", {
+        promptAfter: false,
+        showLeadingNewline: false,
+        trackAnalytics: false,
+        scrollAfter: false,
+      });
+    }
+    expect(term.history).toHaveLength(200);
+    expect(term.visitHistory).toHaveLength(201);
+
+    ping.mockClear();
+    fitTo(40);
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+    await term.resizeListener();
+
+    expect(ping).toHaveBeenCalledTimes(201);
+    expect(term.history).toHaveLength(200);
+  });
+
   it("echoes but does not rerun animated or interactive commands on replay", async () => {
     // `upgrade` locks the terminal for its whole animation and `apply` opens a
     // form; replaying either on a window resize was hostile.
@@ -553,6 +698,7 @@ describe("terminal-ext", () => {
     env.window.__term = term;
     extend(term);
     term.history = ["upgrade", "apply 1", "test", "claude", "whois lee"];
+    term.visitHistory = [...term.history];
     fitTo(40);
     term.init = vi.fn();
     term.prompt = vi.fn();
@@ -857,6 +1003,7 @@ describe("terminal-ext", () => {
       "unset TEMP",
       "env",
     ];
+    term.visitHistory = [...term.history];
     term.runDeepLink = vi.fn();
     env.window.commands.export = (args) => {
       const assignment = args[0];

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserEnv } from "./helpers/browser-env";
 let env;
-function setup(hash = "") {
+function setup(hash = "", storage = null) {
   env = createBrowserEnv({
     html: '<div id="tui"></div>',
     url: "https://root.vc/" + hash,
@@ -13,7 +13,14 @@ function setup(hash = "") {
   env.window.HTMLDialogElement.prototype.close = function () {
     this.open = false;
   };
+  if (storage) {
+    Object.defineProperty(env.window, "localStorage", {
+      configurable: true,
+      value: storage,
+    });
+  }
   env.loadScripts([
+    "js/browser-storage.js",
     "config/firm.js",
     "config/portfolio.js",
     "config/team.js",
@@ -180,6 +187,88 @@ describe("TUI directory", () => {
     expect(
       doc.querySelector("[data-theme=paper]").getAttribute("aria-pressed")
     ).toBe("true");
+  });
+
+  it("applies a theme locally but preserves saved theme and history after non-quota denial", () => {
+    const history = JSON.stringify(["ping", "pwd"]);
+    const values = new Map([
+      ["rootvc.history.v1", history],
+      ["root-tui-theme", "gruvbox"],
+      ["sentinel", "keep"],
+    ]);
+    let denyNextThemeWrite = false;
+    const storage = {
+      getItem: vi.fn((key) => values.get(key) ?? null),
+      setItem: vi.fn((key, value) => {
+        if (key === "root-tui-theme" && denyNextThemeWrite) {
+          denyNextThemeWrite = false;
+          throw new DOMException("denied", "SecurityError");
+        }
+        values.set(key, String(value));
+      }),
+      removeItem: vi.fn((key) => values.delete(key)),
+    };
+    const doc = setup("#settings", storage);
+    storage.getItem.mockClear();
+    storage.setItem.mockClear();
+    denyNextThemeWrite = true;
+
+    doc.querySelector("[data-theme=paper]").click();
+
+    expect(doc.documentElement.style.colorScheme).toBe("light");
+    expect(doc.querySelector("[data-theme=paper]").getAttribute("aria-pressed")).toBe(
+      "true"
+    );
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.getItem).not.toHaveBeenCalled();
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    expect(Object.fromEntries(values)).toEqual({
+      "rootvc.history.v1": history,
+      "root-tui-theme": "gruvbox",
+      sentinel: "keep",
+    });
+
+    doc.querySelector("[data-theme=everforest]").click();
+    expect(values.get("root-tui-theme")).toBe("everforest");
+    expect(values.get("rootvc.history.v1")).toBe(history);
+  });
+
+  it("keeps the applied theme while durable history yields under shared pressure", () => {
+    const values = new Map([
+      ["rootvc.history.v1", JSON.stringify(["ping", "pwd"])],
+      ["sentinel", "keep"],
+    ]);
+    const limit = "paper".length + "keep".length;
+    const storage = {
+      getItem: vi.fn((key) => values.get(key) ?? null),
+      setItem: vi.fn((key, value) => {
+        const candidate = new Map(values);
+        candidate.set(key, String(value));
+        const size = [...candidate.values()].reduce(
+          (total, stored) => total + stored.length,
+          0
+        );
+        if (size > limit) {
+          throw new DOMException("quota exceeded", "QuotaExceededError");
+        }
+        values.clear();
+        for (const [storedKey, storedValue] of candidate) {
+          values.set(storedKey, storedValue);
+        }
+      }),
+      removeItem: vi.fn((key) => values.delete(key)),
+    };
+    const doc = setup("#settings", storage);
+
+    doc.querySelector("[data-theme=paper]").click();
+
+    expect(doc.documentElement.style.colorScheme).toBe("light");
+    expect(doc.querySelector("[data-theme=paper]").getAttribute("aria-pressed")).toBe(
+      "true"
+    );
+    expect(values.get("root-tui-theme")).toBe("paper");
+    expect(values.has("rootvc.history.v1")).toBe(false);
+    expect(values.get("sentinel")).toBe("keep");
   });
   it("keeps keyboard focus inside the application dialog and supports Escape", () => {
     const doc = setup("#apply-1");
