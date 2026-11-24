@@ -156,4 +156,67 @@ describe("browser setting storage priority", () => {
     expect(storage.setItem).toHaveBeenCalledTimes(1);
     expect(values.get(HISTORY_KEY)).toBe(history ?? undefined);
   });
+
+  it.each([
+    ["aliases", "rootvc.aliases", JSON.stringify([["p", "ping"]])],
+    [
+      "environment variables",
+      "rootvc.cli.environment.v1",
+      JSON.stringify({ version: 1, variables: [["SAVED", "kept"]] }),
+    ],
+  ])("lets the production terminal persist %s under shared pressure", (_label, key, expected) => {
+    const historyEntries = ["ping", "pwd"];
+    const history = JSON.stringify(historyEntries);
+    const storage = sharedQuotaStorage(expected.length + "keep".length + "[]".length, {
+      [HISTORY_KEY]: history,
+      sentinel: "keep",
+    });
+    env = createBrowserEnv();
+    Object.defineProperty(env.window, "localStorage", {
+      configurable: true,
+      value: storage,
+    });
+    env.loadScripts(["js/browser-storage.js", "js/terminal-ext.js"]);
+    const { extend } = env.exportValues(["extend"]);
+    const term = {};
+    extend(term);
+
+    if (key === "rootvc.aliases") {
+      expect(term.defineAlias("p", "ping")).toBe(true);
+      expect(term.getAlias("p")).toBe("ping");
+    } else {
+      expect(term.environment.set("SAVED", "kept")).toEqual({
+        ok: true,
+        value: "kept",
+      });
+      expect(term.environment.get("SAVED")).toBe("kept");
+    }
+
+    expect(storage.value(key)).toBe(expected);
+    expect(storage.value(HISTORY_KEY)).toBe("[]");
+    expect(storage.value("sentinel")).toBe("keep");
+    expect(term.history).toEqual(historyEntries);
+    expect(term.visitHistory).toEqual([]);
+  });
+
+  it("lets the production bookmark store persist under shared pressure", () => {
+    const history = JSON.stringify(["ping", "pwd"]);
+    const expected = JSON.stringify([{ name: "checkpoint", path: "~" }]);
+    const storage = sharedQuotaStorage(expected.length + "keep".length + "[]".length, {
+      [HISTORY_KEY]: history,
+      sentinel: "keep",
+    });
+    env = createBrowserEnv();
+    env.loadScripts(["js/browser-storage.js", "js/bookmarks.js"]);
+    const { createBookmarkStore } = env.exportValues(["createBookmarkStore"]);
+    const store = createBookmarkStore(storage);
+
+    expect(store.add("checkpoint", "~")).toEqual({ ok: true });
+    expect(store.lookup("checkpoint")).toEqual({ ok: true, path: "~" });
+    expect(storage.snapshot()).toEqual({
+      [HISTORY_KEY]: "[]",
+      sentinel: "keep",
+      "rootvc.bookmarks.v1": expected,
+    });
+  });
 });
