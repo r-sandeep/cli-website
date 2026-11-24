@@ -367,6 +367,107 @@ describe("saved history terminal integration", () => {
     expect(storage.value("rootvc.bookmarks.v1")).toBe("[]");
   });
 
+  it("composes quota recovery with edited recall and pending resize preparation", async () => {
+    const storage = sizeLimitedHistoryStorage(80, {
+      "rootvc.aliases": "[]",
+      "rootvc.cli.environment.v1": JSON.stringify({ version: 1, variables: [] }),
+      "rootvc.bookmarks.v1": "[]",
+    });
+    const state = createTerminal(storage); environments.push(state.env);
+    const { env, term } = state;
+    const oversized = `unknown-${"x".repeat(200)}`;
+    accelerateUpgrade(term);
+
+    await enter(term, oversized);
+    expect(term.history).toEqual([oversized]);
+    expect(storage.value(HISTORY_KEY)).toBeUndefined();
+
+    await enter(term, "ping");
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping"]);
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("ping");
+    const preventDefault = vi.fn();
+    expect(term.keyHandler({
+      altKey: false,
+      code: "KeyU",
+      ctrlKey: true,
+      key: "u",
+      metaKey: false,
+      preventDefault,
+      shiftKey: false,
+      type: "keydown",
+    })).toBe(false);
+    expect(term.currentLine).toBe("");
+    await enter(term, "upgrade");
+    expect(term.history).toEqual([oversized, "ping", "upgrade"]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping", "upgrade"]);
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("upgrade");
+    term.input("\x1b[B");
+    expect(term.currentLine).toBe("");
+
+    let releasePreparation;
+    const preparation = new Promise((resolve) => { releasePreparation = resolve; });
+    term.preloadCommandAssets = vi.fn((cmd) =>
+      cmd === "ping" ? preparation : Promise.resolve()
+    );
+    let nextCols = 40;
+    env.window.fitAddon.fit.mockImplementation(() => { term.cols = nextCols; });
+    const pongsBeforePending = term.writeln.mock.calls.flat().filter((line) => line === "pong").length;
+
+    for (const character of "ping") term.input(character);
+    term.input("\r");
+    await vi.waitFor(() => expect(term.preloadCommandAssets).toHaveBeenCalledWith("ping", []));
+    expect(term.history).toEqual([oversized, "ping", "upgrade", "ping"]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping", "upgrade", "ping"]);
+    expect(term.visitHistory).toEqual([]);
+
+    await term.resizeListener();
+    nextCols = 100;
+    await term.resizeListener();
+    expect(term.visitHistory).toEqual([]);
+    expect(term.writeln.mock.calls.flat().filter((line) => line === "pong")).toHaveLength(
+      pongsBeforePending
+    );
+
+    releasePreparation();
+    await vi.waitFor(() => expect(term.busy).toBe(false));
+    expect(term.visitHistory).toEqual(["ping"]);
+    expect(term.writeln.mock.calls.flat().filter((line) => line === "pong")).toHaveLength(
+      pongsBeforePending + 1
+    );
+
+    await enter(term, "pwd");
+    await enter(term, "history");
+    const durable = ["ping", "upgrade", "ping", "pwd", "history"];
+    expect(term.history).toEqual([oversized, ...durable]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(durable);
+    expect(term.writeln.mock.calls.flat().join("\n")).toContain("/home/guest");
+    expect(env.window.dataLayer.map(({ command, args }) => ({ command, args }))).toEqual([
+      { command: oversized, args: "" },
+      { command: "ping", args: "" },
+      { command: "upgrade", args: "" },
+      { command: "ping", args: "" },
+      { command: "pwd", args: "" },
+      { command: "history", args: "" },
+    ]);
+
+    const returning = createTerminal(storage); environments.push(returning.env);
+    expect(returning.term.history).toEqual(durable);
+    await enter(returning.term, "history");
+    const restoredWithListing = [...durable, "history"];
+    expect(returning.term.history).toEqual(restoredWithListing);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(restoredWithListing);
+    restoredWithListing.forEach((line, index) => {
+      expect(returning.term.writeln).toHaveBeenCalledWith(`${1000 + index}  ${line}`);
+    });
+    expect(returning.term.busy).toBe(false);
+    expect(returning.term.locked).toBe(false);
+  });
+
   it.each(["clear", "zsh", "upgrade"])(
     "%s resets display replay while retaining bounded recall and durable history",
     async (resetCommand) => {
