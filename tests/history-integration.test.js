@@ -468,6 +468,71 @@ describe("saved history terminal integration", () => {
     expect(returning.term.locked).toBe(false);
   });
 
+  it("keeps production history usable after a non-quota setting denial", async () => {
+    const savedAliases = JSON.stringify([["old", "pwd"]]);
+    const storage = sharedStorage({
+      [HISTORY_KEY]: JSON.stringify(["saved"]),
+      "rootvc.aliases": savedAliases,
+      "rootvc.cli.environment.v1": JSON.stringify({ version: 1, variables: [] }),
+      "rootvc.bookmarks.v1": "[]",
+      sentinel: "keep",
+    });
+    const state = createTerminal(storage); environments.push(state.env);
+    const { env, term } = state;
+    const commit = storage.setItem.getMockImplementation();
+    let denyAlias = true;
+    let aliasAttempts = 0;
+    storage.setItem.mockImplementation((key, value) => {
+      if (key === "rootvc.aliases") {
+        aliasAttempts += 1;
+        if (denyAlias) {
+          denyAlias = false;
+          throw new env.window.DOMException("denied", "SecurityError");
+        }
+      }
+      commit(key, value);
+    });
+
+    await enter(term, "alias p=ping");
+    expect(aliasAttempts).toBe(1);
+    expect(term.getAliases()).toEqual([["old", "pwd"]]);
+    expect(storage.value("rootvc.aliases")).toBe(savedAliases);
+    expect(storage.value("sentinel")).toBe("keep");
+    expect(term.writeln.mock.calls.flat().join("\n")).toContain(
+      "alias: unable to save aliases; no changes were made"
+    );
+
+    await enter(term, "ping");
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("ping");
+    term.input("\r");
+    await vi.waitFor(() => expect(term.busy).toBe(false));
+    await enter(term, "history");
+
+    const expected = ["saved", "alias p=ping", "ping", "ping", "history"];
+    expect(term.history).toEqual(expected);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(expected);
+    expected.forEach((line, index) => {
+      expect(term.writeln).toHaveBeenCalledWith(`${1000 + index}  ${line}`);
+    });
+    expect(term.writeln.mock.calls.flat().filter((line) => line === "pong")).toHaveLength(2);
+
+    env.window.fitAddon.fit.mockImplementation(() => { term.cols = 40; });
+    await term.resizeListener();
+    expect(term.history).toEqual(expected);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(expected);
+
+    const returning = createTerminal(storage); environments.push(returning.env);
+    expect(returning.term.history).toEqual(expected);
+    expect(returning.term.visitHistory).toEqual([]);
+    expect(returning.term.getAliases()).toEqual([["old", "pwd"]]);
+    await enter(returning.term, "p");
+    expect(returning.term.writeln.mock.calls.flat().join("\n")).toContain(
+      "Command not found: p"
+    );
+    expect(returning.term.busy).toBe(false);
+  });
+
   it.each(["clear", "zsh", "upgrade"])(
     "%s resets display replay while retaining bounded recall and durable history",
     async (resetCommand) => {
