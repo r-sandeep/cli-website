@@ -211,7 +211,18 @@ const extend = (term) => {
   }
 
   let aliasPersistenceEnabled = true;
+  let currentVisitReplayIndex = -1;
+  let replaySettingFailure = false;
+  let visitReplaySettingFailures = [];
+  const markVisitSettingFailure = () => {
+    if (currentVisitReplayIndex >= 0) {
+      visitReplaySettingFailures[currentVisitReplayIndex] = true;
+    }
+  };
   const persistAliases = (nextAliases) => {
+    if (replaySettingFailure) {
+      throw new Error("Alias persistence failed during the original submission");
+    }
     if (!aliasPersistenceEnabled) return;
     const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
       compareAliasNames(left, right)
@@ -234,7 +245,12 @@ const extend = (term) => {
 
     const nextAliases = new Map(userAliases);
     nextAliases.set(name, value);
-    persistAliases(nextAliases);
+    try {
+      persistAliases(nextAliases);
+    } catch (error) {
+      markVisitSettingFailure();
+      throw error;
+    }
     userAliases = nextAliases;
     return true;
   };
@@ -246,7 +262,12 @@ const extend = (term) => {
 
     const nextAliases = new Map(userAliases);
     nextAliases.delete(name);
-    persistAliases(nextAliases);
+    try {
+      persistAliases(nextAliases);
+    } catch (error) {
+      markVisitSettingFailure();
+      throw error;
+    }
     userAliases = nextAliases;
     return true;
   };
@@ -311,6 +332,13 @@ const extend = (term) => {
   const environmentResult = (ok, code, message = "") => ({ ok, code, message });
   let environmentPersistenceEnabled = true;
   const persistEnvironmentCandidate = (candidate) => {
+    if (replaySettingFailure) {
+      return environmentResult(
+        false,
+        "storage",
+        "Environment variables could not be saved. Storage is unavailable."
+      );
+    }
     if (!environmentPersistenceEnabled) {
       environmentVariables = candidate;
       return environmentResult(true, "updated");
@@ -320,6 +348,7 @@ const extend = (term) => {
       const serialized = serializeEnvironment(candidate);
       _writeTerminalSetting(window.localStorage, ENV_STORAGE_KEY, serialized);
     } catch (_error) {
+      markVisitSettingFailure();
       return environmentResult(
         false,
         "storage",
@@ -786,6 +815,8 @@ const extend = (term) => {
         // already rendered during the current visit. Keep the whole visit so a
         // later column-changing resize does not silently drop older output.
         term.visitHistory = [...term.visitHistory, parsed.line];
+        visitReplaySettingFailures.push(false);
+        currentVisitReplayIndex = term.visitHistory.length - 1;
       }
     };
     // User aliases expand exactly once, on the interactive line and before
@@ -893,6 +924,7 @@ const extend = (term) => {
       console.error("Command preparation failed", error);
       term.stylePrint("Command failed to load required assets. Please try again.");
     } finally {
+      currentVisitReplayIndex = -1;
       if (settings.promptAfter && exitStatus != 1 && parsed.cmd != "upgrade") {
         term.prompt();
         term.clearCurrentLine(true);
@@ -945,7 +977,9 @@ const extend = (term) => {
     // pipelines apply exactly as they did interactively, while alias and
     // environment mutations replayed from history never persist a second time.
     await replayWithoutSettingSideEffects(async () => {
-      for (const c of term.visitHistory) {
+      for (let index = 0; index < term.visitHistory.length; index += 1) {
+        const c = term.visitHistory[index];
+        replaySettingFailure = visitReplaySettingFailures[index] === true;
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
           await term.executeCommandLine(c, {
@@ -958,6 +992,7 @@ const extend = (term) => {
           });
         }
       }
+      replaySettingFailure = false;
     });
     // A form (collectInput) still owns the keyboard, so put its question and
     // what has been typed back on screen rather than a misleading shell prompt.
@@ -1011,6 +1046,7 @@ const extend = (term) => {
     term.user = user;
     if (!preserveVisitHistory) {
       term.visitHistory = [];
+      visitReplaySettingFailures = [];
     }
     term.focus();
   };

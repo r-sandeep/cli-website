@@ -519,6 +519,8 @@ describe("saved history terminal integration", () => {
 
     env.window.fitAddon.fit.mockImplementation(() => { term.cols = 40; });
     await term.resizeListener();
+    expect(term.writeln.mock.calls.flat().filter((line) => line === "pong")).toHaveLength(4);
+    expect(term.getAliases()).toEqual([["old", "pwd"]]);
     expect(term.history).toEqual(expected);
     expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(expected);
 
