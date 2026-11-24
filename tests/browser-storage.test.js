@@ -175,7 +175,7 @@ describe("browser setting storage priority", () => {
     }
   });
 
-  it("restores exact history after a failed retry and rethrows the original error", () => {
+  it("leaves yielded history released after a failed retry and rethrows the original error", () => {
     const history = '["ping", "pwd"]';
     const storage = sharedQuotaStorage(history.length + 5, {
       [HISTORY_KEY]: history,
@@ -192,7 +192,6 @@ describe("browser setting storage priority", () => {
 
     expect(error).toMatchObject({ message: "quota exceeded" });
     expect(storage.snapshot()).toEqual({
-      [HISTORY_KEY]: history,
       sentinel: "keep",
     });
   });
@@ -237,6 +236,63 @@ describe("browser setting storage priority", () => {
 
     historyStore.append("after");
     expect(JSON.parse(values.get(HISTORY_KEY))).toEqual(["after"]);
+  });
+
+  it("does not restore stale history across independent page realms", () => {
+    const original = JSON.stringify(["old"]);
+    const values = new Map([[HISTORY_KEY, original]]);
+    let outerAttempts = 0;
+    let innerAttempts = 0;
+    let tabBHistory;
+    const outerQuota = new DOMException("outer full", "QuotaExceededError");
+    const innerQuota = new DOMException("inner full", "QuotaExceededError");
+    const storage = {
+      getItem: vi.fn((key) => values.get(key) ?? null),
+      removeItem: vi.fn((key) => values.delete(key)),
+      setItem: vi.fn((key, value) => {
+        if (key === "outer") {
+          if (outerAttempts++ === 0) throw outerQuota;
+          tabBHistory.append("newer");
+          tabB.writeBrowserSetting(storage, "inner", "kept");
+          throw new Error("outer retry denied");
+        }
+        if (key === "inner" && innerAttempts++ === 0) throw innerQuota;
+        values.set(key, String(value));
+      }),
+    };
+    const tabAEnv = createBrowserEnv();
+    const tabBEnv = createBrowserEnv();
+    Object.defineProperty(tabAEnv.window, "localStorage", {
+      configurable: true,
+      value: storage,
+    });
+    Object.defineProperty(tabBEnv.window, "localStorage", {
+      configurable: true,
+      value: storage,
+    });
+    tabAEnv.loadScripts(["js/browser-storage.js", "js/terminal-ext.js"]);
+    tabBEnv.loadScripts(["js/browser-storage.js", "js/terminal-ext.js"]);
+    const tabA = tabAEnv.exportValues(["writeBrowserSetting"]);
+    const tabB = tabBEnv.exportValues([
+      "writeBrowserSetting",
+      "createHistoryStore",
+    ]);
+    tabBHistory = tabB.createHistoryStore();
+
+    try {
+      expect(() =>
+        tabA.writeBrowserSetting(storage, "outer", "candidate")
+      ).toThrow(outerQuota);
+      expect(tabBHistory.snapshot()).toEqual(["old", "newer"]);
+      expect(values.get("inner")).toBe("kept");
+      expect(values.has(HISTORY_KEY)).toBe(false);
+
+      tabBHistory.append("after");
+      expect(JSON.parse(values.get(HISTORY_KEY))).toEqual(["after"]);
+    } finally {
+      tabAEnv.cleanup();
+      tabBEnv.cleanup();
+    }
   });
 
   it("does not overwrite newer history during failed-setting rollback", () => {

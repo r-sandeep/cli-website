@@ -38,7 +38,6 @@ const _parseCommandLine = (line) => {
 };
 
 const HISTORY_LIMIT = 200;
-const _terminalSettingRecoveryOwners = new WeakMap();
 
 // Production bundles load browser-storage.js first. Keep terminal-ext.js
 // independently executable for the long-standing direct-script integration
@@ -58,8 +57,6 @@ const _writeTerminalSetting =
             throw originalError;
           }
 
-          const recoveryOwner = {};
-          _terminalSettingRecoveryOwners.set(storage, recoveryOwner);
           let originalHistory;
           try {
             originalHistory = storage.getItem("rootvc.history.v1");
@@ -82,16 +79,8 @@ const _writeTerminalSetting =
           try {
             storage.setItem(targetKey, serializedCandidate);
           } catch (_) {
-            try {
-              const yieldedHistory =
-                typeof storage.removeItem === "function" ? null : "";
-              if (
-                _terminalSettingRecoveryOwners.get(storage) === recoveryOwner &&
-                storage.getItem("rootvc.history.v1") === yieldedHistory
-              ) {
-                storage.setItem("rootvc.history.v1", originalHistory);
-              }
-            } catch (_) {}
+            // Never restore a page-local snapshot after yielding shared
+            // durable history; another page may have completed a newer write.
             throw originalError;
           }
         }

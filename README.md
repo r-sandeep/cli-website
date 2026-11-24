@@ -47,7 +47,9 @@ command itself.
 Saved aliases, environment variables, bookmarks, and appearance settings take
 priority when browser storage is full. If one of those settings fits only after
 saved history is removed, the browser discards the durable history list while
-the current tab keeps its complete bounded recall history in memory.
+the current tab keeps its complete bounded recall history in memory. If the
+setting retry also fails, the released durable history is not restored, while
+active tabs retain their in-memory recall history.
 
 Open tabs keep independent recall views. Before a tab saves a command, it
 rereads durable history so sequential saves from other tabs are retained;
