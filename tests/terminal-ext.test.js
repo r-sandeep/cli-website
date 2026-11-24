@@ -545,6 +545,34 @@ describe("terminal-ext", () => {
     expect(whois).toHaveBeenCalledWith(["lee"]);
   });
 
+  it("replays every rendered command after a visit exceeds the saved-history limit", async () => {
+    const ping = vi.fn();
+    const { extend } = loadTerminalExt({ commands: { ping } });
+    const term = createTerm();
+    env.window.__term = term;
+    extend(term);
+
+    for (let index = 0; index < 201; index += 1) {
+      await term.executeCommandLine("ping", {
+        promptAfter: false,
+        showLeadingNewline: false,
+        trackAnalytics: false,
+        scrollAfter: false,
+      });
+    }
+    expect(term.history).toHaveLength(200);
+    expect(term.visitHistory).toHaveLength(201);
+
+    ping.mockClear();
+    fitTo(40);
+    term.init = vi.fn();
+    term.prompt = vi.fn();
+    await term.resizeListener();
+
+    expect(ping).toHaveBeenCalledTimes(201);
+    expect(term.history).toHaveLength(200);
+  });
+
   it("echoes but does not rerun animated or interactive commands on replay", async () => {
     // `upgrade` locks the terminal for its whole animation and `apply` opens a
     // form; replaying either on a window resize was hostile.

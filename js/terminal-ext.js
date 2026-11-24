@@ -718,7 +718,10 @@ const extend = (term) => {
     }
     const registerVisitHistory = () => {
       if (settings.addToHistory && parsed.line.length > 0) {
-        term.visitHistory = _boundedHistory([...term.visitHistory, parsed.line]);
+        // Saved recall history is bounded, but this list represents everything
+        // already rendered during the current visit. Keep the whole visit so a
+        // later column-changing resize does not silently drop older output.
+        term.visitHistory = [...term.visitHistory, parsed.line];
       }
     };
     // User aliases expand exactly once, on the interactive line and before
