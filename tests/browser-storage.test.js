@@ -16,7 +16,9 @@ function sharedQuotaStorage(limit, initial = {}) {
         (total, stored) => total + stored.length,
         0
       );
-      if (size > limit) throw new Error("quota exceeded");
+      if (size > limit) {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      }
       values.clear();
       for (const [storedKey, storedValue] of candidate) {
         values.set(storedKey, storedValue);
@@ -116,13 +118,19 @@ describe("browser setting storage priority", () => {
     const newer = JSON.stringify(["newer"]);
     const values = new Map([[HISTORY_KEY, original]]);
     let targetAttempts = 0;
+    const initialQuota = new DOMException(
+      "target exceeds capacity",
+      "QuotaExceededError"
+    );
+    const retryFailure = new Error("target denied after recovery");
     const storage = {
       getItem: vi.fn((key) => values.get(key) ?? null),
       setItem: vi.fn((key, value) => {
         if (key === "rootvc.aliases") {
           targetAttempts += 1;
-          if (targetAttempts === 2) values.set(HISTORY_KEY, newer);
-          throw new Error("target denied");
+          if (targetAttempts === 1) throw initialQuota;
+          values.set(HISTORY_KEY, newer);
+          throw retryFailure;
         }
         values.set(key, String(value));
       }),

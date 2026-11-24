@@ -49,6 +49,14 @@ const _writeTerminalSetting =
         try {
           storage.setItem(targetKey, serializedCandidate);
         } catch (originalError) {
+          const errorName = originalError?.name;
+          if (
+            errorName !== "QuotaExceededError" &&
+            errorName !== "NS_ERROR_DOM_QUOTA_REACHED"
+          ) {
+            throw originalError;
+          }
+
           let originalHistory;
           try {
             originalHistory = storage.getItem("rootvc.history.v1");

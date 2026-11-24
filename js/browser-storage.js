@@ -25,6 +25,14 @@ function writeBrowserSetting(storage, targetKey, serializedCandidate) {
     storage.setItem(targetKey, serializedCandidate);
     return;
   } catch (originalError) {
+    const errorName = originalError?.name;
+    if (
+      errorName !== "QuotaExceededError" &&
+      errorName !== "NS_ERROR_DOM_QUOTA_REACHED"
+    ) {
+      throw originalError;
+    }
+
     let originalHistory;
     try {
       originalHistory = storage.getItem(ROOTVC_HISTORY_STORAGE_KEY);
