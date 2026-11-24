@@ -194,7 +194,7 @@ describe("TUI directory", () => {
       ["rootvc.history.v1", JSON.stringify(["ping", "pwd"])],
       ["sentinel", "keep"],
     ]);
-    const limit = "paper".length + "keep".length + "[]".length;
+    const limit = "paper".length + "keep".length;
     const storage = {
       getItem: vi.fn((key) => values.get(key) ?? null),
       setItem: vi.fn((key, value) => {
@@ -210,6 +210,7 @@ describe("TUI directory", () => {
           values.set(storedKey, storedValue);
         }
       }),
+      removeItem: vi.fn((key) => values.delete(key)),
     };
     const doc = setup("#settings", storage);
 
@@ -220,7 +221,7 @@ describe("TUI directory", () => {
       "true"
     );
     expect(values.get("root-tui-theme")).toBe("paper");
-    expect(values.get("rootvc.history.v1")).toBe("[]");
+    expect(values.has("rootvc.history.v1")).toBe(false);
     expect(values.get("sentinel")).toBe("keep");
   });
   it("keeps keyboard focus inside the application dialog and supports Escape", () => {

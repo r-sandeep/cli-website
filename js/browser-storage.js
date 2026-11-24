@@ -34,8 +34,14 @@ function writeBrowserSetting(storage, targetKey, serializedCandidate) {
 
     if (!_hasYieldableHistory(originalHistory)) throw originalError;
 
+    // Release all history bytes so a setting that exactly fits can succeed.
+    // Older Storage-compatible seams may not expose removeItem; an empty
+    // string is the equivalent zero-byte tombstone and restores as empty.
+    const canRemove = typeof storage.removeItem === "function";
+    const yieldedHistory = canRemove ? null : "";
     try {
-      storage.setItem(ROOTVC_HISTORY_STORAGE_KEY, ROOTVC_EMPTY_HISTORY);
+      if (canRemove) storage.removeItem(ROOTVC_HISTORY_STORAGE_KEY);
+      else storage.setItem(ROOTVC_HISTORY_STORAGE_KEY, yieldedHistory);
     } catch (_) {
       throw originalError;
     }
@@ -47,7 +53,7 @@ function writeBrowserSetting(storage, targetKey, serializedCandidate) {
       // Restore only while this recovery still owns the temporary empty value.
       // A newer history writer must never be replaced by stale bytes.
       try {
-        if (storage.getItem(ROOTVC_HISTORY_STORAGE_KEY) === ROOTVC_EMPTY_HISTORY) {
+        if (storage.getItem(ROOTVC_HISTORY_STORAGE_KEY) === yieldedHistory) {
           storage.setItem(ROOTVC_HISTORY_STORAGE_KEY, originalHistory);
         }
       } catch (_) {

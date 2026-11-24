@@ -22,6 +22,7 @@ function sharedQuotaStorage(limit, initial = {}) {
         values.set(storedKey, storedValue);
       }
     }),
+    removeItem: vi.fn((key) => values.delete(key)),
     snapshot: () => Object.fromEntries(values),
     value: (key) => values.get(key),
   };
@@ -64,7 +65,7 @@ describe("browser setting storage priority", () => {
   ])("handles %s without a fixed history reserve", (_label, history, yields) => {
     const setting = JSON.stringify([["p", "ping"]]);
     const sentinel = "keep";
-    const limit = setting.length + sentinel.length + "[]".length;
+    const limit = setting.length + sentinel.length;
     const storage = sharedQuotaStorage(limit, {
       [HISTORY_KEY]: history,
       sentinel,
@@ -74,7 +75,6 @@ describe("browser setting storage priority", () => {
     if (yields) {
       write(storage, "rootvc.aliases", setting);
       expect(storage.snapshot()).toEqual({
-        [HISTORY_KEY]: "[]",
         sentinel,
         "rootvc.aliases": setting,
       });
@@ -167,7 +167,7 @@ describe("browser setting storage priority", () => {
   ])("lets the production terminal persist %s under shared pressure", (_label, key, expected) => {
     const historyEntries = ["ping", "pwd"];
     const history = JSON.stringify(historyEntries);
-    const storage = sharedQuotaStorage(expected.length + "keep".length + "[]".length, {
+    const storage = sharedQuotaStorage(expected.length + "keep".length, {
       [HISTORY_KEY]: history,
       sentinel: "keep",
     });
@@ -194,7 +194,7 @@ describe("browser setting storage priority", () => {
     }
 
     expect(storage.value(key)).toBe(expected);
-    expect(storage.value(HISTORY_KEY)).toBe("[]");
+    expect(storage.value(HISTORY_KEY)).toBeUndefined();
     expect(storage.value("sentinel")).toBe("keep");
     expect(term.history).toEqual(historyEntries);
     expect(term.visitHistory).toEqual([]);
@@ -203,7 +203,7 @@ describe("browser setting storage priority", () => {
   it("lets the production bookmark store persist under shared pressure", () => {
     const history = JSON.stringify(["ping", "pwd"]);
     const expected = JSON.stringify([["checkpoint", "~"]]);
-    const storage = sharedQuotaStorage(expected.length + "keep".length + "[]".length, {
+    const storage = sharedQuotaStorage(expected.length + "keep".length, {
       [HISTORY_KEY]: history,
       sentinel: "keep",
     });
@@ -215,7 +215,6 @@ describe("browser setting storage priority", () => {
     expect(store.add("checkpoint", "~")).toEqual({ ok: true });
     expect(store.lookup("checkpoint")).toEqual({ ok: true, path: "~" });
     expect(storage.snapshot()).toEqual({
-      [HISTORY_KEY]: "[]",
       sentinel: "keep",
       "rootvc.bookmarks.v1": expected,
     });

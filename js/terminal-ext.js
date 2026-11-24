@@ -60,7 +60,11 @@ const _writeTerminalSetting =
             ) {
               throw originalError;
             }
-            storage.setItem("rootvc.history.v1", "[]");
+            if (typeof storage.removeItem === "function") {
+              storage.removeItem("rootvc.history.v1");
+            } else {
+              storage.setItem("rootvc.history.v1", "");
+            }
           } catch (_) {
             throw originalError;
           }
@@ -68,7 +72,9 @@ const _writeTerminalSetting =
             storage.setItem(targetKey, serializedCandidate);
           } catch (_) {
             try {
-              if (storage.getItem("rootvc.history.v1") === "[]") {
+              const yieldedHistory =
+                typeof storage.removeItem === "function" ? null : "";
+              if (storage.getItem("rootvc.history.v1") === yieldedHistory) {
                 storage.setItem("rootvc.history.v1", originalHistory);
               }
             } catch (_) {}
