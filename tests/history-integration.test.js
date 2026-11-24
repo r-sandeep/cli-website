@@ -12,6 +12,18 @@ function sharedStorage(initial = {}) {
   };
 }
 
+function sizeLimitedHistoryStorage(limit, initial = {}) {
+  const storage = sharedStorage(initial);
+  const commit = storage.setItem.getMockImplementation();
+  storage.setItem.mockImplementation((key, value) => {
+    if (key === HISTORY_KEY && String(value).length > limit) {
+      throw new Error("quota exceeded");
+    }
+    commit(key, value);
+  });
+  return storage;
+}
+
 function createTerm() {
   const term = {
     VERSION: 4,
@@ -218,6 +230,52 @@ describe("saved history terminal integration", () => {
     expect(state.term.locked).toBe(false);
     expect(state.term.currentLine).toBe("");
     expect(state.term.writeln.mock.calls.flat().join("\n")).toContain("pong");
+  });
+
+  it("keeps failed oversized input in this visit while later terminal submissions persist", async () => {
+    const storage = sizeLimitedHistoryStorage(80, {
+      "rootvc.aliases": "[]",
+      "rootvc.cli.environment.v1": JSON.stringify({ version: 1, variables: [] }),
+      "rootvc.bookmarks.v1": "[]",
+    });
+    const first = createTerminal(storage); environments.push(first.env);
+    const oversized = `unknown-${"x".repeat(200)}`;
+
+    await enter(first.term, oversized);
+    expect(first.term.history).toEqual([oversized]);
+    expect(storage.value(HISTORY_KEY)).toBeUndefined();
+    const failureOutput = first.term.writeln.mock.calls.flat().join("\n");
+    expect(failureOutput).toContain("Command not found:");
+    expect(failureOutput).toContain(oversized.slice(0, 70));
+    expect(failureOutput).toContain("Try 'help' to get");
+    expect(failureOutput).toContain("started.");
+
+    await enter(first.term, "ping");
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping"]);
+    first.term.input("\x1b[A");
+    expect(first.term.currentLine).toBe("ping");
+    first.term.input("\r");
+    await vi.waitFor(() => expect(first.term.busy).toBe(false));
+    await enter(first.term, "history");
+
+    expect(first.term.history).toEqual([oversized, "ping", "ping", "history"]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping", "ping", "history"]);
+    expect(first.term.writeln.mock.calls.flat().join("\n")).toContain("pong");
+
+    const returning = createTerminal(storage); environments.push(returning.env);
+    expect(returning.term.history).toEqual(["ping", "ping", "history"]);
+    returning.term.input("\x1b[A");
+    expect(returning.term.currentLine).toBe("history");
+    returning.term.input("\r");
+    await vi.waitFor(() => expect(returning.term.busy).toBe(false));
+    expect(returning.term.writeln).toHaveBeenCalledWith("1000  ping");
+    expect(returning.term.writeln).toHaveBeenCalledWith("1001  ping");
+    expect(returning.term.writeln).toHaveBeenCalledWith("1002  history");
+    expect(returning.term.writeln).toHaveBeenCalledWith("1003  history");
+    expect(returning.term.busy).toBe(false);
+    expect(returning.term.locked).toBe(false);
+    expect(storage.value("rootvc.aliases")).toBe("[]");
+    expect(storage.value("rootvc.bookmarks.v1")).toBe("[]");
   });
 
   it.each(["clear", "zsh", "upgrade"])(

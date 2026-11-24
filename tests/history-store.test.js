@@ -16,6 +16,18 @@ function memoryStorage(initial = {}) {
   };
 }
 
+function sizeLimitedHistoryStorage(limit, initial = {}) {
+  const storage = memoryStorage(initial);
+  const commit = storage.setItem.getMockImplementation();
+  storage.setItem.mockImplementation((key, value) => {
+    if (key === HISTORY_KEY && String(value).length > limit) {
+      throw new Error("quota exceeded");
+    }
+    commit(key, value);
+  });
+  return storage;
+}
+
 function loadHistoryStore(storage = memoryStorage()) {
   env = createBrowserEnv();
   Object.defineProperty(env.window, "localStorage", {
@@ -179,6 +191,76 @@ describe("browser-local history store", () => {
     expect(storage.value(HISTORY_KEY)).toBe(persistedBeforeFailure);
     expect(storage.value("rootvc.aliases")).toBe("alias-sentinel");
     expect(storage.value("rootvc.cli.environment.v1")).toBe("environment-sentinel");
+    expect(storage.value("rootvc.bookmarks.v1")).toBe("bookmark-sentinel");
+  });
+
+  it.each([
+    ["empty durable history", [], ["ping"], ["ping", "pwd"]],
+    ["seeded durable history", ["pwd"], ["pwd", "ping"], ["pwd", "ping", "pwd"]],
+  ])(
+    "does not retry an oversized failed entry when a later command fits with %s",
+    (_label, seeded, afterPing, afterPwd) => {
+      const storage = sizeLimitedHistoryStorage(80, {
+        ...(seeded.length ? { [HISTORY_KEY]: JSON.stringify(seeded) } : {}),
+        "rootvc.aliases": "alias-sentinel",
+        "rootvc.cli.environment.v1": "environment-sentinel",
+        "rootvc.bookmarks.v1": "bookmark-sentinel",
+      });
+      const { createHistoryStore } = loadHistoryStore(storage);
+      const store = createHistoryStore();
+      const oversized = "x".repeat(200);
+
+      store.append(oversized);
+      expect(store.snapshot()).toEqual([...seeded, oversized]);
+      expect(storage.value(HISTORY_KEY)).toBe(
+        seeded.length ? JSON.stringify(seeded) : undefined
+      );
+
+      store.append("ping");
+      expect(store.snapshot()).toEqual([...seeded, oversized, "ping"]);
+      expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(afterPing);
+      expect(createHistoryStore().snapshot()).toEqual(afterPing);
+
+      store.append("pwd");
+      expect(store.snapshot()).toEqual([...seeded, oversized, "ping", "pwd"]);
+      expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(afterPwd);
+      expect(createHistoryStore().snapshot()).toEqual(afterPwd);
+      expect(storage.value("rootvc.aliases")).toBe("alias-sentinel");
+      expect(storage.value("rootvc.cli.environment.v1")).toBe("environment-sentinel");
+      expect(storage.value("rootvc.bookmarks.v1")).toBe("bookmark-sentinel");
+    }
+  );
+
+  it("recovers against completed tab writes at capacity without importing them into the active view", () => {
+    const seeded = Array.from({ length: 200 }, (_, index) =>
+      `saved-${String(index).padStart(3, "0")}`
+    );
+    const serializedSeed = JSON.stringify(seeded);
+    const storage = sizeLimitedHistoryStorage(serializedSeed.length + 100, {
+      [HISTORY_KEY]: serializedSeed,
+      "rootvc.aliases": "alias-sentinel",
+      "rootvc.bookmarks.v1": "bookmark-sentinel",
+    });
+    const { createHistoryStore } = loadHistoryStore(storage);
+    const tabA = createHistoryStore();
+    const tabB = createHistoryStore();
+    const oversized = "x".repeat(500);
+
+    tabA.append(oversized);
+    expect(tabA.snapshot()).toEqual([...seeded.slice(1), oversized]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(seeded);
+
+    tabB.append("B-short");
+    expect(tabB.snapshot()).toEqual([...seeded.slice(1), "B-short"]);
+    tabA.append("A-short");
+
+    const expectedDurable = [...seeded.slice(2), "B-short", "A-short"];
+    expect(createHistoryStore().snapshot()).toEqual(expectedDurable);
+    expect(tabA.snapshot()).toEqual([
+      ...seeded.slice(2), oversized, "A-short",
+    ]);
+    expect(tabA.snapshot()).not.toContain("B-short");
+    expect(storage.value("rootvc.aliases")).toBe("alias-sentinel");
     expect(storage.value("rootvc.bookmarks.v1")).toBe("bookmark-sentinel");
   });
 

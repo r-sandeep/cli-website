@@ -61,7 +61,6 @@ const _parseStoredHistory = (serialized) => {
 // memory is updated first and remains usable if access or quota checks fail.
 const createHistoryStore = () => {
   let history = [];
-  let pending = [];
   let storage = null;
 
   try {
@@ -82,7 +81,6 @@ const createHistoryStore = () => {
     }
 
     history = _boundedHistory([...history, command]);
-    pending = _boundedHistory([...pending, command]);
 
     if (!storage) return snapshot();
 
@@ -92,11 +90,12 @@ const createHistoryStore = () => {
       );
       storage.setItem(
         HISTORY_STORAGE_KEY,
-        JSON.stringify(_boundedHistory([...durable, ...pending]))
+        JSON.stringify(_boundedHistory([...durable, command]))
       );
-      pending = [];
     } catch (error) {
-      // Retain pending entries in memory so a later append can retry them.
+      // Keep the failed entry in this visit's memory, but do not retry it with
+      // a later command. A later append gets a fresh durable snapshot so a
+      // fitting command can recover without overwriting completed tab writes.
     }
 
     return snapshot();
