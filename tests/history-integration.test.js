@@ -490,11 +490,11 @@ describe("saved history terminal integration", () => {
   });
 
   it.each([
-    ["standalone", "ping", ["ping", []]],
-    ["valid pipeline", "ping | wc -l", ["ping"]],
+    ["standalone", "ping", ["ping", []], "pong"],
+    ["valid pipeline", "ping | wc -l", ["ping"], "1"],
   ])(
     "saves pending %s preparation without exposing it to resize replay",
-    async (_label, line, preloadArgs) => {
+    async (_label, line, preloadArgs, expectedOutput) => {
       const storage = sharedStorage();
       const state = createTerminal(storage); environments.push(state.env);
       const { env, term } = state;
@@ -506,7 +506,9 @@ describe("saved history terminal integration", () => {
       let nextCols = 40;
       env.window.fitAddon.fit.mockImplementation(() => { term.cols = nextCols; });
 
-      const execution = term.executeCommandLine(line);
+      for (const character of line) term.input(character);
+      term.input("\r");
+      await vi.waitFor(() => expect(term.preloadCommandAssets).toHaveBeenCalled());
       expect(term.history).toEqual([line]);
       expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual([line]);
       expect(term.visitHistory).toEqual([]);
@@ -519,10 +521,10 @@ describe("saved history terminal integration", () => {
       expect(term.writeln.mock.calls.flat().join("\n")).not.toContain("pong");
 
       releasePreparation();
-      await execution;
+      await vi.waitFor(() => expect(term.busy).toBe(false));
       expect(term.preloadCommandAssets).toHaveBeenCalledWith(...preloadArgs);
       expect(term.visitHistory).toEqual([line]);
-      expect(term.writeln.mock.calls.flat().filter((line) => line === "pong")).toHaveLength(1);
+      expect(term.writeln.mock.calls.flat().filter((line) => line === expectedOutput)).toHaveLength(1);
       expect(env.window.dataLayer).toEqual([
         { args: line === "ping" ? "" : "| wc -l", command: "ping", event: "commandSent" },
       ]);
@@ -537,12 +539,16 @@ describe("saved history terminal integration", () => {
     const state = createTerminal(storage); environments.push(state.env);
     const { env, term } = state;
     let rejectPreparation;
-    term.preloadCommandAssets = vi.fn((cmd) =>
-      cmd === "ping" ? new Promise((_, reject) => { rejectPreparation = reject; }) : Promise.resolve()
-    );
+    let pingPreparations = 0;
+    term.preloadCommandAssets = vi.fn((cmd) => {
+      if (cmd !== "ping" || pingPreparations++ > 0) return Promise.resolve();
+      return new Promise((_, reject) => { rejectPreparation = reject; });
+    });
     env.window.fitAddon.fit.mockImplementation(() => { term.cols = 40; });
 
-    const execution = term.executeCommandLine("ping");
+    for (const character of "ping") term.input(character);
+    term.input("\r");
+    await vi.waitFor(() => expect(term.preloadCommandAssets).toHaveBeenCalled());
     expect(term.history).toEqual(["ping"]);
     expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping"]);
     expect(term.visitHistory).toEqual([]);
@@ -551,20 +557,19 @@ describe("saved history terminal integration", () => {
     expect(term.writeln.mock.calls.flat().join("\n")).not.toContain("pong");
 
     rejectPreparation(new Error("asset unavailable"));
-    await execution;
+    await vi.waitFor(() => expect(term.busy).toBe(false));
     expect(term.visitHistory).toEqual([]);
-    expect(term.writeln.mock.calls.flat().join("\n")).toContain(
-      "Command failed to load required assets. Please try again."
-    );
-    expect(term.busy).toBe(false);
+    const failureOutput = term.writeln.mock.calls.flat().join("\n");
+    expect(failureOutput).toContain("Command failed to load required assets.");
+    expect(failureOutput).toContain("Please try again.");
 
-    await enter(term, "pwd");
+    await enter(term, "ping");
+    expect(term.writeln.mock.calls.flat()).toContain("pong");
     await enter(term, "history");
-    expect(term.history).toEqual(["ping", "pwd", "history"]);
-    expect(term.visitHistory).toEqual(["pwd", "history"]);
-    expect(term.writeln.mock.calls.flat().join("\n")).toContain("/home/guest");
+    expect(term.history).toEqual(["ping", "ping", "history"]);
+    expect(term.visitHistory).toEqual(["ping", "history"]);
     expect(term.writeln).toHaveBeenCalledWith("1000  ping");
-    expect(term.writeln).toHaveBeenCalledWith("1001  pwd");
+    expect(term.writeln).toHaveBeenCalledWith("1001  ping");
     expect(term.writeln).toHaveBeenCalledWith("1002  history");
   });
 
