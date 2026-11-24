@@ -714,6 +714,7 @@ const extend = (term) => {
     const parsed = parseCommandLine(line);
     if (settings.addToHistory && parsed.line.length > 0) {
       term.history = historyStore.append(parsed.line);
+      term.historyCursor = -1;
       term.visitHistory = _boundedHistory([...term.visitHistory, parsed.line]);
     }
     // User aliases expand exactly once, on the interactive line and before

@@ -129,6 +129,95 @@ describe("saved history terminal integration", () => {
     expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(second.term.history);
   });
 
+  it("restarts recall at an edited recalled upgrade submission", async () => {
+    const storage = sharedStorage();
+    const state = createTerminal(storage); environments.push(state.env);
+    const { term } = state;
+    accelerateUpgrade(term);
+
+    await enter(term, "ping");
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("ping");
+    expect(term.historyCursor).toBe(0);
+
+    const preventDefault = vi.fn();
+    expect(term.keyHandler({
+      altKey: false,
+      code: "KeyU",
+      ctrlKey: true,
+      key: "u",
+      metaKey: false,
+      preventDefault,
+      shiftKey: false,
+      type: "keydown",
+    })).toBe(false);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(term.currentLine).toBe("");
+    await enter(term, "upgrade");
+
+    expect(term.history).toEqual(["ping", "upgrade"]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping", "upgrade"]);
+    expect(term.VERSION).toBe(4);
+    expect(term.busy).toBe(false);
+    expect(term.locked).toBe(false);
+    expect(term.historyCursor).toBe(-1);
+
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("upgrade");
+    term.input("\x1b[B");
+    expect(term.currentLine).toBe("");
+    expect(term.historyCursor).toBe(-1);
+
+    await enter(term, "pwd");
+    expect(term.history).toEqual(["ping", "upgrade", "pwd"]);
+    expect(term.writeln.mock.calls.flat().join("\n")).toContain("/home/guest");
+  });
+
+  it("does not reset recall for replay or deep-link execution", async () => {
+    const storage = sharedStorage({
+      [HISTORY_KEY]: JSON.stringify(["ping", "pwd", "history"]),
+    });
+    const state = createTerminal(storage, { hash: "#ping" }); environments.push(state.env);
+    const { env, term } = state;
+    await vi.waitFor(() => expect(env.window.dataLayer?.length).toBe(1));
+
+    term.input("\x1b[A");
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("pwd");
+    expect(term.historyCursor).toBe(1);
+    const historyBefore = [...term.history];
+    const analyticsBefore = env.window.dataLayer.map((event) => ({ ...event }));
+
+    await term.executeCommandLine("ping", {
+      addToHistory: false,
+      promptAfter: false,
+      showLeadingNewline: false,
+      trackAnalytics: false,
+    });
+    expect(term.history).toEqual(historyBefore);
+    expect(term.historyCursor).toBe(1);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+
+    await term.runDeepLink({ replay: true });
+    expect(term.history).toEqual(historyBefore);
+    expect(term.historyCursor).toBe(1);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+
+    let nextCols = 40;
+    env.window.fitAddon.fit.mockImplementation(() => { term.cols = nextCols; });
+    await term.resizeListener();
+    expect(term.history).toEqual(historyBefore);
+    expect(term.historyCursor).toBe(1);
+    expect(env.window.dataLayer).toEqual(analyticsBefore);
+
+    term.input("\x1b[A");
+    expect(term.currentLine).toBe("ping");
+    term.input("\u0003");
+    await enter(term, "pwd");
+    expect(term.history).toEqual([...historyBefore, "pwd"]);
+    expect(term.historyCursor).toBe(-1);
+  });
+
   it("shows the exact saved-history policy through production help after restoration", async () => {
     const expectedFooter = [
       "Saved command history:",
