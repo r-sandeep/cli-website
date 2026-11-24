@@ -65,7 +65,8 @@ describe("browser setting storage priority", () => {
   ])("handles %s without a fixed history reserve", (_label, history, yields) => {
     const setting = JSON.stringify([["p", "ping"]]);
     const sentinel = "keep";
-    const limit = setting.length + sentinel.length;
+    const limit =
+      setting.length + sentinel.length + (yields ? 0 : history.length);
     const storage = sharedQuotaStorage(limit, {
       [HISTORY_KEY]: history,
       sentinel,
