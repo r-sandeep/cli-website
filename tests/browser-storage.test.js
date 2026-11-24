@@ -295,7 +295,7 @@ describe("browser setting storage priority", () => {
     }
   });
 
-  it("does not overwrite newer history during failed-setting rollback", () => {
+  it("does not overwrite newer history during a failed setting retry", () => {
     const original = JSON.stringify(["old"]);
     const newer = JSON.stringify(["newer"]);
     const values = new Map([[HISTORY_KEY, original]]);

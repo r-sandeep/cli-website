@@ -180,6 +180,45 @@ describe("terminal-ext", () => {
     }
   );
 
+  it("leaves yielded history released after a direct-script quota retry fails", () => {
+    const { extend } = loadTerminalExt({}, { includeBrowserStorage: false });
+    const storage = env.window.localStorage;
+    const history = JSON.stringify(["ping", "pwd"]);
+    storage.setItem("rootvc.history.v1", history);
+    storage.setItem("sentinel", "keep");
+    const originalSetItem = env.window.Storage.prototype.setItem;
+    let aliasAttempts = 0;
+    const initialQuota = new env.window.DOMException(
+      "full",
+      "QuotaExceededError"
+    );
+    const setItem = vi
+      .spyOn(env.window.Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "rootvc.aliases") {
+          aliasAttempts += 1;
+          if (aliasAttempts === 1) throw initialQuota;
+          if (aliasAttempts === 2) throw new Error("retry denied");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+    const term = createTerm();
+    extend(term);
+
+    expect(() => term.defineAlias("p", "ping")).toThrow(initialQuota);
+    expect(aliasAttempts).toBe(2);
+    expect(storage.getItem("rootvc.history.v1")).toBeNull();
+    expect(storage.getItem("rootvc.aliases")).toBeNull();
+    expect(storage.getItem("sentinel")).toBe("keep");
+    expect(term.history).toEqual(["ping", "pwd"]);
+    expect(term.getAliases()).toEqual([]);
+
+    setItem.mockRestore();
+    expect(term.defineAlias("p", "ping")).toBe(true);
+    expect(term.getAlias("p")).toBe("ping");
+    expect(storage.getItem("rootvc.history.v1")).toBeNull();
+  });
+
   it("keeps environment state private and returns sorted defensive copies", () => {
     const { extend } = loadTerminalExt();
     const term = createTerm();
