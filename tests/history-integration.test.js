@@ -489,6 +489,85 @@ describe("saved history terminal integration", () => {
     ]);
   });
 
+  it.each([
+    ["standalone", "ping", ["ping", []]],
+    ["valid pipeline", "ping | wc -l", ["ping"]],
+  ])(
+    "saves pending %s preparation without exposing it to resize replay",
+    async (_label, line, preloadArgs) => {
+      const storage = sharedStorage();
+      const state = createTerminal(storage); environments.push(state.env);
+      const { env, term } = state;
+      let releasePreparation;
+      const preparation = new Promise((resolve) => { releasePreparation = resolve; });
+      term.preloadCommandAssets = vi.fn((...args) =>
+        args[0] === "ping" ? preparation : Promise.resolve()
+      );
+      let nextCols = 40;
+      env.window.fitAddon.fit.mockImplementation(() => { term.cols = nextCols; });
+
+      const execution = term.executeCommandLine(line);
+      expect(term.history).toEqual([line]);
+      expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual([line]);
+      expect(term.visitHistory).toEqual([]);
+      await term.resizeListener();
+      expect(term.visitHistory).toEqual([]);
+      expect(term.writeln.mock.calls.flat().join("\n")).not.toContain("pong");
+      nextCols = 100;
+      await term.resizeListener();
+      expect(term.visitHistory).toEqual([]);
+      expect(term.writeln.mock.calls.flat().join("\n")).not.toContain("pong");
+
+      releasePreparation();
+      await execution;
+      expect(term.preloadCommandAssets).toHaveBeenCalledWith(...preloadArgs);
+      expect(term.visitHistory).toEqual([line]);
+      expect(term.writeln.mock.calls.flat().filter((line) => line === "pong")).toHaveLength(1);
+      expect(env.window.dataLayer).toEqual([
+        { args: line === "ping" ? "" : "| wc -l", command: "ping", event: "commandSent" },
+      ]);
+      await enter(term, "pwd");
+      expect(term.history).toEqual([line, "pwd"]);
+      expect(term.writeln.mock.calls.flat().join("\n")).toContain("/home/guest");
+    }
+  );
+
+  it("keeps a rejected preparation saved and out of replay while later input works", async () => {
+    const storage = sharedStorage();
+    const state = createTerminal(storage); environments.push(state.env);
+    const { env, term } = state;
+    let rejectPreparation;
+    term.preloadCommandAssets = vi.fn((cmd) =>
+      cmd === "ping" ? new Promise((_, reject) => { rejectPreparation = reject; }) : Promise.resolve()
+    );
+    env.window.fitAddon.fit.mockImplementation(() => { term.cols = 40; });
+
+    const execution = term.executeCommandLine("ping");
+    expect(term.history).toEqual(["ping"]);
+    expect(JSON.parse(storage.value(HISTORY_KEY))).toEqual(["ping"]);
+    expect(term.visitHistory).toEqual([]);
+    await term.resizeListener();
+    expect(term.visitHistory).toEqual([]);
+    expect(term.writeln.mock.calls.flat().join("\n")).not.toContain("pong");
+
+    rejectPreparation(new Error("asset unavailable"));
+    await execution;
+    expect(term.visitHistory).toEqual([]);
+    expect(term.writeln.mock.calls.flat().join("\n")).toContain(
+      "Command failed to load required assets. Please try again."
+    );
+    expect(term.busy).toBe(false);
+
+    await enter(term, "pwd");
+    await enter(term, "history");
+    expect(term.history).toEqual(["ping", "pwd", "history"]);
+    expect(term.visitHistory).toEqual(["pwd", "history"]);
+    expect(term.writeln.mock.calls.flat().join("\n")).toContain("/home/guest");
+    expect(term.writeln).toHaveBeenCalledWith("1000  ping");
+    expect(term.writeln).toHaveBeenCalledWith("1001  pwd");
+    expect(term.writeln).toHaveBeenCalledWith("1002  history");
+  });
+
   it("redraws only current-visit commands without duplicating history or analytics", async () => {
     const storage = sharedStorage({
       [HISTORY_KEY]: JSON.stringify(["export RESTORED=must-not-run", "pwd"]),

@@ -715,8 +715,12 @@ const extend = (term) => {
     if (settings.addToHistory && parsed.line.length > 0) {
       term.history = historyStore.append(parsed.line);
       term.historyCursor = -1;
-      term.visitHistory = _boundedHistory([...term.visitHistory, parsed.line]);
     }
+    const registerVisitHistory = () => {
+      if (settings.addToHistory && parsed.line.length > 0) {
+        term.visitHistory = _boundedHistory([...term.visitHistory, parsed.line]);
+      }
+    };
     // User aliases expand exactly once, on the interactive line and before
     // pipeline parsing; redirects and replays never expand a second time.
     const expanded = expandUserAlias(parsed);
@@ -732,6 +736,7 @@ const extend = (term) => {
         const validation = Pipeline.validatePipeline(parsedPipeline);
 
         if (!validation.ok) {
+          registerVisitHistory();
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
           }
@@ -748,6 +753,7 @@ const extend = (term) => {
           }
         } else {
           await term.preloadCommandAssets(validation.producer);
+          registerVisitHistory();
 
           if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
             term.writeln("");
@@ -794,6 +800,7 @@ const extend = (term) => {
         // a second time, and so the lexical rawArgs reach the alias handler.
         const prepared = prepareParsed(expanded);
         await term.preloadCommandAssets(prepared.cmd, prepared.args);
+        registerVisitHistory();
 
         if (settings.showLeadingNewline && parsed.cmd != "upgrade") {
           term.writeln("");
