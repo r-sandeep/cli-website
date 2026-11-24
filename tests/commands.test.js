@@ -7,6 +7,7 @@ const jobsContext = vm.createContext({ module: { exports: {} } });
 vm.runInContext(`${readFileSync("config/jobs.js", "utf8")}\nthis.productionJobs = jobs;`, jobsContext);
 const productionJobs = jobsContext.productionJobs;
 const testJobs = { ...productionJobs, 2: ["Platform Engineer"] };
+const browserStorageSource = readFileSync("js/browser-storage.js", "utf8");
 const bookmarkSource = readFileSync("js/bookmarks.js", "utf8");
 
 function createMemoryStorage(initial = {}) {
@@ -184,6 +185,7 @@ function loadCommands({
     localStorage: storage,
     window: { location },
   });
+  vm.runInContext(browserStorageSource, context);
   vm.runInContext(bookmarkSource, context);
   vm.runInContext(commandSource, context);
   const commands = vm.runInContext("commands", context);

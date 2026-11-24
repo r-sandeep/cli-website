@@ -39,6 +39,49 @@ const _parseCommandLine = (line) => {
 
 const HISTORY_LIMIT = 200;
 
+// Production bundles load browser-storage.js first. Keep terminal-ext.js
+// independently executable for the long-standing direct-script integration
+// seam while preserving the same bounded recovery policy.
+const _writeTerminalSetting =
+  typeof writeBrowserSetting === "function"
+    ? writeBrowserSetting
+    : (storage, targetKey, serializedCandidate) => {
+        try {
+          storage.setItem(targetKey, serializedCandidate);
+        } catch (originalError) {
+          let originalHistory;
+          try {
+            originalHistory = storage.getItem("rootvc.history.v1");
+            const entries = JSON.parse(originalHistory);
+            if (
+              !Array.isArray(entries) ||
+              entries.length === 0 ||
+              entries.some((entry) => typeof entry !== "string")
+            ) {
+              throw originalError;
+            }
+            storage.setItem("rootvc.history.v1", "[]");
+          } catch (_) {
+            throw originalError;
+          }
+          try {
+            storage.setItem(targetKey, serializedCandidate);
+          } catch (_) {
+            try {
+              if (storage.getItem("rootvc.history.v1") === "[]") {
+                storage.setItem("rootvc.history.v1", originalHistory);
+              }
+            } catch (_) {}
+            throw originalError;
+          }
+        }
+      };
+
+const _historyStorageKey =
+  typeof ROOTVC_HISTORY_STORAGE_KEY === "string"
+    ? ROOTVC_HISTORY_STORAGE_KEY
+    : "rootvc.history.v1";
+
 const _boundedHistory = (entries) => entries.slice(-HISTORY_LIMIT);
 
 const _parseStoredHistory = (serialized) => {
@@ -65,7 +108,7 @@ const createHistoryStore = () => {
   try {
     storage = window.localStorage;
     history = _parseStoredHistory(
-      storage.getItem(ROOTVC_HISTORY_STORAGE_KEY)
+      storage.getItem(_historyStorageKey)
     );
   } catch (error) {
     storage = null;
@@ -85,10 +128,10 @@ const createHistoryStore = () => {
 
     try {
       const durable = _parseStoredHistory(
-        storage.getItem(ROOTVC_HISTORY_STORAGE_KEY)
+        storage.getItem(_historyStorageKey)
       );
       storage.setItem(
-        ROOTVC_HISTORY_STORAGE_KEY,
+        _historyStorageKey,
         JSON.stringify(_boundedHistory([...durable, command]))
       );
     } catch (error) {
@@ -157,7 +200,7 @@ const extend = (term) => {
     const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
       compareAliasNames(left, right)
     );
-    writeBrowserSetting(window.localStorage, aliasStorageKey, JSON.stringify(entries));
+    _writeTerminalSetting(window.localStorage, aliasStorageKey, JSON.stringify(entries));
   };
 
   term.getAliases = () =>
@@ -259,7 +302,7 @@ const extend = (term) => {
 
     try {
       const serialized = serializeEnvironment(candidate);
-      writeBrowserSetting(window.localStorage, ENV_STORAGE_KEY, serialized);
+      _writeTerminalSetting(window.localStorage, ENV_STORAGE_KEY, serialized);
     } catch (_error) {
       return environmentResult(
         false,
