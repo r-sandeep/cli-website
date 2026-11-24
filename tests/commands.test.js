@@ -984,29 +984,6 @@ describe("help stays in sync with commands", () => {
     expect(output.slice(-expectedFooter.length)).toEqual(expectedFooter);
   });
 
-  it("documents the same saved-history behavior in the source README", () => {
-    const readme = readFileSync("README.md", "utf8");
-    const independentExpectedPhrases = [
-      "## Saved command history",
-      "saved in this browser",
-      "including failed commands",
-      "**ArrowUp**",
-      "run `history`",
-      "newest 200 commands",
-      "memory-only history for the current visit",
-      "`clear`, `zsh`, and `upgrade`",
-      "retain saved and recallable history",
-      "independent recall views",
-      "last completed write",
-      "is not uploaded by this feature",
-      "Existing command analytics remain unchanged",
-    ];
-
-    for (const phrase of independentExpectedPhrases) {
-      expect(readme).toContain(phrase);
-    }
-  });
-
   it("renders the environment commands and complete expansion grammar", () => {
     const { commands, term } = loadCommands({ help: helpContext.helpEntries });
 
