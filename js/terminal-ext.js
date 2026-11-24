@@ -210,7 +210,9 @@ const extend = (term) => {
     userAliases = new Map();
   }
 
+  let aliasPersistenceEnabled = true;
   const persistAliases = (nextAliases) => {
+    if (!aliasPersistenceEnabled) return;
     const entries = Array.from(nextAliases.entries()).sort(([left], [right]) =>
       compareAliasNames(left, right)
     );
@@ -380,17 +382,23 @@ const extend = (term) => {
 
   // The replay may be asynchronous (resize replays each history line through
   // executeCommandLine so aliases and pipelines apply); the guard is held for
-  // its whole duration and restored afterwards.
-  const replayWithoutEnvironmentSideEffects = async (replay) => {
+  // its whole duration and restores alias/environment state afterwards.
+  const replayWithoutSettingSideEffects = async (replay) => {
+    const activeAliases = userAliases;
     const activeVariables = environmentVariables;
-    const previousPersistenceSetting = environmentPersistenceEnabled;
+    const previousAliasPersistenceSetting = aliasPersistenceEnabled;
+    const previousEnvironmentPersistenceSetting = environmentPersistenceEnabled;
+    userAliases = new Map(activeAliases);
     environmentVariables = new Map(activeVariables);
+    aliasPersistenceEnabled = false;
     environmentPersistenceEnabled = false;
     try {
       await replay();
     } finally {
+      userAliases = activeAliases;
       environmentVariables = activeVariables;
-      environmentPersistenceEnabled = previousPersistenceSetting;
+      aliasPersistenceEnabled = previousAliasPersistenceSetting;
+      environmentPersistenceEnabled = previousEnvironmentPersistenceSetting;
     }
   };
 
@@ -934,9 +942,9 @@ const extend = (term) => {
     }
     await term.runDeepLink({ replay: true });
     // Replay serially through the full execution boundary so aliases and
-    // pipelines apply exactly as they did interactively, while environment
-    // mutations replayed from history never persist a second time.
-    await replayWithoutEnvironmentSideEffects(async () => {
+    // pipelines apply exactly as they did interactively, while alias and
+    // environment mutations replayed from history never persist a second time.
+    await replayWithoutSettingSideEffects(async () => {
       for (const c of term.visitHistory) {
         term.prompt("\r\n", ` ${c}\r\n`);
         if (!term.NO_REPLAY.includes(expandUserAlias(parseCommandLine(c)).cmd)) {
